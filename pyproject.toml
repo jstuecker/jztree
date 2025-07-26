@@ -1,0 +1,9 @@
+[build-system]
+requires = ["nanobind", "jax>=0.4.31", "scikit-build-core"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "custom-jax"
+version = "0.1.0"
+requires-python = ">=3.10"
+#dependencies = ["jax"]
