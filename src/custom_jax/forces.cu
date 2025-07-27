@@ -23,11 +23,10 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 // And in Python:
 // (4) A Python function that calls the FFI handler
 
-__global__ void PotentialKernel(const float4 *xm, float *phi, size_t n) {
-  // size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void PotentialKernel(const float4 *xm, float *phi, size_t n, float epsilon) {
   const size_t blocksize = blockDim.x;
-
   const size_t steps = n / blocksize;
+  float epsilon2 = epsilon * epsilon;
 
   float4 xmi = xm[blockIdx.x * blocksize + threadIdx.x];
 
@@ -50,23 +49,26 @@ __global__ void PotentialKernel(const float4 *xm, float *phi, size_t n) {
       float dz = xmi.z - xmj.z;
       float m = xmj.w; // we packed mass into the w component of xm
 
-      float r = sqrtf(dx*dx + dy*dy + dz*dz);
-      float rinv = (r >= 1e-15f) ? 1.0f/r : 0.0f; // avoid division by zero
+      float r2 = dx*dx + dy*dy + dz*dz;
 
-      phii += -1.0f*m*rinv;
+      phii += -1.0f*m*rsqrtf(r2 + epsilon2);
     }
   }
+
+  // Since it is good to avoid any branches on GPU, we deal with the self-interaction by
+  // first adding it above and now subtracting it again:
+  phii += xmi.w / epsilon; 
 
   phi[blockIdx.x * blocksize + threadIdx.x] = phii;
 }
 
-ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> phi, size_t block_size) {
+ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> phi, size_t block_size, float epsilon) {
   size_t n = x.element_count() / x.dimensions().back();
 
   const size_t grid_size = (n + (block_size - 1)) / block_size;
   
   auto* x_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
-  PotentialKernel<<<grid_size, block_size, /*shared_mem=*/block_size*sizeof(float4), stream>>>(x_float4, phi->typed_data(), n);
+  PotentialKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(x_float4, phi->typed_data(), n, epsilon);
 
   cudaError_t last_error = cudaGetLastError();
   if (last_error != cudaSuccess) {
@@ -82,7 +84,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::Buffer<ffi::F32>>()              // x
         .Ret<ffi::Buffer<ffi::F32>>()              // phi
-        .Attr<size_t>("n"),
+        .Attr<size_t>("block_size")
+        .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 NB_MODULE(nb_forces, m) {
