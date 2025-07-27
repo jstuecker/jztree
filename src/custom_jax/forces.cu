@@ -11,16 +11,35 @@ namespace ffi = xla::ffi;
 
 __global__ void PotentialKernel(const float3 *x, float *phi, size_t n) {
   size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
-  const size_t grid_stride = blockDim.x * gridDim.x;
+  const size_t blocksize = blockDim.x;
+
+  const size_t steps = n / blocksize;
+
+  float3 xi = x[blockIdx.x * blocksize + threadIdx.x];
 
   extern __shared__ float3 xj[];
 
-  for (size_t i = tid; i < n; i += grid_stride) {
-    xj[threadIdx.x] = x[i];
+  float phii = 0.f;
+
+  for (size_t jblock = 0; jblock < steps; jblock += 1) {
+    // Load the next block of x into shared memory
+    // this avoids reading from global memory multiple times
+    __syncthreads();
+    xj[threadIdx.x] = x[jblock * blocksize + threadIdx.x];
     __syncthreads();
 
-    phi[i] =  x[i].x*x[i].x + x[i].y*x[i].y + x[i].z*x[i].z;
+    for (size_t j = 0; j < blocksize; j++) {
+      float3 xj_val = xj[j];
+      
+      float dx = xi.x - xj_val.x;
+      float dy = xi.y - xj_val.y;
+      float dz = xi.z - xj_val.z;
+
+      phii += sqrtf(dx*dx + dy*dy + dz*dz);
+    }
   }
+
+  phi[blockIdx.x * blocksize + threadIdx.x] = phii;
 }
 
 ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> phi, size_t block_size) {
