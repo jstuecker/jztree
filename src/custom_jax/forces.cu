@@ -23,6 +23,11 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 // And in Python:
 // (4) A Python function that calls the FFI handler
 
+
+// =============================================================
+// Potential Kernel
+// =============================================================
+
 __global__ void PotentialKernel(const float4 *xm, float *phi, size_t n, float epsilon) {
     const size_t blocksize = blockDim.x;
     const size_t steps = n / blocksize;
@@ -67,8 +72,8 @@ ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Resu
 
     const size_t grid_size = (n + (block_size - 1)) / block_size;
 
-    auto* x_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
-    PotentialKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(x_float4, phi->typed_data(), n, epsilon);
+    auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
+    PotentialKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, phi->typed_data(), n, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -87,6 +92,82 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+// =============================================================
+// Force Kernel
+// =============================================================
+
+__global__ void ForceKernel(const float4 *xm, float3 *force, size_t n, float epsilon) {
+    const size_t blocksize = blockDim.x;
+    const size_t steps = n / blocksize;
+    float epsilon2 = epsilon * epsilon;
+
+    float4 xmi = xm[blockIdx.x * blocksize + threadIdx.x];
+
+    extern __shared__ float4 xmj_shared[];
+
+    float3 force_i = {0.f, 0.f, 0.f};
+
+    for (size_t jblock = 0; jblock < steps; jblock += 1) {
+        // Load the next block of x into shared memory
+        // this avoids reading from global memory multiple times
+        __syncthreads();
+        xmj_shared[threadIdx.x] = xm[jblock * blocksize + threadIdx.x];
+        __syncthreads();
+
+        for (size_t j = 0; j < blocksize; j++) {
+            float4 xmj = xmj_shared[j];
+            
+            float dx = xmj.x - xmi.x;
+            float dy = xmj.y - xmi.y;
+            float dz = xmj.z - xmi.z;
+            float m = xmj.w; // we packed mass into the w component of xm
+
+            float r2 = dx*dx + dy*dy + dz*dz + epsilon2;
+            float rinv = rsqrtf(r2);
+
+            float minvr3 = m * rinv * rinv * rinv;
+
+            force_i.x += minvr3 * dx;
+            force_i.y += minvr3 * dy;
+            force_i.z += minvr3 * dz;
+        }
+    }
+
+    force[blockIdx.x * blocksize + threadIdx.x] = force_i;
+}
+
+ffi::Error ForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> force, size_t block_size, float epsilon) {
+    size_t n = x.element_count() / x.dimensions().back();
+
+    const size_t grid_size = (n + (block_size - 1)) / block_size;
+
+    auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
+    auto* force_float3 = reinterpret_cast<float3*>(force->typed_data()); // interprete acc as an array of float3
+
+    ForceKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, force_float3, n, epsilon);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    Force, ForceHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()              // x
+        .Ret<ffi::Buffer<ffi::F32>>()              // acc
+        .Attr<size_t>("block_size")
+        .Attr<float>("epsilon"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
+// =============================================================
+// Module Registrations
+// =============================================================
+
 NB_MODULE(nb_forces, m) {
     m.def("potential", []() { return EncapsulateFfiCall(Potential); });
+    m.def("force", []() { return EncapsulateFfiCall(Force); });
 }
