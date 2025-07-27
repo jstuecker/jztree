@@ -13,6 +13,8 @@ endif()
 
 find_package(Python 3.11 REQUIRED COMPONENTS Interpreter Development.Module)
 find_package(nanobind CONFIG REQUIRED)
+find_package(nanobind CONFIG REQUIRED)
+find_package(CUDAToolkit REQUIRED)
 
 execute_process(
   COMMAND "${Python_EXECUTABLE}" -c "from jax import ffi; print(ffi.include_dir())"
@@ -26,10 +28,6 @@ if(NOT XLA_RESULT EQUAL 0)
 endif()
 
 message(STATUS "XLA include directory: ${XLA_DIR}")
-
-find_package(nanobind CONFIG REQUIRED)
-
-find_package(CUDAToolkit REQUIRED)
 
 nanobind_add_module(nb_forces src/custom_jax/forces.cu)
 set_target_properties(nb_forces PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
