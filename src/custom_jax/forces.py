@@ -6,16 +6,19 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-libfile = os.path.join(os.path.dirname(__file__), "lib/lib_forces.so")
+import importlib.resources
 
-# This is a temporary hack for editable mode working with pip install -e .
-# Somehow it keeps placing the .so file in the wrong place...
-if not os.path.exists(libfile):
-  otherpath = "/home/jens/miniconda3/envs/jax/lib/python3.11/site-packages/custom_jax/lib/lib_forces.so"
-  if not os.path.exists(otherpath):
-    raise FileNotFoundError(f"Could not find {libfile}.")
-  else:
-    libfile = otherpath
+main_dir = importlib.resources.files("custom_jax")
+
+possible_path1 = os.path.join(main_dir, "lib", "lib_forces.so")
+possible_path2 = os.path.join(main_dir, "..", "..", "build", "lib_forces.so")
+
+if os.path.exists(possible_path1):
+  libfile = possible_path1
+elif os.path.exists(possible_path2):
+  libfile = possible_path2
+else:
+  raise FileNotFoundError(f"Could not find in {possible_path1} or {possible_path2}.")
 
 library = ctypes.cdll.LoadLibrary(libfile)
 
