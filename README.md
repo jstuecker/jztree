@@ -11,3 +11,8 @@ Editable installation with
 pip install -e .
 ```
 will only work if hard-coded paths to .so files are adapted. So far I didn't figure out how to make the build system put the libraries in a folder that can be found by the .py files...
+
+Can save a lot of time with
+```bash
+pip install -e . --no-build-isolation
+```

@@ -9,11 +9,17 @@ namespace ffi = xla::ffi;
 // And in Python:
 // (4) A Python function that calls the FFI handler
 
-__global__ void PotentialKernel(const float *x, float *phi, size_t n) {
+__global__ void PotentialKernel(const float3 *x, float *phi, size_t n) {
   size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
   const size_t grid_stride = blockDim.x * gridDim.x;
+
+  extern __shared__ float3 xj[];
+
   for (size_t i = tid; i < n; i += grid_stride) {
-    phi[i] =  x[3*i]*x[3*i] + x[3*i+1]*x[3*i+1] + x[3*i+2]*x[3*i+2];
+    xj[threadIdx.x] = x[i];
+    __syncthreads();
+
+    phi[i] =  x[i].x*x[i].x + x[i].y*x[i].y + x[i].z*x[i].z;
   }
 }
 
@@ -22,7 +28,8 @@ ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Resu
 
   const size_t grid_size = (n + (block_size - 1)) / block_size;
   
-  PotentialKernel<<<grid_size, block_size, /*shared_mem=*/0, stream>>>(x.typed_data(), phi->typed_data(), n);
+  auto* x_float3 = reinterpret_cast<const float3*>(x.typed_data()); // interprete x as an array of float3. This makes the kernel easier to write.
+  PotentialKernel<<<grid_size, block_size, /*shared_mem=*/block_size*sizeof(float3), stream>>>(x_float3, phi->typed_data(), n);
 
   cudaError_t last_error = cudaGetLastError();
   if (last_error != cudaSuccess) {
