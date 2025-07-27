@@ -10,9 +10,10 @@ Editable installation with
 ```bash
 pip install -e .
 ```
-will only work if hard-coded paths to .so files are adapted. So far I didn't figure out how to make the build system put the libraries in a folder that can be found by the .py files...
+will be in auto-rebuild mode. This means that libraries will be recompiled (if necessary) on import. Therfore, you don't need to do 'pip install' again when changing .cu files.
 
-Can save a lot of time with
+Additionally to properly make VSCode find your paths (and also save build time) you can use
 ```bash
 pip install -e . --no-build-isolation
 ```
+which will properly write the used paths into 'build/compile_commands.json' so that VSCode understands them. (With build isolation the include paths may be wrong, pointing to temporary directories.) Only use this during development!

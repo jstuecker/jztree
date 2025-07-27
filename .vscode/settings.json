@@ -2,4 +2,6 @@
     "files.associations": {
         "string": "cpp"
     }
+    ,
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"
 }

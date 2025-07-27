@@ -1,16 +1,30 @@
+#include <type_traits>
+
+#include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 
+namespace nb = nanobind;
 namespace ffi = xla::ffi;
+
+// A wrapper to encapsulate an FFI call
+template <typename T>
+nb::capsule EncapsulateFfiCall(T *fn) {
+  static_assert(std::is_invocable_r_v<XLA_FFI_Error *, T, XLA_FFI_CallFrame *>,
+                "Encapsulated function must be and XLA FFI handler");
+  return nb::capsule(reinterpret_cast<void *>(fn));
+}
 
 // Each custom FFI handler has four parts:
 // (1) the CUDA kernel
 // (2) the host function that launches the kernel
 // (3) the FFI handler registration that registers the handler with the XLA runtime
+// To make the python interface easier, we use nanobind (rather than ctypes). This requires
+// additionally (3b) that we declare the function to our nanobind module at the bottom of this file.
 // And in Python:
 // (4) A Python function that calls the FFI handler
 
 __global__ void PotentialKernel(const float4 *xm, float *phi, size_t n) {
-  size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
+  // size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
   const size_t blocksize = blockDim.x;
 
   const size_t steps = n / blocksize;
@@ -39,7 +53,7 @@ __global__ void PotentialKernel(const float4 *xm, float *phi, size_t n) {
       float r = sqrtf(dx*dx + dy*dy + dz*dz);
       float rinv = (r >= 1e-15f) ? 1.0f/r : 0.0f; // avoid division by zero
 
-      phii += -m*rinv;
+      phii += -1.0f*m*rinv;
     }
   }
 
@@ -70,3 +84,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::F32>>()              // phi
         .Attr<size_t>("n"),
     {xla::ffi::Traits::kCmdBufferCompatible});
+
+NB_MODULE(nb_forces, m) {
+  m.def("potential", []() { return EncapsulateFfiCall(Potential); });
+}

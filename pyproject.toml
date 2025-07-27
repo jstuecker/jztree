@@ -6,7 +6,7 @@ build-backend = "scikit_build_core.build"
 name = "custom-jax"
 version = "0.1.0"
 requires-python = ">=3.10"
-#dependencies = ["jax"]
+#dependencies = ["jax", "ninja"]
 
 [tool.scikit-build]
 editable.rebuild = true

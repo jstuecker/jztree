@@ -8,21 +8,9 @@ import jax.numpy as jnp
 
 import importlib.resources
 
-main_dir = importlib.resources.files("custom_jax")
+import custom_jax.nb_forces as nb_forces
 
-possible_path1 = os.path.join(main_dir, "lib", "lib_forces.so")
-possible_path2 = os.path.join(main_dir, "..", "..", "build", "lib_forces.so")
-
-if os.path.exists(possible_path1):
-  libfile = possible_path1
-elif os.path.exists(possible_path2):
-  libfile = possible_path2
-else:
-  raise FileNotFoundError(f"Could not find in {possible_path1} or {possible_path2}.")
-
-library = ctypes.cdll.LoadLibrary(libfile)
-
-jax.ffi.register_ffi_target("potential", jax.ffi.pycapsule(library.Potential), platform="CUDA")
+jax.ffi.register_ffi_target("potential", nb_forces.potential(), platform="CUDA")
 
 def potential(x, mass=1., block_size=64):
   assert x.dtype == jnp.float32
