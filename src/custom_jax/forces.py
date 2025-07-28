@@ -51,14 +51,14 @@ def force(x, mass=1., block_size=64, eps=1e-2, get_potential=False):
 
 force_jit = jax.jit(force, static_argnames=("block_size", "eps", "get_potential"))
 
-def ilist_force(x, isplit, interactions, mass=1., block_size=64, eps=1e-2, get_potential=True):
+def ilist_force(x, isplit, interactions, mass=1., eps=1e-2, get_potential=True, block_size=64, interactions_per_block=16):
     assert x.dtype == jnp.float32
     assert isplit.dtype == jnp.int32
     assert interactions.dtype == jnp.int32
     assert interactions.shape[-1] == 2, "Interactions must be a 2D array with shape (N, 2) where N is the number of interactions."
     assert x.shape[-1] == 3
     assert x.ndim >= 2
-    assert np.prod(x.shape[:-1]) % block_size == 0, "The length of x must be divisible by the block size."
+    assert interactions.ndim == 2
     assert eps > 0, "Epsilon must be positive to deal with self-interaction."
     
     assert get_potential, "only with get_potential=True is supported so far"
@@ -66,14 +66,13 @@ def ilist_force(x, isplit, interactions, mass=1., block_size=64, eps=1e-2, get_p
     xm = jnp.concatenate([x, jnp.broadcast_to(1., x.shape[:-1])[:,None]], axis=-1)
 
     out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (4,), x.dtype)
-    f = jax.ffi.ffi_call("ilist_force", (out_type,))(xm, isplit, interactions, block_size=np.uint64(block_size), epsilon=np.float32(eps))[0]
+    f = jax.ffi.ffi_call("ilist_force", (out_type,))(xm, isplit, interactions,  block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
     
     phi = f[..., 3] + mass / eps # Remove self-interaction from potential
     
     return f[..., :3], phi
 
-
-ilist_force_jit = jax.jit(ilist_force, static_argnames=("block_size", "eps", "get_potential"))
+ilist_force_jit = jax.jit(ilist_force, static_argnames=("eps", "get_potential", "block_size", "interactions_per_block"))
 
 # ======= Some reference implemetations that can be used for testing =======
 

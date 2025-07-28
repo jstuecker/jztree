@@ -226,41 +226,61 @@ __device__ inline void atomicAddFloat4(float4* addr, const float4 val) {
     atomicAdd(&addr->w, val.w);
 }
 
-__global__ void IlistForceAndPotKernel(const float4 *xm, int32_t *isplit, int32_t *interactions, float4 *fphi, size_t n, float epsilon) {
-    const size_t blocksize = blockDim.x;
-    const size_t steps = n / blocksize;
+__global__ void IlistForceAndPotKernel(const float4 *xm, int32_t *isplit, int2 *interactions, float4 *fphi, size_t interactions_per_block, float epsilon) {
+    const int blocksize = blockDim.x;
     float epsilon2 = epsilon * epsilon;
-
-    float4 xmi = xm[blockIdx.x * blocksize + threadIdx.x];
 
     extern __shared__ float4 xmj_shared[];
 
-    for (size_t jblock = 0; jblock < steps; jblock += 1) {
-        float4 fphi_i = {0.f, 0.f, 0.f, 0.f};
+    for (int iint = 0; iint < interactions_per_block; iint++) {
+        int2 interaction = interactions[blockIdx.x * interactions_per_block + iint];
+        int iAstart = isplit[interaction.x], iAend = isplit[interaction.x + 1];
+        int iBstart = isplit[interaction.y], iBend = isplit[interaction.y + 1];
 
-        __syncthreads();
-        xmj_shared[threadIdx.x] = xm[jblock * blocksize + threadIdx.x];
-        __syncthreads();
+        /* We have to have interactions between all particles of x[IAstart:IAend] with x[IBstart:IBend]*/
+        /* These may be larger than our warp's blocksize so that we have to loop individual parts of A and B */
+        int nA = iAend - iAstart, nB = iBend - iBstart;
+        for (int i = 0; i < nA; i += blocksize) {
+            float4 fphi_i = {0.f, 0.f, 0.f, 0.f};
+            float4 xmi = {0.f, 0.f, 0.f, 0.f};
+            int ioffA = i + threadIdx.x;
 
-        for (size_t j = 0; j < blocksize; j++) {
-            accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+            if(ioffA  < nA) {
+                xmi = xm[iAstart + ioffA];
+            }
+
+            for (int j = 0; j < nB; j += blocksize) {
+                int joffB = j + threadIdx.x;
+                if(joffB < nB) {
+                    xmj_shared[threadIdx.x] = xm[iBstart + joffB];
+                }
+                __syncthreads();
+
+                for (int k = 0; k < min(nB - j, blocksize); k++) {
+                    accumulateForceAndPot(xmi, xmj_shared[k], epsilon2, fphi_i);
+                }
+                __syncthreads();
+            }
+
+            if(ioffA < nA) {
+                atomicAddFloat4(&fphi[iAstart + ioffA], fphi_i);
+            }
         }
-        
-        atomicAddFloat4(&fphi[blockIdx.x * blocksize + threadIdx.x], fphi_i);
     }
 }
 
-ffi::Error IlistForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::ResultBuffer<ffi::F32> force, size_t block_size, float epsilon) {
-    size_t n = x.element_count() / x.dimensions().back();
+ffi::Error IlistForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::ResultBuffer<ffi::F32> force, size_t block_size, size_t interactions_per_block, float epsilon) {
+    size_t n = interactions.element_count() / 2;
 
-    const size_t grid_size = (n + (block_size - 1)) / block_size;
+    const size_t grid_size = n / interactions_per_block;
 
     auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
     auto* fphi_float4 = reinterpret_cast<float4*>(force->typed_data());
+    auto* interactions2 = reinterpret_cast<int2*>(interactions.typed_data());
+    
+    cudaMemsetAsync(fphi_float4, 0, x.element_count() * sizeof(float), stream); // Initialize to 0, because of atomic adds
 
-    cudaMemsetAsync(fphi_float4, 0, n * sizeof(float4), stream); // Initialize to 0, because of atomic adds
-
-    IlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, isplit.typed_data(), interactions.typed_data(), fphi_float4, n, epsilon);
+    IlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, isplit.typed_data(), interactions2, fphi_float4, interactions_per_block, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -278,6 +298,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>()              // interactions
         .Ret<ffi::Buffer<ffi::F32>>()              // acc
         .Attr<size_t>("block_size")
+        .Attr<size_t>("interactions_per_block")
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
