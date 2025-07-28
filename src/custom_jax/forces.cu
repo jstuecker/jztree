@@ -226,14 +226,19 @@ __device__ inline void atomicAddFloat4(float4* addr, const float4 val) {
     atomicAdd(&addr->w, val.w);
 }
 
-__global__ void IlistForceAndPotKernel(const float4 *xm, int32_t *isplit, int2 *interactions, float4 *fphi, size_t interactions_per_block, float epsilon) {
+__global__ void IlistForceAndPotKernel(const float4 *xm, int32_t *isplit, int2 *interactions, float4 *fphi, size_t interactions_per_block, int int_first, int nint, float epsilon) {
     const int blocksize = blockDim.x;
     float epsilon2 = epsilon * epsilon;
 
     extern __shared__ float4 xmj_shared[];
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
-        int2 interaction = interactions[blockIdx.x * interactions_per_block + iint];
+        int int_id = blockIdx.x * interactions_per_block + iint;
+        if (int_id >= nint) {
+            return;
+        }
+
+        int2 interaction = interactions[int_id];
         int iAstart = isplit[interaction.x], iAend = isplit[interaction.x + 1];
         int iBstart = isplit[interaction.y], iBend = isplit[interaction.y + 1];
 
@@ -270,9 +275,9 @@ __global__ void IlistForceAndPotKernel(const float4 *xm, int32_t *isplit, int2 *
 }
 
 ffi::Error IlistForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::ResultBuffer<ffi::F32> force, size_t block_size, size_t interactions_per_block, float epsilon) {
-    size_t n = interactions.element_count() / 2;
+    size_t ninteractions = interactions.element_count() / 2;
 
-    const size_t grid_size = n / interactions_per_block;
+    const size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
 
     auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
     auto* fphi_float4 = reinterpret_cast<float4*>(force->typed_data());
@@ -280,7 +285,7 @@ ffi::Error IlistForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buf
     
     cudaMemsetAsync(fphi_float4, 0, x.element_count() * sizeof(float), stream); // Initialize to 0, because of atomic adds
 
-    IlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, isplit.typed_data(), interactions2, fphi_float4, interactions_per_block, epsilon);
+    IlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, isplit.typed_data(), interactions2, fphi_float4, interactions_per_block, 0, ninteractions, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
