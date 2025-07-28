@@ -51,16 +51,18 @@ def force(x, mass=1., block_size=64, eps=1e-2, get_potential=False):
 
 force_jit = jax.jit(force, static_argnames=("block_size", "eps", "get_potential"))
 
-def ilist_force(x, isplit, interactions=None, mass=1., eps=1e-2, get_potential=True, block_size=64, interactions_per_block=None):
+def ilist_force(x, isplit, interactions=None, iminmax=None, mass=1., eps=1e-2, get_potential=True, block_size=32, interactions_per_block=None):
     """
     Calculates forces through an interaction list.
     isplit: offsets in the particle array that defines different nodes. Each node goes from isplit[i] to isplit[i+1], so len(isplit) = nnodes + 1
     interactions: (Nint, 2) array of interactions, with sink node indices and source node indices.
                    Defaults to using all possible interactions
+    iminmax: If given, only consider interactions[iminmax[0]:iminmax[1]]. Can be jax.Array. Useful for dynamically sized interaction lists.
     
     --- optimization parameters ---
     block_size: The number of particles handled per loop of each warp. 32 should be good usually.
-    interactions_per_block: The number of interactions handled by each warp block. No need to change this
+    interactions_per_block: The number of interactions handled by each warp block. No need to change this.
+                            should be >> 1 to avoid kernel launch overhead, but small enough to keep all SMs busy
     """
     if interactions is None:
         iarange = jnp.arange(0, len(isplit)-1)
@@ -81,10 +83,12 @@ def ilist_force(x, isplit, interactions=None, mass=1., eps=1e-2, get_potential=T
     xm = jnp.concatenate([x, jnp.broadcast_to(1., x.shape[:-1])[:,None]], axis=-1)
     
     if interactions_per_block is None:
-        interactions_per_block = np.clip(len(interactions) // 8096, 4, 128)
+        interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
+    if iminmax is None:
+        iminmax = jnp.array([0, len(interactions)], dtype=jnp.int32)
 
     out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (4,), x.dtype)
-    f = jax.ffi.ffi_call("ilist_force", (out_type,))(xm, isplit, interactions,  block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
+    f = jax.ffi.ffi_call("ilist_force", (out_type,))(xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
     
     phi = f[..., 3] + mass / eps # Remove self-interaction from potential
     
