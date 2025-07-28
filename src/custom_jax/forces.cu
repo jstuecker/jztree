@@ -96,6 +96,22 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 // Force Kernel
 // =============================================================
 
+__forceinline__ __device__ void accumulateForce(float4 xmi, float4 xmj, float epsilon2, float3 &force_i) {
+    float dx = xmj.x - xmi.x;
+    float dy = xmj.y - xmi.y;
+    float dz = xmj.z - xmi.z;
+    float m = xmj.w;
+
+    float r2 = dx*dx + dy*dy + dz*dz + epsilon2;
+    float rinv = rsqrtf(r2);
+
+    float minvr3 = m * rinv * rinv * rinv;
+
+    force_i.x += minvr3 * dx;
+    force_i.y += minvr3 * dy;
+    force_i.z += minvr3 * dz;
+}
+
 __global__ void ForceKernel(const float4 *xm, float3 *force, size_t n, float epsilon) {
     const size_t blocksize = blockDim.x;
     const size_t steps = n / blocksize;
@@ -108,43 +124,79 @@ __global__ void ForceKernel(const float4 *xm, float3 *force, size_t n, float eps
     float3 force_i = {0.f, 0.f, 0.f};
 
     for (size_t jblock = 0; jblock < steps; jblock += 1) {
-        // Load the next block of x into shared memory
-        // this avoids reading from global memory multiple times
         __syncthreads();
         xmj_shared[threadIdx.x] = xm[jblock * blocksize + threadIdx.x];
         __syncthreads();
 
         for (size_t j = 0; j < blocksize; j++) {
-            float4 xmj = xmj_shared[j];
-            
-            float dx = xmj.x - xmi.x;
-            float dy = xmj.y - xmi.y;
-            float dz = xmj.z - xmi.z;
-            float m = xmj.w; // we packed mass into the w component of xm
-
-            float r2 = dx*dx + dy*dy + dz*dz + epsilon2;
-            float rinv = rsqrtf(r2);
-
-            float minvr3 = m * rinv * rinv * rinv;
-
-            force_i.x += minvr3 * dx;
-            force_i.y += minvr3 * dy;
-            force_i.z += minvr3 * dz;
+            accumulateForce(xmi, xmj_shared[j], epsilon2, force_i);
         }
     }
 
     force[blockIdx.x * blocksize + threadIdx.x] = force_i;
 }
 
-ffi::Error ForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> force, size_t block_size, float epsilon) {
+/* Also create an alternative kernel that computes force + potential. This creates only a very small overhead (10%ish) */
+
+__forceinline__ __device__ void accumulateForceAndPot(float4 xmi, float4 xmj, float epsilon2, float4 &fphi_i) {
+    float dx = xmj.x - xmi.x;
+    float dy = xmj.y - xmi.y;
+    float dz = xmj.z - xmi.z;
+    float m = xmj.w;
+
+    float r2 = dx*dx + dy*dy + dz*dz + epsilon2;
+    float rinv = rsqrtf(r2);
+
+    float minvr = m * rinv;
+    float minvr3 = minvr * rinv * rinv;
+
+    fphi_i.x += minvr3 * dx;
+    fphi_i.y += minvr3 * dy;
+    fphi_i.z += minvr3 * dz;
+    fphi_i.w += -minvr; // accumulate potential in the w component
+}
+
+__global__ void ForceAndPotKernel(const float4 *xm, float4 *fphi, size_t n, float epsilon) {
+    const size_t blocksize = blockDim.x;
+    const size_t steps = n / blocksize;
+    float epsilon2 = epsilon * epsilon;
+
+    float4 xmi = xm[blockIdx.x * blocksize + threadIdx.x];
+
+    extern __shared__ float4 xmj_shared[];
+
+    float4 fphi_i = {0.f, 0.f, 0.f, 0.f};
+
+    for (size_t jblock = 0; jblock < steps; jblock += 1) {
+        __syncthreads();
+        xmj_shared[threadIdx.x] = xm[jblock * blocksize + threadIdx.x];
+        __syncthreads();
+
+        for (size_t j = 0; j < blocksize; j++) {
+            accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+        }
+    }
+
+    fphi_i.w += xmi.w / epsilon; // remove self-interaction from potential
+
+    fphi[blockIdx.x * blocksize + threadIdx.x] = fphi_i;
+}
+
+ffi::Error ForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> force, size_t block_size, float epsilon, bool get_potential = false) {
     size_t n = x.element_count() / x.dimensions().back();
 
     const size_t grid_size = (n + (block_size - 1)) / block_size;
 
     auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
-    auto* force_float3 = reinterpret_cast<float3*>(force->typed_data()); // interprete acc as an array of float3
-
-    ForceKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, force_float3, n, epsilon);
+    if (get_potential) {
+        auto* fphi_float4 = reinterpret_cast<float4*>(force->typed_data());
+        ForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, fphi_float4, n, epsilon);
+        return ffi::Error::Success();
+    }
+    else {
+        auto* force_float3 = reinterpret_cast<float3*>(force->typed_data()); 
+        ForceKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, force_float3, n, epsilon);
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -160,7 +212,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::F32>>()              // x
         .Ret<ffi::Buffer<ffi::F32>>()              // acc
         .Attr<size_t>("block_size")
-        .Attr<float>("epsilon"),
+        .Attr<float>("epsilon")
+        .Attr<bool>("get_potential"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 // =============================================================

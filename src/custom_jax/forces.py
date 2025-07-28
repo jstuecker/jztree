@@ -30,7 +30,7 @@ def potential(x, mass=1., block_size=64, eps=1e-2):
     return phi[0]
 potential_jit = jax.jit(potential, static_argnames=("block_size", "eps"))
 
-def force(x, mass=1., block_size=64, eps=1e-2):
+def force(x, mass=1., block_size=64, eps=1e-2, get_potential=False):
     assert x.dtype == jnp.float32
     assert x.shape[-1] == 3
     assert x.ndim >= 2
@@ -39,10 +39,16 @@ def force(x, mass=1., block_size=64, eps=1e-2):
 
     xm = jnp.concatenate([x, jnp.broadcast_to(1., x.shape[:-1])[:,None]], axis=-1)
 
-    out_type = jax.ShapeDtypeStruct(x.shape, x.dtype)
-    f = jax.ffi.ffi_call("force", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(eps))
-    return f[0]
-force_jit = jax.jit(force, static_argnames=("block_size", "eps"))
+    if get_potential:
+        out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (4,), x.dtype)
+        f = jax.ffi.ffi_call("force", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(eps), get_potential=True)[0]
+        return f[..., :3], f[..., 3]  # Return force and potential separately
+    else:
+        out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (3,), x.dtype)
+        f = jax.ffi.ffi_call("force", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(eps), get_potential=False)[0]
+        return f
+
+force_jit = jax.jit(force, static_argnames=("block_size", "eps", "get_potential"))
 
 # ======= Some reference implemetations that can be used for testing =======
 
