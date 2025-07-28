@@ -191,7 +191,6 @@ ffi::Error ForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBu
     if (get_potential) {
         auto* fphi_float4 = reinterpret_cast<float4*>(force->typed_data());
         ForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, fphi_float4, n, epsilon);
-        return ffi::Error::Success();
     }
     else {
         auto* force_float3 = reinterpret_cast<float3*>(force->typed_data()); 
@@ -217,10 +216,77 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 // =============================================================
+// Force Via Interaction List
+// =============================================================
+
+__device__ inline void atomicAddFloat4(float4* addr, const float4 val) {
+    atomicAdd(&addr->x, val.x);
+    atomicAdd(&addr->y, val.y);
+    atomicAdd(&addr->z, val.z);
+    atomicAdd(&addr->w, val.w);
+}
+
+__global__ void IlistForceAndPotKernel(const float4 *xm, int32_t *isplit, int32_t *interactions, float4 *fphi, size_t n, float epsilon) {
+    const size_t blocksize = blockDim.x;
+    const size_t steps = n / blocksize;
+    float epsilon2 = epsilon * epsilon;
+
+    float4 xmi = xm[blockIdx.x * blocksize + threadIdx.x];
+
+    extern __shared__ float4 xmj_shared[];
+
+    for (size_t jblock = 0; jblock < steps; jblock += 1) {
+        float4 fphi_i = {0.f, 0.f, 0.f, 0.f};
+
+        __syncthreads();
+        xmj_shared[threadIdx.x] = xm[jblock * blocksize + threadIdx.x];
+        __syncthreads();
+
+        for (size_t j = 0; j < blocksize; j++) {
+            accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+        }
+        
+        atomicAddFloat4(&fphi[blockIdx.x * blocksize + threadIdx.x], fphi_i);
+    }
+}
+
+ffi::Error IlistForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::ResultBuffer<ffi::F32> force, size_t block_size, float epsilon) {
+    size_t n = x.element_count() / x.dimensions().back();
+
+    const size_t grid_size = (n + (block_size - 1)) / block_size;
+
+    auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
+    auto* fphi_float4 = reinterpret_cast<float4*>(force->typed_data());
+
+    cudaMemsetAsync(fphi_float4, 0, n * sizeof(float4), stream); // Initialize to 0, because of atomic adds
+
+    IlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, isplit.typed_data(), interactions.typed_data(), fphi_float4, n, epsilon);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    IlistForce, IlistForceHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()              // x
+        .Arg<ffi::Buffer<ffi::S32>>()              // isplit
+        .Arg<ffi::Buffer<ffi::S32>>()              // interactions
+        .Ret<ffi::Buffer<ffi::F32>>()              // acc
+        .Attr<size_t>("block_size")
+        .Attr<float>("epsilon"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
+// =============================================================
 // Module Registrations
 // =============================================================
 
 NB_MODULE(nb_forces, m) {
     m.def("potential", []() { return EncapsulateFfiCall(Potential); });
     m.def("force", []() { return EncapsulateFfiCall(Force); });
+    m.def("ilist_force", []() { return EncapsulateFfiCall(IlistForce); });
 }
