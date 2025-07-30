@@ -329,25 +329,17 @@ __forceinline__ __device__ void accumulateGradients(float4 xmi, float4 xmj, floa
     float f1 = -rinv*rinv2;
     float f2 = 3*rinv*rinv2*rinv2;
 
-    float dx_dot_gi = dx * gi.x + dy * gi.y + dz * gi.z;
-    float dx_dot_gj = dx * gj.x + dy * gj.y + dz * gj.z;
-    float fgdiff = f2*(dx_dot_gi * mj - dx_dot_gj * mi);
+    float3 gm_diff = {gi.x*mj - gj.x*mi, gi.y*mj - gj.y*mi, gi.z*mj - gj.z*mi};
+    float fgdiff = f2*(gm_diff.x * dx + gm_diff.y * dy + gm_diff.z * dz);
     // This line handles the potential gradient:
     fgdiff += f1 * (gi.w * mj + gj.w * mi);
 
-    float4 gnew = {0.f, 0.f, 0.f, 0.f};
+    gxmi.x += f1 * gm_diff.x + dx * fgdiff;
+    gxmi.y += f1 * gm_diff.y + dy * fgdiff;
+    gxmi.z += f1 * gm_diff.z + dz * fgdiff;
 
-    // VJP of the final force gradient:
-    gnew.x = f1 * (gi.x * mj - gj.x * mi) + dx * fgdiff;
-    gnew.y = f1 * (gi.y * mj - gj.y * mi) + dy * fgdiff;
-    gnew.z = f1 * (gi.z * mj - gj.z * mi) + dz * fgdiff;
-    gnew.w = f1 * dx_dot_gj;
-    gnew.w -= rinv * gj.w;
-    
-    gxmi.x += gnew.x;
-    gxmi.y += gnew.y;
-    gxmi.z += gnew.z;
-    gxmi.w += gnew.w;
+    float dx_dot_gj = dx * gj.x + dy * gj.y + dz * gj.z;
+    gxmi.w += f1 * dx_dot_gj - rinv * gj.w; // first part for force, second for potential
 }
 
 __global__ void BwdIlistForceAndPotKernel(const float4 *gfphi, const float4 *xm, int32_t *isplit, int2 *interactions, float4 *gxm, size_t interactions_per_block, int *iminmax, float epsilon) {
