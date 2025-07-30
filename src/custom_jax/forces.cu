@@ -310,13 +310,56 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
-__global__ void BwdIlistForceAndPotKernel(const float4 *gm, const float4 *xm, int32_t *isplit, int2 *interactions, float4 *fphi, size_t interactions_per_block, int *iminmax, float epsilon) {
+__forceinline__ __device__ void accumulateGradients(float4 xmi, float4 xmj, float4 gi, float4 gj, float epsilon2, float4 &gxmi) {
+    // calculates the vector jacobian product of the interaction between xmi and xmj
+    // gi and gj are the final gradient vectors of fphi_i and fphi_j, respectively.
+    // we have to back propagate the gradient towards a gradient with respect to xmi
+    // for understanding the maths, please consider the corresponding .ipynb notebook
+    float dx = xmj.x - xmi.x;
+    float dy = xmj.y - xmi.y;
+    float dz = xmj.z - xmi.z;
+    float mi = xmi.w;
+    float mj = xmj.w;
+
+    float r2 = dx*dx + dy*dy + dz*dz;
+    // Mask self-interaction. (It would have a very large contribution here, so subtracting it later is numerically bad.):
+    float rinv = r2 > 1e-10f ? rsqrtf(r2 + epsilon2) : 0.f; // 1e-30
+    float rinv2 = rinv*rinv;
+
+    float f1 = -rinv*rinv2;
+    float f2 = 3*rinv*rinv2*rinv2;
+
+    float dx_dot_gi = dx * gi.x + dy * gi.y + dz * gi.z;
+    float dx_dot_gj = dx * gj.x + dy * gj.y + dz * gj.z;
+    float fgdiff = f2*(dx_dot_gi * mj - dx_dot_gj * mi);
+    // This line handles the potential gradient:
+    fgdiff += f1 * (gi.w * mj + gj.w * mi);
+
+    float4 gnew = {0.f, 0.f, 0.f, 0.f};
+
+    // VJP of the final force gradient:
+    gnew.x = f1 * (gi.x * mj - gj.x * mi) + dx * fgdiff;
+    gnew.y = f1 * (gi.y * mj - gj.y * mi) + dy * fgdiff;
+    gnew.z = f1 * (gi.z * mj - gj.z * mi) + dz * fgdiff;
+    gnew.w = f1 * dx_dot_gj;
+    gnew.w -= rinv * gj.w;
+    
+    gxmi.x += gnew.x;
+    gxmi.y += gnew.y;
+    gxmi.z += gnew.z;
+    gxmi.w += gnew.w;
+}
+
+__global__ void BwdIlistForceAndPotKernel(const float4 *gfphi, const float4 *xm, int32_t *isplit, int2 *interactions, float4 *gxm, size_t interactions_per_block, int *iminmax, float epsilon) {
     const int blocksize = blockDim.x;
     float epsilon2 = epsilon * epsilon;
 
     int imin = iminmax[0], imax = iminmax[1];
 
-    extern __shared__ float4 xmj_shared[];
+    extern __shared__ float4 shared_memory[];
+
+    float4* xmj_shared     = shared_memory;
+    float4* gfphi_j_shared = &shared_memory[blocksize];
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
         int int_id = imin + blockIdx.x * interactions_per_block + iint;
@@ -332,29 +375,32 @@ __global__ void BwdIlistForceAndPotKernel(const float4 *gm, const float4 *xm, in
         /* These may be larger than our warp's blocksize so that we have to loop individual parts of A and B */
         int nA = iAend - iAstart, nB = iBend - iBstart;
         for (int i = 0; i < nA; i += blocksize) {
-            float4 fphi_i = {0.f, 0.f, 0.f, 0.f};
             float4 xmi = {0.f, 0.f, 0.f, 0.f};
+            float4 gxm_i = {0.f, 0.f, 0.f, 0.f};
+            float4 gfphi_i = {0.f, 0.f, 0.f, 0.f};
             int ioffA = i + threadIdx.x;
 
             if(ioffA  < nA) {
                 xmi = xm[iAstart + ioffA];
+                gfphi_i = gfphi[iAstart + ioffA];
             }
 
             for (int j = 0; j < nB; j += blocksize) {
                 int joffB = j + threadIdx.x;
                 if(joffB < nB) {
                     xmj_shared[threadIdx.x] = xm[iBstart + joffB];
+                    gfphi_j_shared[threadIdx.x] = gfphi[iBstart + joffB];
                 }
                 __syncthreads();
 
                 for (int k = 0; k < min(nB - j, blocksize); k++) {
-                    accumulateForceAndPot(xmi, xmj_shared[k], epsilon2, fphi_i);
+                    accumulateGradients(xmi, xmj_shared[k], gfphi_i, gfphi_j_shared[k], epsilon2, gxm_i);
                 }
                 __syncthreads();
             }
 
             if(ioffA < nA) {
-                atomicAddFloat4(&fphi[iAstart + ioffA], fphi_i);
+                atomicAddFloat4(&gxm[iAstart + ioffA], gxm_i);
             }
         }
     }
@@ -372,7 +418,7 @@ ffi::Error BwdIlistFPhiHost(cudaStream_t stream, ffi::Buffer<ffi::F32> g, ffi::B
     
     cudaMemsetAsync(gxm_float4, 0, xm.element_count() * sizeof(float), stream); // Initialize to 0, because of atomic adds
 
-    BwdIlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(g_float4, xm_float4, isplit.typed_data(), interactions_i2, gxm_float4, interactions_per_block, iminmax.typed_data(), epsilon);
+    BwdIlistForceAndPotKernel<<<grid_size, block_size, 2*block_size*sizeof(float4), stream>>>(g_float4, xm_float4, isplit.typed_data(), interactions_i2, gxm_float4, interactions_per_block, iminmax.typed_data(), epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
