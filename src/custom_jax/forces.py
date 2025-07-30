@@ -9,7 +9,8 @@ import custom_jax.nb_forces as nb_forces
 
 jax.ffi.register_ffi_target("potential", nb_forces.potential(), platform="CUDA")
 jax.ffi.register_ffi_target("force", nb_forces.force(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_force", nb_forces.ilist_force(), platform="CUDA")
+jax.ffi.register_ffi_target("ilist_fphi", nb_forces.ilist_fphi(), platform="CUDA")
+jax.ffi.register_ffi_target("ilist_fphi_bwd", nb_forces.ilist_fphi_bwd(), platform="CUDA")
 
 # ======= Interfaces from CUDA code to Python =======
 
@@ -90,7 +91,7 @@ def ilist_fphi_fwd(xm, isplit, interactions=None, iminmax=None, eps=1e-2, block_
     assert eps > 0, "Epsilon must be positive to deal with self-interaction."
 
     out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
-    fphi = jax.ffi.ffi_call("ilist_force", (out_type,))(xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
+    fphi = jax.ffi.ffi_call("ilist_fphi", (out_type,))(xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
     
     fphi = fphi.at[...,3].add(xm[...,3]/eps) # Remove self-interaction from potential
     
@@ -100,8 +101,11 @@ def ilist_fphi_bwd(eps, block_size, interactions_per_block, res, g):
     xm, isplit, interactions, iminmax = res
     if interactions_per_block is None:
         interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
+    out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
 
-    return (jnp.zeros_like(xm), None, None, None)
+    gxm = jax.ffi.ffi_call("ilist_fphi_bwd", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
+
+    return (gxm, None, None, None)
 
 @partial(jax.custom_vjp, nondiff_argnames=("eps", "block_size", "interactions_per_block"))
 def ilist_fphi(xm, isplit, interactions=None, iminmax=None, eps=1e-2, block_size=32, interactions_per_block=None):
