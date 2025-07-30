@@ -119,16 +119,16 @@ ilist_fphi_jit = jax.jit(ilist_fphi, static_argnames=("eps", "block_size", "inte
 # ======= Some reference implemetations that can be used for testing =======
 
 @jax.jit
-def potential_pure_jax_jit(x, eps=1e-2):
+def potential_pure_jax_jit(x, m=1., eps=1e-2):
     rij2 = jnp.sum((x[:, None, :] - x[None, :, :]) ** 2, axis=-1)
     rinv = jnp.where(rij2 > 0, 1. / jnp.sqrt(rij2 + eps**2), 0.)
     
-    return -jnp.sum(rinv, axis=1)
+    return -jnp.sum(rinv * jnp.broadcast_to(m, x.shape[:-1])[None,:], axis=1)
 
 @jax.jit
-def force_pure_jax_jit(x, eps=1e-2):
+def force_pure_jax_jit(x, m=1., eps=1e-2):
     dx = x[:, None] - x[None, :]
     rij2 = jnp.sum(dx ** 2, axis=-1, keepdims=True)
     rinv = jnp.where(rij2 > 0, 1. / jnp.sqrt(rij2 + eps**2), 0.)
     
-    return -jnp.sum(dx * rinv**3, axis=1)
+    return -jnp.sum(dx * rinv**3 * jnp.broadcast_to(m, x.shape[:-1])[None,:,None], axis=1)

@@ -48,3 +48,34 @@ def test_ilist_force():
 
             assert np.allclose(acc0, acc1, atol=1e-2)
             assert np.allclose(phi0, phi1, rtol=1e-2)
+
+def test_ilist_bwd_force():
+    # Test the backward pass of the force and potential calculation
+    for n in 1024, 3333:
+        xm = jax.random.normal(jax.random.PRNGKey(0), (n, 4)).block_until_ready()
+
+        def loss_fphi(xm):
+            force = cj.forces.force_pure_jax_jit(xm[...,0:3], xm[...,3], eps=1e-2)
+            phi = cj.forces.potential_pure_jax_jit(xm[...,0:3], xm[...,3], eps=1e-2)
+            return jnp.sum(jnp.abs(phi)) + jnp.sum(force**2)
+        
+        loss0 = loss_fphi(xm)
+        xmgrad0 = jax.grad(loss_fphi)(xm)
+
+        isplit = jnp.append(jnp.arange(0, n, 32), jnp.array([n]))
+        # # Add some random shifts so that we don't always have the same number of interactions
+        isplit = isplit.at[1:-1].add(jax.random.randint(jax.random.PRNGKey(0), len(isplit) - 2, -16, 16))
+        iarange = jnp.arange(0, len(isplit)-1)
+        interactions = jnp.stack(jnp.meshgrid(iarange, iarange, indexing='ij'), axis=-1).reshape(-1, 2)
+
+        for block_size, interactions_per_block in ((32, None), (32, 7), (64, 16), (128, 99)): 
+            def loss_fphi_ilist(xm):
+                fphi = cj.forces.ilist_fphi(xm, isplit, interactions, eps=1e-2, block_size=block_size, interactions_per_block=interactions_per_block)
+                return jnp.sum(jnp.abs(fphi[...,3])) + jnp.sum(fphi[...,0:3]**2)
+            
+            loss1 = loss_fphi_ilist(xm)
+
+            assert np.allclose(loss0, loss1, rtol=1e-4)
+            xmgrad1 = jax.grad(loss_fphi_ilist)(xm)
+
+            assert np.allclose(xmgrad0, xmgrad1, rtol=1e-2)
