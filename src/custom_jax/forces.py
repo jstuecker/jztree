@@ -1,12 +1,9 @@
-import os
-import ctypes
+from functools import partial
 
 import numpy as np
 
 import jax
 import jax.numpy as jnp
-
-import importlib.resources
 
 import custom_jax.nb_forces as nb_forces
 
@@ -24,7 +21,7 @@ def potential(x, mass=1., block_size=64, eps=1e-2):
     assert eps > 0, "Epsilon must be positive to deal with self-interaction."
 
     # Reading on GPU will be more efficient if we read pos and mass together as single float4 values
-    xm = jnp.concatenate([x, jnp.broadcast_to(1., x.shape[:-1])[:,None]], axis=-1)
+    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
 
     out_type = jax.ShapeDtypeStruct(x.shape[:-1], x.dtype)
     phi = jax.ffi.ffi_call("potential", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(eps))
@@ -38,7 +35,7 @@ def force(x, mass=1., block_size=64, eps=1e-2, get_potential=False):
     assert np.prod(x.shape[:-1]) % block_size == 0, "The length of x must be divisible by the block size."
     assert eps > 0, "Epsilon must be positive to deal with self-interaction."
 
-    xm = jnp.concatenate([x, jnp.broadcast_to(1., x.shape[:-1])[:,None]], axis=-1)
+    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
 
     if get_potential:
         out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (4,), x.dtype)
@@ -48,17 +45,27 @@ def force(x, mass=1., block_size=64, eps=1e-2, get_potential=False):
         out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (3,), x.dtype)
         f = jax.ffi.ffi_call("force", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(eps), get_potential=False)[0]
         return f
-
-force_jit = jax.jit(force, static_argnames=("block_size", "eps", "get_potential"))
+force_jit = jax.jit(force, static_argnames=("eps", "get_potential", "block_size"))
 
 def ilist_force(x, isplit, interactions=None, iminmax=None, mass=1., eps=1e-2, get_potential=True, block_size=32, interactions_per_block=None):
+    """A convenience interface to ilist_phi. Calling ilist_fphi directly is prefered"""
+    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
+    
+    fphi = ilist_fphi(xm, isplit, interactions, iminmax, eps=eps, block_size=block_size, interactions_per_block=interactions_per_block)
+
+    if get_potential:
+        return fphi[..., :3], fphi[..., 3]
+    else:
+        return fphi[..., :3]
+ilist_force_jit = jax.jit(ilist_force, static_argnames=("eps", "get_potential", "block_size", "interactions_per_block"))
+
+def ilist_fphi_fwd(xm, isplit, interactions=None, iminmax=None, eps=1e-2, block_size=32, interactions_per_block=None):
     """
-    Calculates forces through an interaction list.
+    Calculates forces and potential through an interaction list.
     isplit: offsets in the particle array that defines different nodes. Each node goes from isplit[i] to isplit[i+1], so len(isplit) = nnodes + 1
     interactions: (Nint, 2) array of interactions, with sink node indices and source node indices.
                    Defaults to using all possible interactions
     iminmax: If given, only consider interactions[iminmax[0]:iminmax[1]]. Can be jax.Array. Useful for dynamically sized interaction lists.
-    
     --- optimization parameters ---
     block_size: The number of particles handled per loop of each warp. 32 should be good usually.
     interactions_per_block: The number of interactions handled by each warp block. No need to change this.
@@ -67,34 +74,43 @@ def ilist_force(x, isplit, interactions=None, iminmax=None, mass=1., eps=1e-2, g
     if interactions is None:
         iarange = jnp.arange(0, len(isplit)-1)
         interactions = jnp.stack(jnp.meshgrid(iarange, iarange, indexing='ij'), axis=-1).reshape(-1, 2)
-    
-    assert x.dtype == jnp.float32
+    if iminmax is None:
+        iminmax = jnp.array([0, len(interactions)], dtype=jnp.int32)
+    if interactions_per_block is None:
+        interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
+
+    assert block_size % 32 == 0, "Please keep multiples of 32 for blocksize"
+    assert xm.dtype == jnp.float32
     assert isplit.dtype == jnp.int32
     assert interactions.dtype == jnp.int32
     assert interactions.shape[-1] == 2, "Interactions must be a 2D array with shape (N, 2) where N is the number of interactions."
-    assert x.shape[-1] == 3
-    assert x.ndim >= 2
+    assert xm.shape[-1] == 4
+    assert xm.ndim >= 2
     assert interactions.ndim == 2
     assert eps > 0, "Epsilon must be positive to deal with self-interaction."
-    assert block_size % 32 == 0, "Please keep multiples of 32 for blocksize"
-    
-    assert get_potential, "only with get_potential=True is supported so far"
 
-    xm = jnp.concatenate([x, jnp.broadcast_to(1., x.shape[:-1])[:,None]], axis=-1)
+    out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
+    fphi = jax.ffi.ffi_call("ilist_force", (out_type,))(xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
     
+    fphi = fphi.at[...,3].add(xm[...,3]/eps) # Remove self-interaction from potential
+    
+    return fphi, (xm, isplit, interactions, iminmax)
+
+def ilist_fphi_bwd(eps, block_size, interactions_per_block, res, g):
+    xm, isplit, interactions, iminmax = res
     if interactions_per_block is None:
         interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
-    if iminmax is None:
-        iminmax = jnp.array([0, len(interactions)], dtype=jnp.int32)
 
-    out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (4,), x.dtype)
-    f = jax.ffi.ffi_call("ilist_force", (out_type,))(xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
-    
-    phi = f[..., 3] + mass / eps # Remove self-interaction from potential
-    
-    return f[..., :3], phi
+    return (jnp.zeros_like(xm), None, None, None)
 
-ilist_force_jit = jax.jit(ilist_force, static_argnames=("eps", "get_potential", "block_size", "interactions_per_block"))
+@partial(jax.custom_vjp, nondiff_argnames=("eps", "block_size", "interactions_per_block"))
+def ilist_fphi(xm, isplit, interactions=None, iminmax=None, eps=1e-2, block_size=32, interactions_per_block=None):
+    fphi, res = ilist_fphi_fwd(xm, isplit, interactions, iminmax, eps, block_size, interactions_per_block)
+    return fphi
+ilist_fphi.defvjp(ilist_fphi_fwd, ilist_fphi_bwd)
+
+ilist_fphi_jit = jax.jit(ilist_fphi, static_argnames=("eps", "block_size", "interactions_per_block"))
+
 
 # ======= Some reference implemetations that can be used for testing =======
 
