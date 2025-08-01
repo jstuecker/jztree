@@ -33,4 +33,11 @@ nanobind_add_module(nb_forces src/custom_jax/forces.cu)
 set_target_properties(nb_forces PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
 target_include_directories(nb_forces SYSTEM PRIVATE ${XLA_DIR})
 target_compile_features(nb_forces PRIVATE cxx_std_17)
+
+nanobind_add_module(nb_tree src/custom_jax/tree.cu)
+set_target_properties(nb_tree PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
+target_include_directories(nb_tree SYSTEM PRIVATE ${XLA_DIR})
+target_compile_features(nb_tree PRIVATE cxx_std_17)
+
 install(TARGETS nb_forces LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
+install(TARGETS nb_tree LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
