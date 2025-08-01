@@ -14,52 +14,23 @@ nb::capsule EncapsulateFfiCall(T *fn) {
     return nb::capsule(reinterpret_cast<void *>(fn));
 }
 
-__global__ void PotentialKernel(const float4 *xm, float *phi, size_t n, float epsilon) {
+__global__ void TreeKernel(const int32_t *i_in, int32_t *i_out, size_t n) {
     const size_t blocksize = blockDim.x;
-    const size_t steps = n / blocksize;
-    float epsilon2 = epsilon * epsilon;
 
-    float4 xmi = xm[blockIdx.x * blocksize + threadIdx.x];
-
-    extern __shared__ float4 xmj_shared[];
-
-    float phii = 0.f;
-
-    for (size_t jblock = 0; jblock < steps; jblock += 1) {
-        // Load the next block of x into shared memory
-        // this avoids reading from global memory multiple times
-        __syncthreads();
-        xmj_shared[threadIdx.x] = xm[jblock * blocksize + threadIdx.x];
-        __syncthreads();
-
-        for (size_t j = 0; j < blocksize; j++) {
-            float4 xmj = xmj_shared[j];
-            
-            float dx = xmi.x - xmj.x;
-            float dy = xmi.y - xmj.y;
-            float dz = xmi.z - xmj.z;
-            float m = xmj.w; // we packed mass into the w component of xm
-
-            float r2 = dx*dx + dy*dy + dz*dz;
-
-            phii += -1.0f*m*rsqrtf(r2 + epsilon2);
+    for (size_t jblock = 0; jblock < n; jblock += blocksize) {
+        size_t j = jblock + threadIdx.x;
+        if (j < n) {
+            i_out[j] = 2*i_in[j];
         }
     }
-
-    // Since it is good to avoid any branches on GPU, we deal with the self-interaction by
-    // first adding it above and now subtracting it again:
-    phii += xmi.w / epsilon; 
-
-    phi[blockIdx.x * blocksize + threadIdx.x] = phii;
 }
 
-ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> phi, size_t block_size, float epsilon) {
-    size_t n = x.element_count() / x.dimensions().back();
+ffi::Error TreeHost(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
+    size_t n = key_in.element_count();
 
-    const size_t grid_size = (n + (block_size - 1)) / block_size;
+    size_t grid_size = (n + block_size - 1) / block_size;
 
-    auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
-    PotentialKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, phi->typed_data(), n, epsilon);
+    TreeKernel<<<grid_size, block_size, 0, stream>>>(key_in.typed_data(), id_out->typed_data(), n);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -68,16 +39,16 @@ ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Resu
     return ffi::Error::Success();
 }
 
+
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    Potential, PotentialHost,
+    Tree, TreeHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()              // x
-        .Ret<ffi::Buffer<ffi::F32>>()              // phi
-        .Attr<size_t>("block_size")
-        .Attr<float>("epsilon"),
+        .Arg<ffi::Buffer<ffi::S32>>()        // ids
+        .Ret<ffi::Buffer<ffi::S32>>()        // output ids (should be S32, not F32)
+        .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 NB_MODULE(nb_tree, m) {
-    m.def("potential", []() { return EncapsulateFfiCall(Potential); });
+    m.def("tree", []() { return EncapsulateFfiCall(Tree); });
 }

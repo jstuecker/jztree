@@ -5,19 +5,12 @@ import jax.numpy as jnp
 
 import custom_jax.nb_tree as nb_tree
 
-jax.ffi.register_ffi_target("potential", nb_tree.potential(), platform="CUDA")
+jax.ffi.register_ffi_target("tree", nb_tree.tree(), platform="CUDA")
 
-def potential(x, mass=1., block_size=64, eps=1e-2):
-    assert x.dtype == jnp.float32
-    assert x.shape[-1] == 3
-    assert x.ndim >= 2
-    assert np.prod(x.shape[:-1]) % block_size == 0, "The length of x must be divisible by the block size."
-    assert eps > 0, "Epsilon must be positive to deal with self-interaction."
+def tree(key, block_size=64):
+    assert key.dtype == jnp.int32
 
-    # Reading on GPU will be more efficient if we read pos and mass together as single float4 values
-    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
-
-    out_type = jax.ShapeDtypeStruct(x.shape[:-1], x.dtype)
-    phi = jax.ffi.ffi_call("potential", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(eps))
+    out_type = jax.ShapeDtypeStruct(key.shape, jnp.int32)
+    phi = jax.ffi.ffi_call("tree", (out_type,))(key, block_size=np.uint64(block_size))
     return phi[0]
-potential_jit = jax.jit(potential, static_argnames=("block_size", "eps"))
+potential_jit = jax.jit(tree, static_argnames=("block_size"))
