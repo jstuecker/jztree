@@ -2,6 +2,7 @@
 
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
+#include <cub/cub.cuh>
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
@@ -28,9 +29,21 @@ __global__ void TreeKernel(const int32_t *i_in, int32_t *i_out, size_t n) {
 ffi::Error TreeHost(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
     size_t n = key_in.element_count();
 
-    size_t grid_size = (n + block_size - 1) / block_size;
+    // size_t grid_size = (n + block_size - 1) / block_size;
 
-    TreeKernel<<<grid_size, block_size, 0, stream>>>(key_in.typed_data(), id_out->typed_data(), n);
+    // TreeKernel<<<grid_size, block_size, 0, stream>>>(key_in.typed_data(), id_out->typed_data(), n);
+
+    // sort key_in using the CUB library
+    void *d_temp_storage = nullptr;
+
+    // Determine temporary device storage size
+    size_t temp_storage_bytes = 0;
+    cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, key_in.typed_data(), id_out->typed_data(), n, 0, 32, stream);
+    if (temp_storage_bytes > 0) {
+        // ALlocate and execute the sort
+        cudaMalloc(&d_temp_storage, temp_storage_bytes);
+        cub::DeviceRadixSort::SortKeys(d_temp_storage, temp_storage_bytes, key_in.typed_data(), id_out->typed_data(), n, 0, 32, stream);
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

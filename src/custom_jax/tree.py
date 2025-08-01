@@ -13,4 +13,4 @@ def tree(key, block_size=64):
     out_type = jax.ShapeDtypeStruct(key.shape, jnp.int32)
     phi = jax.ffi.ffi_call("tree", (out_type,))(key, block_size=np.uint64(block_size))
     return phi[0]
-potential_jit = jax.jit(tree, static_argnames=("block_size"))
+tree_jit = jax.jit(tree, static_argnames=("block_size"))
