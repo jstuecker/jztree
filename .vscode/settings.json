@@ -68,7 +68,8 @@
         "variant": "cpp",
         "__nullptr": "cpp",
         "__locale": "cpp",
-        "ios": "cpp"
+        "ios": "cpp",
+        "__config": "cpp"
     }
     ,
     "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json"

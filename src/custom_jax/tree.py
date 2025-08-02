@@ -26,14 +26,12 @@ def i3zsort(ids, block_size=64):
     return isort[0]
 i3zsort.jit = jax.jit(i3zsort, static_argnames=("block_size",))
 
-def f3zsort(x, ids=None, block_size=64):
+def f3zsort(x, block_size=64):
     assert x.dtype == jnp.float32
     assert x.shape[-1] == 3
 
     out_type = jax.ShapeDtypeStruct(x.shape[0:1], jnp.int32)
-    if ids is None:
-        ids = jnp.zeros((x.shape[0], 3), dtype=jnp.int32)
 
-    isort = jax.ffi.ffi_call("f3zsort", (out_type,))(x, ids, block_size=np.uint64(block_size))
+    isort = jax.ffi.ffi_call("f3zsort", (out_type,))(x, block_size=np.uint64(block_size))
     return isort[0]
 f3zsort.jit = jax.jit(f3zsort, static_argnames=("block_size",))
