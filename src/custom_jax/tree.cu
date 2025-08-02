@@ -116,6 +116,26 @@ __device__ bool LexicographicCompare(const int32_t* data, int32_t a, int32_t b) 
     return triplet_a[2] < triplet_b[2];
 }
 
+__device__ bool less_msb(int x, int y) {
+    // Compares whether the most significant bit of x is less than that of y
+    // (If it is equal, returns false)
+    return (x < y) && (x < (x ^ y));
+}
+
+// Custom comparison function for z-order sort of 3 integers
+__device__ bool I3ZsortCompare(const int32_t* data, int32_t a, int32_t b) {
+    const int32_t* triplet_a = &data[a * 3];
+    const int32_t* triplet_b = &data[b * 3];
+
+    int32_t xorab[] = {triplet_a[0] ^ triplet_b[0], triplet_a[1] ^ triplet_b[1], triplet_a[2] ^ triplet_b[2]};
+
+    // Figure out which dimension has the most significant bit
+    int ms_dim = less_msb(xorab[0], xorab[1]) ? 1 : 0;
+    ms_dim = less_msb(xorab[ms_dim], xorab[2]) ? 2 : ms_dim;
+
+    return triplet_a[ms_dim] < triplet_b[ms_dim];
+}
+
 ffi::Error HostI3Zsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
     size_t n = key_in.element_count() / 3;  // Number of triplets
     const int32_t* data = key_in.typed_data();
@@ -129,7 +149,7 @@ ffi::Error HostI3Zsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::R
     thrust::device_ptr<int32_t> indices_ptr(id_out->typed_data());
     thrust::sort(thrust::cuda::par.on(stream), indices_ptr, indices_ptr + n,
         [=] __device__ (int32_t a, int32_t b) {
-            return LexicographicCompare(data, a, b);
+            return I3ZsortCompare(data, a, b);
         });
 
     cudaError_t last_error = cudaGetLastError();
