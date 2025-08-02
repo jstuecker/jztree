@@ -17,3 +17,7 @@ Additionally to properly make VSCode find your paths (and also save build time) 
 pip install -e . --no-build-isolation
 ```
 which will properly write the used paths into 'build/compile_commands.json' so that VSCode understands them. (With build isolation the include paths may be wrong, pointing to temporary directories.) Only use this during development!
+
+
+# Useufl links
+* z-order with floats: http://compgeom.com/~piyush/papers/tvcg_stann.pdf

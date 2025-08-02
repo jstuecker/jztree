@@ -5,12 +5,35 @@ import jax.numpy as jnp
 
 import custom_jax.nb_tree as nb_tree
 
-jax.ffi.register_ffi_target("tree", nb_tree.tree(), platform="CUDA")
+jax.ffi.register_ffi_target("argsort", nb_tree.argsort(), platform="CUDA")
+jax.ffi.register_ffi_target("i3zsort", nb_tree.i3zsort(), platform="CUDA")
+jax.ffi.register_ffi_target("f3zsort", nb_tree.f3zsort(), platform="CUDA")
 
-def tree(key, block_size=64):
+def argsort(key, block_size=64):
     assert key.dtype == jnp.int32
 
-    out_type = jax.ShapeDtypeStruct(key.shape, jnp.int32)
-    phi = jax.ffi.ffi_call("tree", (out_type,))(key, block_size=np.uint64(block_size))
-    return phi[0]
-tree_jit = jax.jit(tree, static_argnames=("block_size"))
+    out_type = jax.ShapeDtypeStruct(key.shape[0:1], jnp.int32)
+    isort = jax.ffi.ffi_call("argsort", (out_type,))(key, block_size=np.uint64(block_size))
+    return isort[0]
+argsort.jit = jax.jit(argsort, static_argnames=("block_size",))
+
+def i3zsort(ids, block_size=64):
+    assert ids.dtype == jnp.int32
+    assert ids.shape[-1] == 3
+
+    out_type = jax.ShapeDtypeStruct(ids.shape[0:1], jnp.int32)
+    isort = jax.ffi.ffi_call("i3zsort", (out_type,))(ids, block_size=np.uint64(block_size))
+    return isort[0]
+i3zsort.jit = jax.jit(i3zsort, static_argnames=("block_size",))
+
+def f3zsort(x, ids=None, block_size=64):
+    assert x.dtype == jnp.float32
+    assert x.shape[-1] == 3
+
+    out_type = jax.ShapeDtypeStruct(x.shape[0:1], jnp.int32)
+    if ids is None:
+        ids = jnp.zeros((x.shape[0], 3), dtype=jnp.int32)
+
+    isort = jax.ffi.ffi_call("f3zsort", (out_type,))(x, ids, block_size=np.uint64(block_size))
+    return isort[0]
+f3zsort.jit = jax.jit(f3zsort, static_argnames=("block_size",))
