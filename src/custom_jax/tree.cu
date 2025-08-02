@@ -6,6 +6,11 @@
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
+#include <thrust/device_vector.h>
+
+#if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2
+#error "CUB version 2.0.0 or higher required"
+#endif
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
@@ -66,9 +71,9 @@ ffi::Error HostArgsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::R
     cudaMalloc(&d_sorted_keys, n * sizeof(int32_t));
     
     // Initialize indices 0, 1, 2, ..., n-1
-    int threads = min(1024, (int)n);
-    int blocks = (n + threads - 1) / threads;
-    InitRangeKernel<<<blocks, threads, 0, stream>>>(d_indices, n);
+    // Initialize indices 0, 1, 2, ..., n-1
+    int blocks = (n + block_size - 1) / block_size;
+    InitRangeKernel<<<blocks, block_size, 0, stream>>>(d_indices, n);
 
     // Determine temporary device storage size for sorting pairs
     void *d_temp_storage = nullptr;
@@ -219,6 +224,63 @@ ffi::Error HostF3Zsort(cudaStream_t stream, ffi::Buffer<ffi::F32> key_in, ffi::R
     return ffi::Error::Success();
 }
 
+struct custom_t
+{
+  int key1, key2, key3;
+
+  custom_t() = default;
+  custom_t(int3 keys) : key1(keys.x), key2(keys.y), key3(keys.z) {}
+};
+
+struct decomposer_t
+{
+  __host__ __device__ thrust::tuple<int&, int&, int&> operator()(custom_t& key) const
+  {
+    return thrust::tuple<int&, int&, int&>(key.key1, key.key2, key.key3);
+  }
+};
+
+
+ffi::Error HostI3Argsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
+    size_t n = key_in.element_count()/3;
+
+    // Create indices array and temporary sorted keys array for argsort
+    int32_t *d_indices;
+    custom_t *d_sorted_keys;
+    cudaMalloc(&d_indices, n * sizeof(int3));
+    cudaMalloc(&d_sorted_keys, n * sizeof(custom_t));
+    
+    // Initialize indices 0, 1, 2, ..., n-1
+    int blocks = (n + block_size - 1) / block_size;
+    InitRangeKernel<<<blocks, block_size, 0, stream>>>(d_indices, n);
+
+    const custom_t* d_keys_in = reinterpret_cast<const custom_t*>(key_in.typed_data());
+
+    void *d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
+    cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys_in, d_sorted_keys, 
+        d_indices, id_out->typed_data(), n, decomposer_t{});
+
+    if (temp_storage_bytes > 0) {
+        // Allocate temporary storage and execute the argsort
+        cudaMalloc(&d_temp_storage, temp_storage_bytes);
+        cub::DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys_in, 
+            d_sorted_keys, d_indices, id_out->typed_data(), n, decomposer_t{});
+
+        cudaFree(d_temp_storage);
+    }
+
+    // Clean up temporary arrays
+    cudaFree(d_indices);
+    cudaFree(d_sorted_keys);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     Argsort, HostArgsort,
     ffi::Ffi::Bind()
@@ -246,8 +308,18 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    I3Argsort, HostI3Argsort,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::S32>>()        // ids
+        .Ret<ffi::Buffer<ffi::S32>>()        // output ids
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
 NB_MODULE(nb_tree, m) {
     m.def("argsort", []() { return EncapsulateFfiCall(Argsort); });
     m.def("i3zsort", []() { return EncapsulateFfiCall(I3zsort); });
     m.def("f3zsort", []() { return EncapsulateFfiCall(F3zsort); });
+    m.def("i3argsort", []() { return EncapsulateFfiCall(I3Argsort); });
 }
