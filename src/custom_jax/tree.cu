@@ -348,7 +348,17 @@ struct PosId {
 struct PosIdLess {
     __device__ __forceinline__
     bool operator()(const PosId &a, const PosId &b) {
-        return a.pos.x < b.pos.x;
+        int msb_x = float_xor_msb(a.pos.x, b.pos.x);
+        int msb_y = float_xor_msb(a.pos.y, b.pos.y);
+        int msb_z = float_xor_msb(a.pos.z, b.pos.z);
+
+        // Find dimension with least clz → most significant differing bit
+        int ms_dim = (msb_x >= msb_y && msb_x >= msb_z) ? 0 : ((msb_y >= msb_z) ? 1 : 2);
+
+        // Perform the comparison on the most significant dimension
+        if (ms_dim == 0) return a.pos.x < b.pos.x;
+        if (ms_dim == 1) return a.pos.y < b.pos.y;
+        return a.pos.z < b.pos.z;
     }
 };
 
