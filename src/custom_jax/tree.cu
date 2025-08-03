@@ -340,6 +340,54 @@ ffi::Error HostI3zMergesort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, f
     return ffi::Error::Success();
 }
 
+struct PosKeyId {
+    float3 pos;
+    int32_t id;
+};
+
+struct PosKeyIdLess {
+    __device__ __forceinline__
+    bool operator()(const PosKeyId &a, const PosKeyId &b) {
+        return a.pos.x < b.pos.x;
+    }
+};
+
+__global__ void PosKeyArangeKernel(const float3* pos_in, PosKeyId *keyid_out, size_t n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        keyid_out[idx].pos = pos_in[idx];
+        keyid_out[idx].id = idx;
+    }
+}
+
+ffi::Error HostF3zMergesort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
+    size_t n = pos_in.element_count()/3;
+
+    float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
+    PosKeyId* keyids = reinterpret_cast<PosKeyId*>(id_out->typed_data());
+    
+    // Initialize indices 0, 1, 2, ..., n-1
+    int blocks = (n + block_size - 1) / block_size;
+    PosKeyArangeKernel<<<blocks, block_size, 0, stream>>>(keys_in, keyids, n);
+
+    // void *d_temp_storage = nullptr;
+    // size_t temp_storage_bytes = 0;
+
+    // cub::DeviceMergeSort::SortKeys<KeyId*, int64_t, KeyIdLess>(nullptr, temp_storage_bytes, keyids, n, KeyIdLess(), stream);
+
+    // if (temp_storage_bytes > 0) {
+    //     cudaMalloc(&d_temp_storage, temp_storage_bytes);
+    //     cub::DeviceMergeSort::SortKeys<KeyId*, int64_t, KeyIdLess>(d_temp_storage, temp_storage_bytes, keyids, n, KeyIdLess(), stream);
+    //     cudaFree(d_temp_storage);
+    // }
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     Argsort, HostArgsort,
     ffi::Ffi::Bind()
@@ -385,10 +433,21 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    F3zMergesort, HostF3zMergesort,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()        // pos
+        .Ret<ffi::Buffer<ffi::S32>>()        // output ids / pos
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
+
 NB_MODULE(nb_tree, m) {
     m.def("argsort", []() { return EncapsulateFfiCall(Argsort); });
     m.def("i3zsort", []() { return EncapsulateFfiCall(I3zsort); });
     m.def("f3zsort", []() { return EncapsulateFfiCall(F3zsort); });
     m.def("i3argsort", []() { return EncapsulateFfiCall(I3Argsort); });
     m.def("i3zmergesort", []() { return EncapsulateFfiCall(I3zMergesort); });
+    m.def("f3zmergesort", []() { return EncapsulateFfiCall(F3zMergesort); });
 }
