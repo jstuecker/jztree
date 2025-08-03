@@ -287,9 +287,19 @@ struct KeyId {
 };
 
 struct KeyIdLess {
-    __device__ bool operator()(const KeyId &a, const KeyId &b) {
-        if (a.key.x != b.key.x) return a.key.x < b.key.x;
-        if (a.key.y != b.key.y) return a.key.y < b.key.y;
+    __device__ __forceinline__
+    bool operator()(const KeyId &a, const KeyId &b) {
+        // Count leading zeros of the difference (higher means lower MSB)
+        int clz0 = __clz(a.key.x ^ b.key.x);
+        int clz1 = __clz(a.key.y ^ b.key.y);
+        int clz2 = __clz(a.key.z ^ b.key.z);
+
+        // Find dimension with least clz → most significant differing bit
+        int ms_dim = (clz0 <= clz1 && clz0 <= clz2) ? 0 : ((clz1 <= clz2) ? 1 : 2);
+
+        // Perform the comparison on the most significant dimension
+        if (ms_dim == 0) return a.key.x < b.key.x;
+        if (ms_dim == 1) return a.key.y < b.key.y;
         return a.key.z < b.key.z;
     }
 };
@@ -302,7 +312,7 @@ __global__ void KeyArangeKernel(const int3* key_in, KeyId *keyid_out, size_t n) 
     }
 }
 
-ffi::Error HostI3Mergesort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
+ffi::Error HostI3zMergesort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
     size_t n = key_in.element_count()/3;
 
     int3* keys_in = reinterpret_cast<int3*>(key_in.typed_data());
@@ -367,7 +377,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    I3Mergesort, HostI3Mergesort,
+    I3zMergesort, HostI3zMergesort,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::Buffer<ffi::S32>>()        // ids
@@ -380,5 +390,5 @@ NB_MODULE(nb_tree, m) {
     m.def("i3zsort", []() { return EncapsulateFfiCall(I3zsort); });
     m.def("f3zsort", []() { return EncapsulateFfiCall(F3zsort); });
     m.def("i3argsort", []() { return EncapsulateFfiCall(I3Argsort); });
-    m.def("i3mergesort", []() { return EncapsulateFfiCall(I3Mergesort); });
+    m.def("i3zmergesort", []() { return EncapsulateFfiCall(I3zMergesort); });
 }

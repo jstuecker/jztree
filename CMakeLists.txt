@@ -32,6 +32,7 @@ message(STATUS "XLA include directory: ${XLA_DIR}")
 nanobind_add_module(nb_forces src/custom_jax/forces.cu)
 set_target_properties(nb_forces PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
 target_include_directories(nb_forces SYSTEM PRIVATE ${XLA_DIR})
+target_compile_options(nb_forces PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
 target_compile_features(nb_forces PRIVATE cxx_std_17)
 target_link_libraries(nb_forces PRIVATE CUDA::cudart)
 # Add NVCC flags for extended lambdas and relaxed constexpr
@@ -40,6 +41,7 @@ target_compile_options(nb_forces PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-l
 nanobind_add_module(nb_tree src/custom_jax/tree.cu)
 set_target_properties(nb_tree PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
 target_include_directories(nb_tree SYSTEM PRIVATE ${XLA_DIR})
+target_compile_options(nb_tree PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
 target_compile_features(nb_tree PRIVATE cxx_std_17)
 target_link_libraries(nb_tree PRIVATE CUDA::cudart)
 # Add NVCC flags for extended lambdas and relaxed constexpr

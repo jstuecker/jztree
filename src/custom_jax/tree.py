@@ -9,7 +9,7 @@ jax.ffi.register_ffi_target("argsort", nb_tree.argsort(), platform="CUDA")
 jax.ffi.register_ffi_target("i3zsort", nb_tree.i3zsort(), platform="CUDA")
 jax.ffi.register_ffi_target("f3zsort", nb_tree.f3zsort(), platform="CUDA")
 jax.ffi.register_ffi_target("i3argsort", nb_tree.i3argsort(), platform="CUDA")
-jax.ffi.register_ffi_target("i3mergesort", nb_tree.i3mergesort(), platform="CUDA")
+jax.ffi.register_ffi_target("i3zmergesort", nb_tree.i3zmergesort(), platform="CUDA")
 
 def argsort(key, block_size=64):
     assert key.dtype == jnp.int32
@@ -47,11 +47,11 @@ def i3argsort(ids, block_size=64):
     return isort[0]
 i3argsort.jit = jax.jit(i3argsort, static_argnames=("block_size",))
 
-def i3mergesort(ids, block_size=64):
+def i3zmergesort(ids, block_size=64):
     assert ids.dtype == jnp.int32
     assert ids.shape[-1] == 3
 
     out_type = jax.ShapeDtypeStruct((ids.shape[0],4), jnp.int32)
-    isort = jax.ffi.ffi_call("i3mergesort", (out_type,))(ids, block_size=np.uint64(block_size))
+    isort = jax.ffi.ffi_call("i3zmergesort", (out_type,))(ids, block_size=np.uint64(block_size))
     return isort[0][:,3]
-i3mergesort.jit = jax.jit(i3mergesort, static_argnames=("block_size",))
+i3zmergesort.jit = jax.jit(i3zmergesort, static_argnames=("block_size",))
