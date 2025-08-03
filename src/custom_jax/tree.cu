@@ -142,47 +142,126 @@ __device__ __forceinline__ int32_t msb_diff_level(const float3 &p1, const float3
 
 __global__ void KernelBinarySearchLeftParent(const float3* pos_in, int *tree_info, size_t n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= n-1)
-        return;
-    
-    // Calculate the level difference of our considered set of two points (=node)
-    float3 p1 = pos_in[idx];
-    float3 p2 = pos_in[idx + 1];
 
-    int target_level = msb_diff_level(p1, p2);
+    int target_level, lvl_right, lvl_left;
+    size_t lbound, rbound;
+    float3 p1, p2;
+    bool valid_thread = (idx < n-1);
 
-    // We do a binary search, trying to find the closest point to the left
-    // that has a level difference of at least `level`
-    size_t imin = -1;
-    size_t imax = idx+1;
-    int test_level = -450;
-    while (imin+1 < imax) {
-        size_t itest = (imin + imax) / 2;
-        test_level = msb_diff_level(pos_in[itest], p2);
-        if (test_level > target_level) {
-            imin = itest;
-        } else {
-            imax = itest;
+    if (valid_thread) {
+        // Calculate the level difference of our considered set of two points (=node)
+        p1 = pos_in[idx];
+        p2 = pos_in[idx + 1];
+
+        target_level = msb_diff_level(p1, p2);
+
+        // We do a binary search, trying to find the closest point to the left
+        // that has a level difference of at least `level`
+        size_t imin = -1, imax = idx+1;
+        lvl_left = 387;
+        while (imin+1 < imax) {
+            size_t itest = (imin + imax) / 2;
+            lvl_left = msb_diff_level(pos_in[itest], p2);
+            if (lvl_left > target_level) {
+                imin = itest;
+            } else {
+                imax = itest;
+            }
         }
+
+        // Our array has two fake nodes at the beginning and end
+        // that's why we have to offset the indices by 1
+        lbound = imin+1;
+
+        lvl_left = msb_diff_level(p1, pos_in[lbound-1]);
+    }
+    
+    __syncthreads(); // Synchronize to reduce thread divergence
+
+    if (valid_thread) {
+        // Now find the right side parent
+        size_t imin = idx, imax = n;
+        lvl_right = 387;
+        while (imin+1 < imax) {
+            size_t itest = (imin + imax) / 2;
+            lvl_right = msb_diff_level(p1, pos_in[itest]);
+            if (lvl_right > target_level) {
+                imax = itest;
+            } else {
+                imin = itest;
+            }
+        }
+
+        rbound = imin+1;
+
+        lvl_right = msb_diff_level(p1, pos_in[rbound]);
     }
 
-    // Our array has two fake nodes at the beginning and end
-    // that's why we have to offset the indices by 1
-    imin = imin+1;
+    __syncthreads();
 
-    tree_info[idx+1] = target_level;
-    tree_info[idx+1 + (n+1)] = imin;
+    if (valid_thread) {
+        // Our array has two fake nodes at the beginning and end
+        // that's why we have to offset the indices by 1
+        tree_info[idx+1] = target_level;
+        tree_info[idx+1 + (n+1)] = lbound;
+        tree_info[idx+1 + 2*(n+1)] = rbound;
+
+        
+        // The parent of each node is the lower one of the two boundary nodes
+        if(lvl_left <= lvl_right) {
+            tree_info[lbound + 4*(n+1)] = idx+1; // we are the parent's right child
+        } else {
+            tree_info[rbound + 3*(n+1)] = idx+1; // we are the parent's left child
+        }
+    }
 }
+
+__global__ void KernelInitialize(int *tree_info, size_t n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (idx >= n+1)
+        return;
+
+    tree_info[idx + 3*(n+1)] = -idx + 1;
+    tree_info[idx + 4*(n+1)] = -idx;
+
+
+}
+
+// __global__ void KernelAssignChildren(int *tree_info, size_t n) {
+//     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+//     if (idx >= n-1)
+//         return;
+    
+//     int lvl = tree_info[idx + 1];
+//     int lbound = tree_info[idx + 1 + (n+1)];
+//     int rbound = tree_info[idx + 1 + 2*(n+1)];
+
+//     int lvl_lbound = tree_info[lbound];
+//     int lvl_rbound = tree_info[rbound];
+
+//     if(lvl_lbound <= lvl_rbound) {
+//         tree_info[lbound + 4*(n+1)] = idx+1; // we are the parent's right child
+//     } else {
+//         tree_info[rbound + 3*(n+1)] = idx+1; // we are the parent's left child
+//     }
+// }
 
 ffi::Error HostBuildZTree(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> level_out, size_t block_size) {
     size_t n = pos_in.element_count()/3;
 
     float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
     
-    int blocks = (n + block_size - 1) / block_size;
+    // int blocks = (n + block_size - 1) / block_size;
     // KernelMsbDiffLevel<<<blocks, block_size, 0, stream>>>(keys_in, level_out->typed_data(), n);
 
-    KernelBinarySearchLeftParent<<<blocks, block_size, 0, stream>>>(keys_in, level_out->typed_data(), n);
+    KernelInitialize<<<(n+1 + block_size-1) / block_size, block_size, 0, stream>>>(level_out->typed_data(), n);
+
+    KernelBinarySearchLeftParent<<<(n-1 + block_size-1) / block_size, block_size, 0, stream>>>(keys_in, level_out->typed_data(), n);
+
+    // KernelAssignChildren<<<(n-1 + block_size-1) / block_size, block_size, 0, stream>>>(level_out->typed_data(), n);
+
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
