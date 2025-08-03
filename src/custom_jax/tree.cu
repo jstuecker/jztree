@@ -340,19 +340,19 @@ ffi::Error HostI3zMergesort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, f
     return ffi::Error::Success();
 }
 
-struct PosKeyId {
+struct PosId {
     float3 pos;
     int32_t id;
 };
 
-struct PosKeyIdLess {
+struct PosIdLess {
     __device__ __forceinline__
-    bool operator()(const PosKeyId &a, const PosKeyId &b) {
+    bool operator()(const PosId &a, const PosId &b) {
         return a.pos.x < b.pos.x;
     }
 };
 
-__global__ void PosKeyArangeKernel(const float3* pos_in, PosKeyId *keyid_out, size_t n) {
+__global__ void PosKeyArangeKernel(const float3* pos_in, PosId *keyid_out, size_t n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
         keyid_out[idx].pos = pos_in[idx];
@@ -364,22 +364,22 @@ ffi::Error HostF3zMergesort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, f
     size_t n = pos_in.element_count()/3;
 
     float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
-    PosKeyId* keyids = reinterpret_cast<PosKeyId*>(id_out->typed_data());
+    PosId* keyids = reinterpret_cast<PosId*>(id_out->typed_data());
     
     // Initialize indices 0, 1, 2, ..., n-1
     int blocks = (n + block_size - 1) / block_size;
     PosKeyArangeKernel<<<blocks, block_size, 0, stream>>>(keys_in, keyids, n);
 
-    // void *d_temp_storage = nullptr;
-    // size_t temp_storage_bytes = 0;
+    void *d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
 
-    // cub::DeviceMergeSort::SortKeys<KeyId*, int64_t, KeyIdLess>(nullptr, temp_storage_bytes, keyids, n, KeyIdLess(), stream);
+    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(nullptr, temp_storage_bytes, keyids, n, PosIdLess(), stream);
 
-    // if (temp_storage_bytes > 0) {
-    //     cudaMalloc(&d_temp_storage, temp_storage_bytes);
-    //     cub::DeviceMergeSort::SortKeys<KeyId*, int64_t, KeyIdLess>(d_temp_storage, temp_storage_bytes, keyids, n, KeyIdLess(), stream);
-    //     cudaFree(d_temp_storage);
-    // }
+    if (temp_storage_bytes > 0) {
+        cudaMalloc(&d_temp_storage, temp_storage_bytes);
+        cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(d_temp_storage, temp_storage_bytes, keyids, n, PosIdLess(), stream);
+        cudaFree(d_temp_storage);
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
