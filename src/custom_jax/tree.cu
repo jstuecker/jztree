@@ -281,55 +281,47 @@ ffi::Error HostI3Argsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi:
     return ffi::Error::Success();
 }
 
-struct Int3Less
-{
-  __device__ bool operator()(const int3 &lhs, const int3 &rhs)
-  {
-    // return lhs.x < rhs.x;
-    if (lhs.x != rhs.x) {
-        return lhs.x < rhs.x;
-    }
-    if (lhs.y != rhs.y) {
-        return lhs.y < rhs.y;
-    }
-    return lhs.z < rhs.z;
-  }
+struct KeyId {
+    int3 key;
+    int32_t id;
 };
+
+struct KeyIdLess {
+    __device__ bool operator()(const KeyId &a, const KeyId &b) {
+        if (a.key.x != b.key.x) return a.key.x < b.key.x;
+        if (a.key.y != b.key.y) return a.key.y < b.key.y;
+        return a.key.z < b.key.z;
+    }
+};
+
+__global__ void KeyArangeKernel(const int3* key_in, KeyId *keyid_out, size_t n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        keyid_out[idx].key = key_in[idx];
+        keyid_out[idx].id = idx;
+    }
+}
 
 ffi::Error HostI3Mergesort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
     size_t n = key_in.element_count()/3;
 
-    // Create indices array and temporary sorted keys array for argsort
-    // int32_t *d_indices;
-    
-    // cudaMalloc(&d_indices, n * sizeof(int3));
-
-    int3 *d_sorted_keys;
-    cudaMalloc(&d_sorted_keys, n * sizeof(int3));
-
-    cudaMemcpyAsync(d_sorted_keys, key_in.typed_data(), n * sizeof(int3), cudaMemcpyDeviceToDevice, stream);
-
-    // int3* key_i3 = reinterpret_cast<int3*>(key_in.typed_data());
+    int3* keys_in = reinterpret_cast<int3*>(key_in.typed_data());
+    KeyId* keyids = reinterpret_cast<KeyId*>(id_out->typed_data());
     
     // Initialize indices 0, 1, 2, ..., n-1
     int blocks = (n + block_size - 1) / block_size;
-    InitRangeKernel<<<blocks, block_size, 0, stream>>>(id_out->typed_data(), n);
+    KeyArangeKernel<<<blocks, block_size, 0, stream>>>(keys_in, keyids, n);
 
     void *d_temp_storage = nullptr;
     size_t temp_storage_bytes = 0;
 
-    cub::DeviceMergeSort::SortPairs<int3*, int32_t*, int64_t, Int3Less>(nullptr, temp_storage_bytes,  d_sorted_keys, id_out->typed_data(), n, Int3Less());
+    cub::DeviceMergeSort::SortKeys<KeyId*, int64_t, KeyIdLess>(nullptr, temp_storage_bytes, keyids, n, KeyIdLess(), stream);
 
     if (temp_storage_bytes > 0) {
         cudaMalloc(&d_temp_storage, temp_storage_bytes);
-        cub::DeviceMergeSort::SortPairs<int3*, int32_t*, int64_t, Int3Less>(d_temp_storage, temp_storage_bytes, d_sorted_keys, id_out->typed_data(), n, Int3Less(), stream);
+        cub::DeviceMergeSort::SortKeys<KeyId*, int64_t, KeyIdLess>(d_temp_storage, temp_storage_bytes, keyids, n, KeyIdLess(), stream);
         cudaFree(d_temp_storage);
     }
-    
-
-    // Clean up temporary arrays
-    // cudaFree(d_indices);
-    cudaFree(d_sorted_keys);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

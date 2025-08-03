@@ -51,7 +51,7 @@ def i3mergesort(ids, block_size=64):
     assert ids.dtype == jnp.int32
     assert ids.shape[-1] == 3
 
-    out_type = jax.ShapeDtypeStruct(ids.shape[0:1], jnp.int32)
+    out_type = jax.ShapeDtypeStruct((ids.shape[0],4), jnp.int32)
     isort = jax.ffi.ffi_call("i3mergesort", (out_type,))(ids, block_size=np.uint64(block_size))
-    return isort[0]
+    return isort[0][:,3]
 i3mergesort.jit = jax.jit(i3mergesort, static_argnames=("block_size",))
