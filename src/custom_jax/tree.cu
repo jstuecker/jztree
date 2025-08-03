@@ -247,7 +247,7 @@ ffi::Error HostI3Argsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi:
     // Create indices array and temporary sorted keys array for argsort
     int32_t *d_indices;
     custom_t *d_sorted_keys;
-    cudaMalloc(&d_indices, n * sizeof(int3));
+    cudaMalloc(&d_indices, n * sizeof(int32_t));
     cudaMalloc(&d_sorted_keys, n * sizeof(custom_t));
     
     // Initialize indices 0, 1, 2, ..., n-1
@@ -272,6 +272,63 @@ ffi::Error HostI3Argsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi:
 
     // Clean up temporary arrays
     cudaFree(d_indices);
+    cudaFree(d_sorted_keys);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+struct Int3Less
+{
+  __device__ bool operator()(const int3 &lhs, const int3 &rhs)
+  {
+    // return lhs.x < rhs.x;
+    if (lhs.x != rhs.x) {
+        return lhs.x < rhs.x;
+    }
+    if (lhs.y != rhs.y) {
+        return lhs.y < rhs.y;
+    }
+    return lhs.z < rhs.z;
+  }
+};
+
+ffi::Error HostI3Mergesort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
+    size_t n = key_in.element_count()/3;
+
+    // Create indices array and temporary sorted keys array for argsort
+    // int32_t *d_indices;
+    
+    // cudaMalloc(&d_indices, n * sizeof(int3));
+
+    int3 *d_sorted_keys;
+    cudaMalloc(&d_sorted_keys, n * sizeof(int3));
+
+    cudaMemcpyAsync(d_sorted_keys, key_in.typed_data(), n * sizeof(int3), cudaMemcpyDeviceToDevice, stream);
+
+    // int3* key_i3 = reinterpret_cast<int3*>(key_in.typed_data());
+    
+    // Initialize indices 0, 1, 2, ..., n-1
+    int blocks = (n + block_size - 1) / block_size;
+    InitRangeKernel<<<blocks, block_size, 0, stream>>>(id_out->typed_data(), n);
+
+    void *d_temp_storage = nullptr;
+    size_t temp_storage_bytes = 0;
+
+    cub::DeviceMergeSort::SortPairs<int3*, int32_t*, int64_t, Int3Less>(nullptr, temp_storage_bytes,  d_sorted_keys, id_out->typed_data(), n, Int3Less());
+
+    if (temp_storage_bytes > 0) {
+        cudaMalloc(&d_temp_storage, temp_storage_bytes);
+        cub::DeviceMergeSort::SortPairs<int3*, int32_t*, int64_t, Int3Less>(d_temp_storage, temp_storage_bytes, d_sorted_keys, id_out->typed_data(), n, Int3Less(), stream);
+        cudaFree(d_temp_storage);
+    }
+    
+
+    // Clean up temporary arrays
+    // cudaFree(d_indices);
     cudaFree(d_sorted_keys);
 
     cudaError_t last_error = cudaGetLastError();
@@ -317,9 +374,19 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    I3Mergesort, HostI3Mergesort,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::S32>>()        // ids
+        .Ret<ffi::Buffer<ffi::S32>>()        // output ids
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
 NB_MODULE(nb_tree, m) {
     m.def("argsort", []() { return EncapsulateFfiCall(Argsort); });
     m.def("i3zsort", []() { return EncapsulateFfiCall(I3zsort); });
     m.def("f3zsort", []() { return EncapsulateFfiCall(F3zsort); });
     m.def("i3argsort", []() { return EncapsulateFfiCall(I3Argsort); });
+    m.def("i3mergesort", []() { return EncapsulateFfiCall(I3Mergesort); });
 }
