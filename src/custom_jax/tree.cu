@@ -110,6 +110,41 @@ ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, 
 }
 
 
+__global__ void GetMsbDiffLevel(const float3* pos_in, int *level_out, size_t n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n-1) {
+        float3 p1 = pos_in[idx];
+        float3 p2 = pos_in[idx + 1];
+
+        int msb_x = float_xor_msb(p1.x, p2.x);
+        int msb_y = float_xor_msb(p1.y, p2.y);
+        int msb_z = float_xor_msb(p1.z, p2.z);
+
+        // The most significant differing bit
+        // int msb_diff = max(3*msb_x+2, max(3*msb_y+1, 3*msb_z));
+
+        level_out[idx] = msb_x;
+        level_out[idx+(n-1)] = msb_y;
+        level_out[idx+2*(n-1)] = msb_z;
+        level_out[idx+3*(n-1)] = max(3*msb_x+3, max(3*msb_y+2, 3*msb_z+1));
+    }
+}
+
+ffi::Error HostBuildZTree(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> level_out, size_t block_size) {
+    size_t n = pos_in.element_count()/3;
+
+    float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
+    
+    int blocks = (n + block_size - 1) / block_size;
+    GetMsbDiffLevel<<<blocks, block_size, 0, stream>>>(keys_in, level_out->typed_data(), n);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     PosZorderSort, HostPosZorderSort,
@@ -117,6 +152,15 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::Buffer<ffi::F32>>()        // pos
         .Ret<ffi::Buffer<ffi::S32>>()        // output ids / pos
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    BuildZTree, HostBuildZTree,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()        // pos
+        .Ret<ffi::Buffer<ffi::S32>>()        // output level
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
@@ -129,6 +173,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 NB_MODULE(nb_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
+    m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
 
     // A bunc of deprecated functions
     m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });

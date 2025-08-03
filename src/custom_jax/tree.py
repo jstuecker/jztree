@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import custom_jax.nb_tree as nb_tree
 
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
+jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
 
 def pos_zorder_sort(x, block_size=64):
     assert x.dtype == jnp.float32
@@ -21,6 +22,16 @@ def pos_zorder_sort(x, block_size=64):
 
     return pos, ids
 pos_zorder_sort.jit = jax.jit(pos_zorder_sort, static_argnames=("block_size",))
+
+def build_ztree(x, block_size=64):
+    assert x.dtype == jnp.float32
+    assert x.shape[-1] == 3
+
+    out_type = jax.ShapeDtypeStruct((5,x.shape[0]-1), jnp.int32)
+    ztree = jax.ffi.ffi_call("BuildZTree", (out_type,))(x, block_size=np.uint64(block_size))[0]
+
+    return ztree
+build_ztree.jit = jax.jit(build_ztree, static_argnames=("block_size",))
 
 
 # ================================= Deprecated functions   ======================================= #
