@@ -21,3 +21,6 @@ which will properly write the used paths into 'build/compile_commands.json' so t
 
 # Useufl links
 * z-order with floats: http://compgeom.com/~piyush/papers/tvcg_stann.pdf
+
+# Other notes:
+* Probably I can remove dependence on thrust when deleting deprecated code
