@@ -163,8 +163,14 @@ ffi::Error HostI3Zsort(cudaStream_t stream, ffi::Buffer<ffi::S32> key_in, ffi::R
     return ffi::Error::Success();
 }
 
-__device__ int32_t float_xor_msb(float a, float b) {
-    // finds the most significant bit that differs between x and y
+__device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
+    // Finds the most significant bit that differs between x and y
+    // For floating point numbers we need to treat the exponent and the mantissa differently:
+    // If the exponent differs, then the (power of two) of the difference is given by the larger
+    // exponent.
+    // If the exponent is the same, then we need to compare the mantissas. The (power of two) of the
+    // difference is then given by the differing bit in the mantissa, offset by the exponent
+
     if (signbit(a) != signbit(b)) {
         return 128;  // The sign is the highest significant bit
     }
@@ -175,11 +181,12 @@ __device__ int32_t float_xor_msb(float a, float b) {
     int32_t b_exp = (b_bits >> 23) - 127;
 
     if (a_exp == b_exp) { // If both floats have the same exponent, we need to compare mantissas
-        int32_t mantissa_msb = 32 - __clz(a_bits ^ b_bits);
-        return a_exp + (mantissa_msb - 24);
+        // clz counts bit-zeros from the left. There will be always 8 leading zeros due to the
+        // exponent
+        return a_exp + (8 - __clz(a_bits ^ b_bits)); 
     }
     else { // If exponents differ, return the larger exponent
-        return a_exp > b_exp ? a_exp : b_exp;
+        return max(a_exp, b_exp);
     }
 }
 
