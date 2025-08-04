@@ -23,6 +23,11 @@ nb::capsule EncapsulateFfiCall(T *fn) {
     return nb::capsule(reinterpret_cast<void *>(fn));
 }
 
+// A function calculating the ceil of integer division on CPU
+inline int div_ceil(int a, int b) {
+    return (a + b - 1) / b;
+}
+
 
 __device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
     // Finds the most significant bit that differs between x and y
@@ -88,8 +93,7 @@ ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, 
     PosId* keyids = reinterpret_cast<PosId*>(id_out->typed_data());
     
     // Initialize indices 0, 1, 2, ..., n-1
-    int blocks = (n + block_size - 1) / block_size;
-    PosKeyArangeKernel<<<blocks, block_size, 0, stream>>>(keys_in, keyids, n);
+    PosKeyArangeKernel<<< div_ceil(n, block_size), block_size, 0, stream>>>(keys_in, keyids, n);
 
     // We have an annoying problem here:
     // CUB requires a temporary storage buffer and it will usually tell us dynamically what the
@@ -152,13 +156,16 @@ struct NodePointers {
 
 __global__ void KernelBinarySearchLeftParent(const float3* pos_in, NodePointers nodes, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    int node = idx + 1; // Node indices are offset by 1, because we put a fake node at the beginning
+    bool valid_thread = (idx < n-1);
     int Nnodes = n + 1; 
 
-    int target_level, lvl_right, lvl_left;
+    // Node indices are offset by 1, because we put a fake node at the beginning
+    // but we don't launch the kernel for it
+    int node = idx + 1; 
+
+    int target_level, lvl_left, lvl_right;
     int lbound, rbound;
     float3 p1, p2;
-    bool valid_thread = (idx < n-1);
 
     if (valid_thread) {
         // Calculate the level difference of our considered set of two points (=node)
@@ -209,7 +216,7 @@ __global__ void KernelBinarySearchLeftParent(const float3* pos_in, NodePointers 
 
         rbound = imin+1;
 
-        if(rbound < Nnodes)
+        if(rbound < n)
             lvl_right = msb_diff_level(p1, pos_in[rbound]);
         else
             lvl_right = 388;
@@ -271,9 +278,9 @@ ffi::Error HostBuildZTree(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi
     nodes.lchild = out_ptr + 3 * Nnodes;
     nodes.rchild = out_ptr + 4 * Nnodes;
     
-    KernelInitialize<<<(n+1 + block_size-1) / block_size, block_size, 0, stream>>>(nodes, n);
+    KernelInitialize<<< div_ceil(Nnodes, block_size), block_size, 0, stream>>>(nodes, n);
 
-    KernelBinarySearchLeftParent<<<(n-1 + block_size-1) / block_size, block_size, 0, stream>>>(keys_in, nodes, n);
+    KernelBinarySearchLeftParent<<< div_ceil(n-1, block_size), block_size, 0, stream>>>(keys_in, nodes, n);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
