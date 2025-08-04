@@ -81,7 +81,7 @@ __global__ void PosKeyArangeKernel(const float3* pos_in, PosId *keyid_out, size_
     }
 }
 
-ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> id_out, size_t block_size) {
+ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> tmp_buffer, size_t block_size) {
     size_t n = pos_in.element_count()/3;
 
     float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
@@ -91,16 +91,37 @@ ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, 
     int blocks = (n + block_size - 1) / block_size;
     PosKeyArangeKernel<<<blocks, block_size, 0, stream>>>(keys_in, keyids, n);
 
-    void *d_temp_storage = nullptr;
-    size_t temp_storage_bytes = 0;
+    // We have an annoying problem here:
+    // CUB requires a temporary storage buffer and it will usually tell us dynamically what the
+    // size of it is (On first call with zero pointer).
+    // Unfortunately, we may not allocate storage dynamically in an FFI call
+    // Therefore, we have to estimate the storage requirements in advance in python/jax and pass
+    // a sufficiently large buffer to the function (via "tmp_buffer").
+    // Empirically I have found that the storage tends to be a bit larger than n * sizeof(PosId)
+    // that is why we will pre-allocate something that is a few percent larger than that.
+    // However, below we throw an error if our assumption ever turns out wrong.
 
-    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(nullptr, temp_storage_bytes, keyids, n, PosIdLess(), stream);
-
-    if (temp_storage_bytes > 0) {
-        cudaMalloc(&d_temp_storage, temp_storage_bytes);
-        cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(d_temp_storage, temp_storage_bytes, keyids, n, PosIdLess(), stream);
-        cudaFree(d_temp_storage);
+    // find out the required storage size
+    size_t required_storage_bytes;
+    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(nullptr, required_storage_bytes, keyids, n, PosIdLess());
+    
+    // Check if the provided buffer is large enough
+    if (tmp_buffer->size_bytes() < required_storage_bytes) {
+        return ffi::Error::Internal(std::string(
+            "The buffer in ZorderSort is too small. Please contact me if this check fails.") +
+            std::string(" Have: ") + std::to_string(tmp_buffer->size_bytes()) +
+            std::string(". Required: ") + std::to_string(required_storage_bytes) +
+            std::string(". Diff: ") + std::to_string((long long)required_storage_bytes - (long long)tmp_buffer->size_bytes())
+        );
     }
+    
+    // This is how we ould allocate if we could. (Note that doing this breaks jit in some cases!)
+    // cudaMallocAsync(&d_temp_storage, required_storage_bytes, stream); 
+
+    // Run the sort
+    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(tmp_buffer->untyped_data(), required_storage_bytes, keyids, n, PosIdLess(), stream);
+    
+    // cudaFreeAsync(d_temp_storage, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -268,6 +289,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::Buffer<ffi::F32>>()        // pos
         .Ret<ffi::Buffer<ffi::S32>>()        // output ids / pos
+        .Ret<ffi::Buffer<ffi::S32>>()        // temporary buffer
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 

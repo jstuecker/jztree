@@ -15,15 +15,22 @@ def pos_zorder_sort(x, block_size=64):
     # To optimize memory layout, we bundle position and id together into a single array
     # We later need to reinterprete the output to extract positions and ids
     out_type = jax.ShapeDtypeStruct((x.shape[0],4), jnp.int32)
-    isort = jax.ffi.ffi_call("PosZorderSort", (out_type,))(x, block_size=np.uint64(block_size))
+    # This is a guess, how much a temporary storage in cub::DeviceMergeSort::SortKeys requires
+    # If we estimate too little, an error will be thrown from the C++ code:
+    tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), 4), jnp.int32)
+    isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type))(x, block_size=np.uint64(block_size))[0]
 
-    pos = isort[0][:, :3].view(jnp.float32)
-    ids = isort[0][:, 3].view(jnp.int32)
+    pos = isort[:, :3].view(jnp.float32)
+    ids = isort[:, 3].view(jnp.int32)
 
     return pos, ids
 pos_zorder_sort.jit = jax.jit(pos_zorder_sort, static_argnames=("block_size",))
 
 def build_ztree(x, block_size=64):
+    """Builds a z-tree assume z-sorted positions
+    
+    returns (level, lbound, rbound, lchild, rchild)
+    """
     assert x.dtype == jnp.float32
     assert x.shape[-1] == 3
 
