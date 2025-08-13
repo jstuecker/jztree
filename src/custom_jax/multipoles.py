@@ -30,3 +30,4 @@ def ilist_multipole_to_local(mp, x, interactions=None, iminmax=None, p=1, block_
     loc = jax.ffi.ffi_call("ilist_m2l", (out_type,))(x, mp, interactions, iminmax, p=np.int32(p), block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
     
     return loc
+ilist_multipole_to_local.jit = jax.jit(ilist_multipole_to_local, static_argnames=("p", "block_size", "eps"))

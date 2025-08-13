@@ -53,10 +53,10 @@ void setup_index_tables()
 }
 
 template<int p>
-__device__ void setupGn(float r2, float eps, float* G)
+__device__ void setupGn(float r2, float eps2, float* G)
 {
     // The derivatives of (1/r d/dr)^n G_0  with G_0 = 1/r
-    float rinv = r2 > 1e-10f ? rsqrtf(r2 + eps * eps) : 0.f; 
+    float rinv = rsqrtf(r2 + eps2); 
     float rinv2 = rinv*rinv;
     G[0] = 1.0f * rinv;
 
@@ -68,7 +68,7 @@ __device__ void setupGn(float r2, float eps, float* G)
 #define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
 
 template<int p>
-__device__ void setupDnG(float3 dx, float eps, float *Dn) {
+__device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     // Set's up the cartesian derivatives of the Green's function
     // Using the method described in Tausch (2003):
     // "The fast multipole method for arbitrary Green’s functions"
@@ -79,7 +79,7 @@ __device__ void setupDnG(float3 dx, float eps, float *Dn) {
     float r2 = dx.x * dx.x + dx.y * dx.y + dx.z * dx.z;
 
     float G[p+1];
-    setupGn<p>(r2, eps, G);
+    setupGn<p>(r2, eps2, G);
     Dn[0] = G[p];
 
     for(int q=p-1; q >= 0; q--) {
