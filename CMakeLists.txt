@@ -47,5 +47,15 @@ target_link_libraries(nb_tree PRIVATE CUDA::cudart)
 # Add NVCC flags for extended lambdas and relaxed constexpr
 target_compile_options(nb_tree PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda --expt-relaxed-constexpr>)
 
+nanobind_add_module(nb_multipoles src/custom_jax/multipoles.cu)
+set_target_properties(nb_multipoles PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
+target_include_directories(nb_multipoles SYSTEM PRIVATE ${XLA_DIR})
+target_compile_options(nb_multipoles PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
+target_compile_features(nb_multipoles PRIVATE cxx_std_17)
+target_link_libraries(nb_multipoles PRIVATE CUDA::cudart)
+# Add NVCC flags for extended lambdas and relaxed constexpr
+target_compile_options(nb_multipoles PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda --expt-relaxed-constexpr>)
+
 install(TARGETS nb_forces LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
 install(TARGETS nb_tree LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
+install(TARGETS nb_multipoles LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
