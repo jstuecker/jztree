@@ -110,24 +110,42 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
 
     int imin = iminmax[0], imax = iminmax[1];
 
-    int int_id = blockIdx.x * blocksize + threadIdx.x;
-
     int nc = NCOMB(p);
 
+    float invfact[MAXP] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
+
     for (int iint = 0; iint < interactions_per_block; iint++) {
-        int int_id = imin + blockIdx.x * interactions_per_block + iint;
+        int int_id = imin + blocksize * (blockIdx.x * interactions_per_block + iint) + threadIdx.x;
         if (int_id >= imax) {
             return;
         }
 
         int iA = interactions[int_id].x, iB = interactions[int_id].y;
         float3 xA = x[iA], xB = x[iB];
-        // float3 dx = {xA.x - xB.x, xA.y - xB.y, xA.z - xB.z};
+        float3 dx = {xA.x - xB.x, xA.y - xB.y, xA.z - xB.z};
         float Dn[NCOMB(p)];
-        setupDnG<p>(xA, epsilon2, Dn);
+        setupDnG<p>(dx, epsilon2, Dn);
 
-        for (int i = 0; i < nc; i++) {
-            Lout[iA * nc + i] = Dn[i]; //mp[iB * ncomb + i];
+        float Mp[NCOMB(p)];
+        for (int iM=0; iM < nc; iM++) {
+            Mp[iM] = mp[iB * nc + iM];
+        }
+
+        for (int iL = 0; iL < nc; iL++) {
+            float Lnew = 0.f;
+            int3 k = flat_to_multi_index[iL];
+            int ksum = k.x + k.y + k.z;
+            for (int iN = 0; iN < NCOMB(p-ksum); iN++) {
+                int3 n = flat_to_multi_index[iN];
+                int nsum = n.x + n.y + n.z;
+                
+                float Dnk = Dn[multi_index_to_flat[k.x+n.x][k.y+n.y][k.z+n.z]];
+                float Mpn = Mp[iN];
+                
+                Lnew += Dnk * Mpn * (invfact[n.x]*invfact[n.y]*invfact[n.z]);
+            }
+
+            atomicAdd(&Lout[iA * nc + iL], -Lnew * invfact[k.x] * invfact[k.y] * invfact[k.z]);
         }
     }
 }
