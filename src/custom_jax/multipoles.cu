@@ -18,70 +18,54 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 // Multipole Translators
 // =============================================================
 
-
-__global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t n, int p, float epsilon) {
+template<int p>
+__global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
     const size_t blocksize = blockDim.x;
-    const size_t steps = n / blocksize;
     float epsilon2 = epsilon * epsilon;
 
+    int imin = iminmax[0], imax = iminmax[1];
+
     int int_id = blockIdx.x * blocksize + threadIdx.x;
-    if (int_id >= n) {
-        return;
+
+    int ncomb = p * (p + 1) * (p+2) / 2;
+
+    for (int iint = 0; iint < interactions_per_block; iint++) {
+        int int_id = imin + blockIdx.x * interactions_per_block + iint;
+        if (int_id >= imax) {
+            return;
+        }
+
+        for (int i = 0; i < ncomb; i++) {
+            Lout[int_id * ncomb + i] = mp[int_id * ncomb + i];
+        }
     }
-
-    int ntot = p * (p + 1) * (p+2) / 2;
-
-    for (int i = 0; i < ntot; i++) {
-        Lout[int_id * ntot + i] = mp[int_id * ntot + i];
-    }
-
-    // float4 xmi = xm[blockIdx.x * blocksize + threadIdx.x];
-
-    // extern __shared__ float4 xmj_shared[];
-
-    // float phii = 0.f;
-
-    // for (size_t jblock = 0; jblock < steps; jblock += 1) {
-    //     // Load the next block of x into shared memory
-    //     // this avoids reading from global memory multiple times
-    //     __syncthreads();
-    //     xmj_shared[threadIdx.x] = xm[jblock * blocksize + threadIdx.x];
-    //     __syncthreads();
-
-    //     for (size_t j = 0; j < blocksize; j++) {
-    //         float4 xmj = xmj_shared[j];
-            
-    //         float dx = xmi.x - xmj.x;
-    //         float dy = xmi.y - xmj.y;
-    //         float dz = xmi.z - xmj.z;
-    //         float m = xmj.w; // we packed mass into the w component of xm
-
-    //         float r2 = dx*dx + dy*dy + dz*dz;
-
-    //         phii += -1.0f*m*rsqrtf(r2 + epsilon2);
-    //     }
-    // }
-
-    // // Since it is good to avoid any branches on GPU, we deal with the self-interaction by
-    // // first adding it above and now subtracting it again:
-    // phii += xmi.w / epsilon; 
-
-    // phi[blockIdx.x * blocksize + threadIdx.x] = phii;
-
-
 }
 
-ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax,  ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, float epsilon) {
-    size_t n = interactions.element_count() / 2;
+void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
+    // This launch mechanic is needed so that p can be treated as a compile time constant
+    // I wish there was a simpler way...
+    switch(p) {
+        case 0: IlistM2LKernel<0><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 1: IlistM2LKernel<1><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 2: IlistM2LKernel<2><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 3: IlistM2LKernel<3><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 4: IlistM2LKernel<4><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 5: IlistM2LKernel<5><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 6: IlistM2LKernel<6><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
+    }
+}
+
+ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax,  ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, float epsilon) {
+    size_t ninteractions = interactions.element_count() / 2;
+    const size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
 
     auto* xfloat3 = reinterpret_cast<const float3*>(x.typed_data());
     auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
 
     cudaMemsetAsync(loc->typed_data(), 0, mp.element_count() * sizeof(float), stream);
 
-    const size_t grid_size = (n + (block_size - 1)) / block_size;
-
-    IlistM2LKernel<<<grid_size, block_size, 0, stream>>>(xfloat3, mp.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), p, n, epsilon);
+    launch_IlistM2LKernel(p, grid_size, block_size, stream, xfloat3, mp.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -101,6 +85,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::F32>>()
         .Attr<int>("p")
         .Attr<size_t>("block_size")
+        .Attr<size_t>("interactions_per_block")
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 

@@ -11,7 +11,7 @@ jax.ffi.register_ffi_target("ilist_m2l", nb_multipoles.ilist_m2l(), platform="CU
 
 # ======= Multipole Translators =======
 
-def m2l(mp, x, interactions=None, iminmax=None, p=1, block_size=64, eps=1e-2):
+def m2l(mp, x, interactions=None, iminmax=None, p=1, block_size=64, interactions_per_block=None, eps=1e-2):
     assert x.dtype == jnp.float32
     assert mp.dtype == jnp.float32
     assert x.ndim >= 2 and mp.ndim >= 2 and mp.ndim >= 2
@@ -23,8 +23,10 @@ def m2l(mp, x, interactions=None, iminmax=None, p=1, block_size=64, eps=1e-2):
         interactions = np.stack((iarange, iarange), axis=-1).astype(np.int32)
     if iminmax is None:
         iminmax = jnp.array([0, len(interactions)], dtype=jnp.int32)
+    if interactions_per_block is None:
+        interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
 
     out_type = jax.ShapeDtypeStruct(mp.shape, mp.dtype)
-    loc = jax.ffi.ffi_call("ilist_m2l", (out_type,))(x, mp, interactions, iminmax, p=np.int32(p), block_size=np.uint64(block_size), epsilon=np.float32(eps))[0]
+    loc = jax.ffi.ffi_call("ilist_m2l", (out_type,))(x, mp, interactions, iminmax, p=np.int32(p), block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
     
     return loc
