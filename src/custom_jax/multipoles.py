@@ -11,7 +11,7 @@ jax.ffi.register_ffi_target("ilist_m2l", nb_multipoles.ilist_m2l(), platform="CU
 
 # ======= Multipole Translators =======
 
-def m2l(mp, x, interactions=None, iminmax=None, p=1, block_size=64, interactions_per_block=None, eps=1e-2):
+def ilist_multipole_to_local(mp, x, interactions=None, iminmax=None, p=1, block_size=64, interactions_per_block=None, eps=1e-2):
     assert x.dtype == jnp.float32
     assert mp.dtype == jnp.float32
     assert x.ndim >= 2 and mp.ndim >= 2 and mp.ndim >= 2
