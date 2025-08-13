@@ -19,7 +19,7 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 // =============================================================
 
 
-__global__ void M2LKernel(const float3 *x, const float *mp, float *Lout, size_t n, int p, float epsilon) {
+__global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t n, int p, float epsilon) {
     const size_t blocksize = blockDim.x;
     const size_t steps = n / blocksize;
     float epsilon2 = epsilon * epsilon;
@@ -71,13 +71,17 @@ __global__ void M2LKernel(const float3 *x, const float *mp, float *Lout, size_t 
 
 }
 
-ffi::Error M2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, float epsilon) {
-    size_t n = x.element_count() / x.dimensions().back();
+ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax,  ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, float epsilon) {
+    size_t n = interactions.element_count() / 2;
+
+    auto* xfloat3 = reinterpret_cast<const float3*>(x.typed_data());
+    auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
+
+    cudaMemsetAsync(loc->typed_data(), 0, mp.element_count() * sizeof(float), stream);
 
     const size_t grid_size = (n + (block_size - 1)) / block_size;
 
-    auto* xfloat3 = reinterpret_cast<const float3*>(x.typed_data());
-    M2LKernel<<<grid_size, block_size, 0, stream>>>(xfloat3, mp.typed_data(), loc->typed_data(), p, n, epsilon);
+    IlistM2LKernel<<<grid_size, block_size, 0, stream>>>(xfloat3, mp.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), p, n, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -87,11 +91,13 @@ ffi::Error M2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    M2L, M2LHost,
+    IlistM2L, IlistM2LHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::Buffer<ffi::F32>>()
         .Arg<ffi::Buffer<ffi::F32>>()
+        .Arg<ffi::Buffer<ffi::S32>>()     // interactions
+        .Arg<ffi::Buffer<ffi::S32>>()     // iminmax
         .Ret<ffi::Buffer<ffi::F32>>()
         .Attr<int>("p")
         .Attr<size_t>("block_size")
@@ -99,5 +105,5 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 NB_MODULE(nb_multipoles, m) {
-    m.def("m2l", []() { return EncapsulateFfiCall(M2L); });
+    m.def("ilist_m2l", []() { return EncapsulateFfiCall(IlistM2L); });
 }
