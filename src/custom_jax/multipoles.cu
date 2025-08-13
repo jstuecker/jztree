@@ -18,6 +18,41 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 // Multipole Translators
 // =============================================================
 
+#define MAXP 6
+__constant__ int multi_index_to_flat[MAXP][MAXP][MAXP];
+__constant__ int3 flat_to_multi_index[(MAXP*(MAXP+1)*(MAXP+2))/6];
+bool index_tables_initialzied = false;
+
+// Set's up the table needed for maping mullti indices (nx,ny,nz) to flat indices
+void setup_index_tables() 
+{
+    if (index_tables_initialzied) {
+        return;
+    }
+
+    int index_table[MAXP][MAXP][MAXP];
+    int3 inverse_table[(MAXP*(MAXP+1)*(MAXP+2))/6];
+
+    int idx = 0;
+    for(int p=0; p < MAXP; p++) {
+        for(int i=0; i <= p; i++) {
+            for(int j=0; j <= p - i; j++) {
+                int k = p - i - j;
+                index_table[k][j][i] = idx;
+                inverse_table[idx] = int3{i, j, k};
+                idx += 1;
+            }
+        }
+    }
+
+    // copy to constant memory
+    cudaMemcpyToSymbol(multi_index_to_flat, index_table, sizeof(index_table), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(flat_to_multi_index, inverse_table, sizeof(inverse_table));
+
+    index_tables_initialzied = true;
+}
+
+
 template<int p>
 __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
     const size_t blocksize = blockDim.x;
@@ -35,8 +70,11 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
             return;
         }
 
+        int iA = interactions[int_id].x, iB = interactions[int_id].y;
+        // float3 dx = x[iA] - x[iB];
+
         for (int i = 0; i < ncomb; i++) {
-            Lout[int_id * ncomb + i] = mp[int_id * ncomb + i];
+            Lout[iA * ncomb + i] = mp[iB * ncomb + i];
         }
     }
 }
@@ -64,6 +102,8 @@ ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffe
     auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
 
     cudaMemsetAsync(loc->typed_data(), 0, mp.element_count() * sizeof(float), stream);
+
+    setup_index_tables();
 
     launch_IlistM2LKernel(p, grid_size, block_size, stream, xfloat3, mp.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
 
