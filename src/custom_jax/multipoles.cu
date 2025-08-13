@@ -18,7 +18,7 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 // Multipole Translators
 // =============================================================
 
-#define MAXP 6
+#define MAXP 7
 __constant__ int multi_index_to_flat[MAXP][MAXP][MAXP];
 __constant__ int3 flat_to_multi_index[(MAXP*(MAXP+1)*(MAXP+2))/6];
 bool index_tables_initialzied = false;
@@ -39,7 +39,7 @@ void setup_index_tables()
             for(int j=0; j <= p - i; j++) {
                 int k = p - i - j;
                 index_table[k][j][i] = idx;
-                inverse_table[idx] = int3{i, j, k};
+                inverse_table[idx] = int3{k, j, i};
                 idx += 1;
             }
         }
@@ -52,6 +52,56 @@ void setup_index_tables()
     index_tables_initialzied = true;
 }
 
+template<int p>
+__device__ void setupGn(float r2, float eps, float* G)
+{
+    // The derivatives of (1/r d/dr)^n G_0  with G_0 = 1/r
+    float rinv = r2 > 1e-10f ? rsqrtf(r2 + eps * eps) : 0.f; 
+    float rinv2 = rinv*rinv;
+    G[0] = 1.0f * rinv;
+
+    for (int n = 1; n <= p; n++) {
+        G[n] = -(2*n-1) * G[n-1] * rinv2;
+    }
+}
+
+#define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
+
+template<int p>
+__device__ void setupDnG(float3 dx, float eps, float *Dn) {
+    // Set's up the cartesian derivatives of the Green's function
+    // Using the method described in Tausch (2003):
+    // "The fast multipole method for arbitrary Green’s functions"
+    // This works by using a recurrence between the derivatives of the Green's function
+    // We start at D0 G(q), go to D1 G(q+1), D2 G(q+2) ...
+
+    float *dxflat = reinterpret_cast<float*>(&dx);
+    float r2 = dx.x * dx.x + dx.y * dx.y + dx.z * dx.z;
+
+    float G[p+1];
+    setupGn<p>(r2, eps, G);
+    Dn[0] = G[p];
+
+    for(int q=p-1; q >= 0; q--) {
+        for(int iflat=NCOMB(p-q)-1; iflat >= 1; iflat--) { // we loop backwards to not overwrite needed values
+            int3 n = flat_to_multi_index[iflat];
+            // choose ek, the direction with the largest index
+            int nk = n.x >= n.y ? n.x : n.y;
+            nk = nk >= n.z ? nk : n.z;
+            int k = n.x == nk ? 0 : (n.y == nk ? 1 : 2);
+            int new_n[3] = {n.x, n.y, n.z};
+            // Add contribution from n - ek
+            new_n[k] = max(0, new_n[k] - 1);
+            float Dnew = (dxflat[k])*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
+            // Add contribution from n - 2*ek
+            new_n[k] = max(0, new_n[k] - 1);
+            Dnew += (nk-1)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
+
+            Dn[iflat] = Dnew;
+        }
+        Dn[0] = G[q];
+    }
+}
 
 template<int p>
 __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
@@ -62,7 +112,7 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
 
     int int_id = blockIdx.x * blocksize + threadIdx.x;
 
-    int ncomb = p * (p + 1) * (p+2) / 2;
+    int nc = NCOMB(p);
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
         int int_id = imin + blockIdx.x * interactions_per_block + iint;
@@ -71,10 +121,13 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
         }
 
         int iA = interactions[int_id].x, iB = interactions[int_id].y;
-        // float3 dx = x[iA] - x[iB];
+        float3 xA = x[iA], xB = x[iB];
+        // float3 dx = {xA.x - xB.x, xA.y - xB.y, xA.z - xB.z};
+        float Dn[NCOMB(p)];
+        setupDnG<p>(xA, epsilon2, Dn);
 
-        for (int i = 0; i < ncomb; i++) {
-            Lout[iA * ncomb + i] = mp[iB * ncomb + i];
+        for (int i = 0; i < nc; i++) {
+            Lout[iA * nc + i] = Dn[i]; //mp[iB * ncomb + i];
         }
     }
 }
@@ -83,7 +136,6 @@ void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStrea
     // This launch mechanic is needed so that p can be treated as a compile time constant
     // I wish there was a simpler way...
     switch(p) {
-        case 0: IlistM2LKernel<0><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
         case 1: IlistM2LKernel<1><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
         case 2: IlistM2LKernel<2><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
         case 3: IlistM2LKernel<3><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
