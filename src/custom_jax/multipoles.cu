@@ -201,6 +201,43 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, float epsilon) {
+    size_t ninteractions = interactions.element_count() / 2;
+
+    const size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
+
+    auto* xm_float4 = reinterpret_cast<const float4*>(xm.typed_data());
+    auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
+    
+    cudaMemsetAsync(loc->typed_data(), 0, loc->element_count() * sizeof(float), stream);
+
+    // IlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, isplit.typed_data(), interactions_i2, fphi_float4, interactions_per_block, iminmax.typed_data(), epsilon);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    IlistLeaf2NodeM2L, IlistLeaf2NodeM2LHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()     // xnodes
+        .Arg<ffi::Buffer<ffi::F32>>()     // xm
+        .Arg<ffi::Buffer<ffi::S32>>()     // isplit
+        .Arg<ffi::Buffer<ffi::S32>>()     // interactions
+        .Arg<ffi::Buffer<ffi::S32>>()     // iminmax
+        .Ret<ffi::Buffer<ffi::F32>>()     // Lk output
+        .Attr<int>("p")
+        .Attr<size_t>("block_size")
+        .Attr<size_t>("interactions_per_block")
+        .Attr<float>("epsilon"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
 NB_MODULE(nb_multipoles, m) {
     m.def("ilist_m2l", []() { return EncapsulateFfiCall(IlistM2L); });
+    m.def("ilist_leaf2node_m2l", []() { return EncapsulateFfiCall(IlistLeaf2NodeM2L); });
 }
