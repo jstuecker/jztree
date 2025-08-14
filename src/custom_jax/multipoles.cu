@@ -122,7 +122,7 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
 
         int iA = interactions[int_id].x, iB = interactions[int_id].y;
         float3 xA = x[iA], xB = x[iB];
-        float3 dx = {xA.x - xB.x, xA.y - xB.y, xA.z - xB.z};
+        float3 dx = {xB.x - xA.x, xB.y - xA.y, xB.z - xA.z};
         float Dn[NCOMB(p)];
         setupDnG<p>(dx, epsilon2, Dn);
 
@@ -142,10 +142,12 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
                 float Dnk = Dn[multi_index_to_flat[k.x+n.x][k.y+n.y][k.z+n.z]];
                 float Mpn = Mp[iN];
                 
+                
                 Lnew += Dnk * Mpn * (invfact[n.x]*invfact[n.y]*invfact[n.z]);
             }
 
-            atomicAdd(&Lout[iA * nc + iL], -Lnew * invfact[k.x] * invfact[k.y] * invfact[k.z]);
+            float sign = ksum % 2 == 0 ? -1.f : 1.f;
+            atomicAdd(&Lout[iA * nc + iL], Lnew * sign * invfact[k.x] * invfact[k.y] * invfact[k.z]);
         }
     }
 }
@@ -166,7 +168,7 @@ void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStrea
 
 ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax,  ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
-    const size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
+    const size_t grid_size = (ninteractions + block_size*interactions_per_block - 1) / (block_size*interactions_per_block);
 
     auto* xfloat3 = reinterpret_cast<const float3*>(x.typed_data());
     auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());

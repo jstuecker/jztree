@@ -37,7 +37,7 @@ def build_ztree(x, block_size=64):
     out_type = jax.ShapeDtypeStruct((5, x.shape[0]+1), jnp.int32)
     ztree = jax.ffi.ffi_call("BuildZTree", (out_type,))(x, block_size=np.uint64(block_size))[0]
  
-    root_node = jnp.argmax(ztree[0][1:-1]) + 1 # Root node is the one with highest level
+    root_node = jnp.argmax(ztree[0][1:-1]).astype(jnp.int32) + 1 # Root node is the one with highest level
     # Marke it as a child of the first and last nodes
     ztree = ztree.at[4,0].set(root_node) # first right child
     ztree = ztree.at[3,-1].set(root_node) # last left child
