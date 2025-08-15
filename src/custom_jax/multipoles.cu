@@ -140,6 +140,7 @@ __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     }
 }
 
+
 template<int p>
 __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
     const size_t blocksize = blockDim.x;
@@ -238,6 +239,24 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+__device__ __forceinline__  __device__ float warp_sum(float v) {
+    #pragma unroll
+    for (int off = 16; off > 0; off >>= 1)
+        v += __shfl_down_sync(0xffffffff, v, off);
+    return v;
+}
+
+template<int N>
+__device__ void add_warp_reduced(const float (&Dn)[N], float* __restrict__ Dsum, bool valid) {
+    const int lane = threadIdx.x & 31;
+    #pragma unroll
+    for (int k = 0; k < N; ++k) {
+        float v = valid ? Dn[k] : 0.f;
+        v = warp_sum(v);
+        if (lane == 0) atomicAdd(&Dsum[k], v);
+    }
+}
+
 template<int p>
 __global__ void IlistLeaf2NodeM2LKernel(
         const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, 
@@ -251,7 +270,12 @@ __global__ void IlistLeaf2NodeM2LKernel(
     float invfact[MAXP] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
 
     constexpr int ncomb = NCOMB(p);
-    __shared__ float Dn[32][ncomb];
+    float Dn[ncomb];
+
+    __shared__ float Dsum[ncomb];
+    for (int i = threadIdx.x; i < ncomb; i += blockDim.x) 
+        Dsum[i] = 0.0f;
+    __syncthreads();
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
         int int_id = imin + iint * gridDim.x + blockIdx.x ; //blockIdx.x * interactions_per_block + iint;
@@ -267,33 +291,32 @@ __global__ void IlistLeaf2NodeM2LKernel(
 
         for(int poffset=0; poffset < iPartEnd - iPartStart; poffset += blocksize)
         {
-            int ipart = min(iPartStart + poffset + threadIdx.x, iPartEnd - 1);
+            int ipart = iPartStart + poffset + threadIdx.x;
+            bool valid = ipart < iPartEnd;
 
-            float4 xmpart = xm[ipart];
+            float4 xmpart = xm[valid ? ipart : iPartEnd-1];
 
             float3 dx = {xmpart.x - xnode.x, xmpart.y - xnode.y, xmpart.z - xnode.z};
-            setupDnG<p>(dx, epsilon2, Dn[threadIdx.x]);
+            setupDnG<p>(dx, epsilon2, Dn);
 
-            __syncthreads();
-            
-            // Now sum the Dn and output them
-            // Here, we transpose the problem differently: by components rather than by particles
-            for(int kflat=threadIdx.x; kflat < ncomb; kflat += blocksize) {
-                int3 k = flat_to_multi_index[kflat];
-                int ksum = k.x + k.y + k.z;
-
-                float Dnksum = 0.;
-                for(int i=0; i < min(32, iPartEnd-iPartStart-poffset); i++) {
-                    Dnksum += Dn[i][kflat];
-                }
-
-                float sign = (ksum & 1) == 0 ? -1.f : 1.f;
-                float Lnew = sign * Dnksum  / fact3f(k.x, k.y, k.z);
-
-                atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew);
-            }
-            __syncthreads();
+            add_warp_reduced<ncomb>(Dn, Dsum, valid);
         }
+
+        __syncthreads();
+
+        // Once we are done with all particles we can ouput the results, split over components
+        for(int kflat=threadIdx.x; kflat < ncomb; kflat += blocksize) {
+            int3 k = flat_to_multi_index[kflat];
+            int ksum = k.x + k.y + k.z;
+            float sign = (ksum & 1) == 0 ? -1.f : 1.f;
+            float Lnew = sign * Dsum[kflat]  / fact3f(k.x, k.y, k.z);
+            
+            atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew);
+
+            Dsum[kflat] = 0.f;
+        }
+
+        __syncthreads();
     }
 }
 
@@ -314,7 +337,7 @@ void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, 
 
 ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, size_t interactions_per_block, float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
-    size_t block_size = 32; // In this case a constant blocksize makes the kernel simpler
+    size_t block_size = 64;
 
     size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
 
