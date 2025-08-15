@@ -249,31 +249,36 @@ __global__ void IlistLeaf2NodeM2LKernel(
         int iNode = interaction.x, iLeaf = interaction.y;
         int iPartStart = isplit[iLeaf], iPartEnd = isplit[iLeaf + 1];
 
-        int ipart = min(threadIdx.x + iPartStart, iPartEnd - 1);
-
-        float4 xmpart = xm[ipart];
         float3 xnode = xnodes[iNode];
 
-        float3 dx = {xmpart.x - xnode.x, xmpart.y - xnode.y, xmpart.z - xnode.z};
-        setupDnG<p>(dx, epsilon2, Dn[threadIdx.x]);
+        for(int poffset=0; poffset < iPartEnd - iPartStart; poffset += blocksize)
+        {
+            int ipart = min(iPartStart + poffset + threadIdx.x, iPartEnd - 1);
 
-        __syncthreads();
-        
-        // Now sum the Dn and output them
-        // Here, we transpose the problem differently: by components rather than by particles
-        for(int kflat=threadIdx.x; kflat < ncomb; kflat += blocksize) {
-            int3 k = flat_to_multi_index[kflat];
-            int ksum = k.x + k.y + k.z;
+            float4 xmpart = xm[ipart];
 
-            float Dnksum = 0.;
-            for(int i=0; i < min(32, iPartEnd-iPartStart); i++) {
-                Dnksum += Dn[i][kflat];
+            float3 dx = {xmpart.x - xnode.x, xmpart.y - xnode.y, xmpart.z - xnode.z};
+            setupDnG<p>(dx, epsilon2, Dn[threadIdx.x]);
+
+            __syncthreads();
+            
+            // Now sum the Dn and output them
+            // Here, we transpose the problem differently: by components rather than by particles
+            for(int kflat=threadIdx.x; kflat < ncomb; kflat += blocksize) {
+                int3 k = flat_to_multi_index[kflat];
+                int ksum = k.x + k.y + k.z;
+
+                float Dnksum = 0.;
+                for(int i=0; i < min(32, iPartEnd-iPartStart-poffset); i++) {
+                    Dnksum += Dn[i][kflat];
+                }
+
+                float sign = (ksum & 1) == 0 ? -1.f : 1.f;
+                float Lnew = sign * Dnksum  / fact3f(k.x, k.y, k.z);
+
+                atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew);
             }
-
-            float sign = (ksum & 1) == 0 ? -1.f : 1.f;
-            float Lnew = sign * Dnksum  / fact3f(k.x, k.y, k.z);
-
-            atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew);
+            __syncthreads();
         }
     }
 }
