@@ -50,7 +50,7 @@ def ilist_leaf_to_local(xnodes, xpart, mpart, isplit,  interactions, iminmax=Non
     if iminmax is None:
         iminmax = jnp.array([0, len(interactions)], dtype=jnp.int32)
     if interactions_per_block is None:
-        interactions_per_block = np.clip(len(interactions) // (4096), 1, 256)
+        interactions_per_block = np.clip(len(interactions) // (4096), 2, 32)
 
     out_type = jax.ShapeDtypeStruct(xnodes.shape[:-1] + (ncomb,), xnodes.dtype)
     loc = jax.ffi.ffi_call("ilist_leaf2node_m2l", (out_type,))(

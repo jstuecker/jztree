@@ -18,39 +18,7 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 // Multipole Translators
 // =============================================================
 
-#define MAXP 7
-__constant__ int multi_index_to_flat[MAXP][MAXP][MAXP];
-__constant__ int3 flat_to_multi_index[(MAXP*(MAXP+1)*(MAXP+2))/6];
-bool index_tables_initialzied = false;
-
-// Set's up the table needed for maping mullti indices (nx,ny,nz) to flat indices
-void setup_index_tables() 
-{
-    if (index_tables_initialzied) {
-        return;
-    }
-
-    int index_table[MAXP][MAXP][MAXP];
-    int3 inverse_table[(MAXP*(MAXP+1)*(MAXP+2))/6];
-
-    int idx = 0;
-    for(int p=0; p < MAXP; p++) {
-        for(int i=0; i <= p; i++) {
-            for(int j=0; j <= p - i; j++) {
-                int k = p - i - j;
-                index_table[k][j][i] = idx;
-                inverse_table[idx] = int3{k, j, i};
-                idx += 1;
-            }
-        }
-    }
-
-    // copy to constant memory
-    cudaMemcpyToSymbol(multi_index_to_flat, index_table, sizeof(index_table), 0, cudaMemcpyHostToDevice);
-    cudaMemcpyToSymbol(flat_to_multi_index, inverse_table, sizeof(inverse_table));
-
-    index_tables_initialzied = true;
-}
+#define MAXP 6
 
 template<int p>
 __device__ void setupGn(float r2, float eps2, float* G)
@@ -171,9 +139,9 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
 
     int imin = iminmax[0], imax = iminmax[1];
 
-    int nc = NCOMB(p);
+    constexpr int ncomb = NCOMB(p);
 
-    float invfact[MAXP] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
+    float invfact[7] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
         int int_id = imin + blocksize * (blockIdx.x * interactions_per_block + iint) + threadIdx.x;
@@ -184,31 +152,34 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
         int iA = interactions[int_id].x, iB = interactions[int_id].y;
         float3 xA = x[iA], xB = x[iB];
         float3 dx = {xB.x - xA.x, xB.y - xA.y, xB.z - xA.z};
-        float Dn[NCOMB(p)];
+        float Dn[ncomb];
         setupDnG<p>(dx, epsilon2, Dn);
 
-        float Mp[NCOMB(p)];
-        for (int iM=0; iM < nc; iM++) {
-            Mp[iM] = mp[iB * nc + iM];
+        float Mp[ncomb];
+        #pragma unroll
+        for (int iM=0; iM < ncomb; iM++) {
+            Mp[iM] = mp[iB * ncomb + iM];
         }
 
-        for (int iL = 0; iL < nc; iL++) {
+
+        #pragma unroll
+        for (int iL = 0; iL < ncomb; iL++) {
             float Lnew = 0.f;
-            int3 k = flat_to_multi_index[iL];
-            int ksum = k.x + k.y + k.z;
+            const int3 k = flat_to_multi<p>(iL);
+            const int ksum = k.x + k.y + k.z;
+            #pragma unroll
             for (int iN = 0; iN < NCOMB(p-ksum); iN++) {
-                int3 n = flat_to_multi_index[iN];
-                int nsum = n.x + n.y + n.z;
+                const int3 n = flat_to_multi<p>(iN);
+                const int nsum = n.x + n.y + n.z;
                 
-                float Dnk = Dn[multi_index_to_flat[k.x+n.x][k.y+n.y][k.z+n.z]];
+                float Dnk = Dn[multi_to_flat(k.x + n.x, k.y + n.y, k.z + n.z)];
                 float Mpn = Mp[iN];
-                
                 
                 Lnew += Dnk * Mpn * (invfact[n.x]*invfact[n.y]*invfact[n.z]);
             }
 
             float sign = ksum % 2 == 0 ? -1.f : 1.f;
-            atomicAdd(&Lout[iA * nc + iL], Lnew * sign * invfact[k.x] * invfact[k.y] * invfact[k.z]);
+            atomicAdd(&Lout[iA * ncomb + iL], Lnew * sign * invfact[k.x] * invfact[k.y] * invfact[k.z]);
         }
     }
 }
@@ -235,8 +206,6 @@ ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffe
     auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
 
     cudaMemsetAsync(loc->typed_data(), 0, mp.element_count() * sizeof(float), stream);
-
-    setup_index_tables();
 
     launch_IlistM2LKernel(p, grid_size, block_size, stream, xfloat3, mp.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
 
@@ -345,12 +314,12 @@ void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, 
     // This launch mechanic is needed so that p can be treated as a compile time constant
     // I wish there was a simpler way...
     switch(p) {
-        case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        // case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        // case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        // case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        // case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        // case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        // case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
 
         default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
     }
@@ -371,8 +340,6 @@ ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnod
     auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
     
     cudaMemsetAsync(loc->typed_data(), 0, loc->element_count() * sizeof(float), stream);
-
-    setup_index_tables();
 
     launch_IlistLeaf2NodeM2LKernel(p, grid_size, block_size, stream, xnodes_float3, xm_float4, isplit.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
 
