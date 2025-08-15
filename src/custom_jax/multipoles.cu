@@ -90,6 +90,13 @@ __device__ __forceinline__ float fact3f(unsigned kx, unsigned ky, unsigned kz) {
     return fact_upto6f(kx) * fact_upto6f(ky) * fact_upto6f(kz);
 }
 
+__device__ __forceinline__ float multi_to_flat(int kx, int ky, int kz) {
+    int p = kx + ky + kz;
+    int npoff = ((p+2)*(p+1)*p) / 6; // offset of the p-th symmeric tensor
+
+    return npoff + (kz*(2*p + 3 - kz))/2 + ky;
+}
+
 template<int p>
 __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     // Set's up the cartesian derivatives of the Green's function
@@ -105,23 +112,28 @@ __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     Dn[0] = G[p];
 
     for(int q=p-1; q >= 0; q--) {
-        for(int iflat=NCOMB(p-q)-1; iflat >= 1; iflat--) { // we loop backwards to not overwrite needed values
-            int3 n = flat_to_multi_index[iflat];
-            // choose ek, the direction with the largest index
-            int nk = n.x >= n.y ? n.x : n.y;
-            nk = nk >= n.z ? nk : n.z;
-            int k = n.x == nk ? 0 : (n.y == nk ? 1 : 2);
-            int new_n[3] = {n.x, n.y, n.z};
-            // Add contribution from n - ek
-            new_n[k] = max(0, new_n[k] - 1);
+        int iflat = NCOMB(p-q)-1;
+        for(int nsum=p-q; nsum >= 1; nsum--) {
+            for(int nz=nsum; nz >= 0; nz--) {
+                for(int ny=nsum-nz; ny >= 0; ny--) {
+                    int nx = nsum - ny - nz;
 
-            float Dnew = get_xk(dx, k)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
-            // Add contribution from n - 2*ek
-            new_n[k] = max(0, new_n[k] - 1);
-            Dnew += (nk-1)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
+                    int k = (ny > 0) ? 1 : (nz > 0) ? 2 : 0;
+                    int nk = k == 0 ? nx : (k == 1 ? ny : nz);
 
-            Dn[iflat] = Dnew;
+                    int new_n[3] = {nx, ny, nz};
+                    new_n[k] = max(0, new_n[k] - 1);
+
+                    float Dnew = get_xk(dx, k)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
+                    new_n[k] = max(0, new_n[k] - 1);
+                    Dnew += (nk-1)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
+
+                    Dn[iflat] = Dnew;
+                    iflat -= 1;
+                }
+            }
         }
+
         Dn[0] = G[q];
     }
 }
