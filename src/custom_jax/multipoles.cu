@@ -98,6 +98,29 @@ __device__ __forceinline__ constexpr  int multi_to_flat(const int kx, const int 
     return off > 0 ? off : 0; // Ensure we don't return negative indices
 }
 
+template<int pmax>
+__device__ __forceinline__ constexpr  int3 flat_to_multi(const int kflat) {
+    int i = 0, ksum, kz, ky;
+    #pragma unroll
+    for(ksum=0; ksum <= pmax; ksum++) {
+        int nadd = ((ksum+2)*(ksum+1)) >> 1;
+        if (i + nadd > kflat)
+            break;
+        i += nadd;
+    }
+    #pragma unroll
+    for(kz=0; kz <= ksum; kz++) {
+        int nadd = (ksum-kz+1);
+        if (i + nadd > kflat)
+            break;
+        i += nadd;
+    }
+    ky = kflat - i;
+
+    return int3{ksum-ky-kz, ky, kz};
+}
+
+
 template<int p>
 __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     // Set's up the cartesian derivatives of the Green's function
@@ -267,8 +290,6 @@ __global__ void IlistLeaf2NodeM2LKernel(
 
     int imin = iminmax[0], imax = iminmax[1];
 
-    float invfact[MAXP] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
-
     constexpr int ncomb = NCOMB(p);
     float Dn[ncomb];
 
@@ -306,7 +327,7 @@ __global__ void IlistLeaf2NodeM2LKernel(
 
         // Once we are done with all particles we can ouput the results, split over components
         for(int kflat=threadIdx.x; kflat < ncomb; kflat += blocksize) {
-            int3 k = flat_to_multi_index[kflat];
+            int3 k = flat_to_multi<p>(kflat);
             int ksum = k.x + k.y + k.z;
             float sign = (ksum & 1) == 0 ? -1.f : 1.f;
             float Lnew = sign * Dsum[kflat]  / fact3f(k.x, k.y, k.z);
@@ -337,7 +358,11 @@ void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, 
 
 ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, size_t interactions_per_block, float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
-    size_t block_size = 64;
+    // Since our kernel uses a lot of registers, we cannot reach full occupancy in general.
+    // Therefore it is fine to use block_size = 32 (which usually should be avoided, since it
+    // limits maximum occupancy to 50%.) The benefit of this is that leafs that have <= 32 particles
+    // can be handled at a smaller cost. I have tested this and found it to be the fastest choice
+    size_t block_size = 32; 
 
     size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
 
