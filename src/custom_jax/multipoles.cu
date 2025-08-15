@@ -90,11 +90,12 @@ __device__ __forceinline__ float fact3f(unsigned kx, unsigned ky, unsigned kz) {
     return fact_upto6f(kx) * fact_upto6f(ky) * fact_upto6f(kz);
 }
 
-__device__ __forceinline__ float multi_to_flat(int kx, int ky, int kz) {
+__device__ __forceinline__ constexpr  int multi_to_flat(const int kx, const int ky, const int kz) {
     int p = kx + ky + kz;
     int npoff = ((p+2)*(p+1)*p) / 6; // offset of the p-th symmeric tensor
+    int off = npoff + (kz*(2*p + 3 - kz))/2 + ky;
 
-    return npoff + (kz*(2*p + 3 - kz))/2 + ky;
+    return off > 0 ? off : 0; // Ensure we don't return negative indices
 }
 
 template<int p>
@@ -111,24 +112,25 @@ __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     setupGn<p>(r2, eps2, G);
     Dn[0] = G[p];
 
+    #pragma unroll
     for(int q=p-1; q >= 0; q--) {
         int iflat = NCOMB(p-q)-1;
+        #pragma unroll
         for(int nsum=p-q; nsum >= 1; nsum--) {
+            #pragma unroll
             for(int nz=nsum; nz >= 0; nz--) {
+                #pragma unroll
                 for(int ny=nsum-nz; ny >= 0; ny--) {
-                    int nx = nsum - ny - nz;
+                    const int nx = nsum - ny - nz;
 
-                    int k = (ny > 0) ? 1 : (nz > 0) ? 2 : 0;
-                    int nk = k == 0 ? nx : (k == 1 ? ny : nz);
+                    const int k = nz > 0 ? 2 : (ny > 0 ? 1 : 0);
+                    const int nk = nz > 0 ? nz : (ny > 0 ? ny : nx);
+                    const float xk = k == 0 ? dx.x : (k == 1 ? dx.y : dx.z);
 
-                    int new_n[3] = {nx, ny, nz};
-                    new_n[k] = max(0, new_n[k] - 1);
+                    const int ilast = multi_to_flat(nx - 1*(k==0), ny - 1*(k==1), nz - 1*(k==2));
+                    const int ilast2 = multi_to_flat(nx - 2*(k==0), ny - 2*(k==1), nz - 2*(k==2));
 
-                    float Dnew = get_xk(dx, k)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
-                    new_n[k] = max(0, new_n[k] - 1);
-                    Dnew += (nk-1)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
-
-                    Dn[iflat] = Dnew;
+                    Dn[iflat] = xk*Dn[ilast] + (nk-1)*Dn[ilast2];
                     iflat -= 1;
                 }
             }
