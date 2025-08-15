@@ -29,6 +29,9 @@ endif()
 
 message(STATUS "XLA include directory: ${XLA_DIR}")
 
+# The following flag is debug output, helping to diagnose local memory spilling in cuda kernels
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
+
 nanobind_add_module(nb_forces src/custom_jax/forces.cu)
 set_target_properties(nb_forces PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
 target_include_directories(nb_forces SYSTEM PRIVATE ${XLA_DIR})

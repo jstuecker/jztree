@@ -60,12 +60,21 @@ __device__ void setupGn(float r2, float eps2, float* G)
     float rinv2 = rinv*rinv;
     G[0] = 1.0f * rinv;
 
+    #pragma unroll
     for (int n = 1; n <= p; n++) {
         G[n] = -(2*n-1) * G[n-1] * rinv2;
     }
 }
 
 #define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
+
+__device__ __forceinline__ float get_xk(const float3& x, int k) {
+    // Get's the k-th component of a float3 vector
+    // Note that we need to do it this way (rather than with an array type vector),
+    // because it is not possible to dynamically index register arrays (and if you do
+    // they will end up in local memory (=very slow))
+    return (k == 0) ? x.x : (k == 1 ? x.y : x.z);
+}
 
 template<int p>
 __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
@@ -75,7 +84,8 @@ __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     // This works by using a recurrence between the derivatives of the Green's function
     // We start at D0 G(q), go to D1 G(q+1), D2 G(q+2) ...
 
-    float *dxflat = reinterpret_cast<float*>(&dx);
+    // float *dxflat = reinterpret_cast<float*>(&dx);
+
     float r2 = dx.x * dx.x + dx.y * dx.y + dx.z * dx.z;
 
     float G[p+1];
@@ -92,7 +102,8 @@ __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
             int new_n[3] = {n.x, n.y, n.z};
             // Add contribution from n - ek
             new_n[k] = max(0, new_n[k] - 1);
-            float Dnew = (dxflat[k])*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
+
+            float Dnew = get_xk(dx, k)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
             // Add contribution from n - 2*ek
             new_n[k] = max(0, new_n[k] - 1);
             Dnew += (nk-1)*Dn[multi_index_to_flat[new_n[0]][new_n[1]][new_n[2]]];
@@ -201,17 +212,94 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
-ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, float epsilon) {
+
+template<int p>
+__global__ void IlistLeaf2NodeM2LKernel(
+        const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, 
+        float *Lout, size_t interactions_per_block, float epsilon
+    )  {
+    const int blocksize = blockDim.x;
+    float epsilon2 = epsilon * epsilon;
+
+    int imin = iminmax[0], imax = iminmax[1];
+
+    float invfact[MAXP] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
+
+    constexpr int ncomb = NCOMB(p);
+    // __shared__ float Dn[32][ncomb];
+    float Dn[NCOMB(p)];
+
+    for (int iint = 0; iint < interactions_per_block; iint++) {
+        int int_id = imin + iint * gridDim.x + blockIdx.x ; //blockIdx.x * interactions_per_block + iint;
+        if (int_id >= imax) {
+            return;
+        }
+
+        int2 interaction = interactions[int_id];
+        int iNode = interaction.x, iLeaf = interaction.y;
+        int iPartStart = isplit[iLeaf], iPartEnd = isplit[iLeaf + 1];
+
+        int ipart = threadIdx.x + iPartStart;
+        bool valid = (ipart < iPartEnd);
+        ipart = valid ? ipart : iPartEnd-1; // if not valid, keep in bounds, we discard the result later
+
+        float4 xmpart = xm[ipart];
+        float3 xnode = xnodes[iNode];
+
+        float3 dx = {xmpart.x - xnode.x, xmpart.y - xnode.y, xmpart.z - xnode.z};
+        setupDnG<p>(dx, epsilon2, Dn);
+
+        /* Calculating the derivative tensor is clearly the bottleneck here, have to optimize it later*/
+        // setupDnG<p>(dx, epsilon2, &Dn[threadIdx.x][0]);
+
+
+        __syncthreads();
+        
+        if(valid) {
+            for(int kflat=0; kflat<ncomb; kflat++) {
+                int3 k = flat_to_multi_index[kflat];
+                int ksum = k.x + k.y + k.z;
+                float sign = ksum % 2 == 0 ? -1.f : 1.f;
+                float Lnew = Dn[kflat] * sign * invfact[k.x] * invfact[k.y] * invfact[k.z];
+
+                atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew); //Dn[0][k]
+            }
+        }
+    }
+}
+
+
+
+void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
+    // This launch mechanic is needed so that p can be treated as a compile time constant
+    // I wish there was a simpler way...
+    switch(p) {
+        case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+
+        default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
+    }
+}
+
+ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, size_t interactions_per_block, float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
+    size_t block_size = 32; // In this case a constant blocksize makes the kernel simpler
 
-    const size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
+    size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
 
+    auto* xnodes_float3 = reinterpret_cast<const float3*>(xnodes.typed_data());
     auto* xm_float4 = reinterpret_cast<const float4*>(xm.typed_data());
     auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
     
     cudaMemsetAsync(loc->typed_data(), 0, loc->element_count() * sizeof(float), stream);
 
-    // IlistForceAndPotKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, isplit.typed_data(), interactions_i2, fphi_float4, interactions_per_block, iminmax.typed_data(), epsilon);
+    setup_index_tables();
+
+    launch_IlistLeaf2NodeM2LKernel(p, grid_size, block_size, stream, xnodes_float3, xm_float4, isplit.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -219,7 +307,6 @@ ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnod
     }
     return ffi::Error::Success();
 }
-
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     IlistLeaf2NodeM2L, IlistLeaf2NodeM2LHost,
@@ -232,7 +319,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>()     // iminmax
         .Ret<ffi::Buffer<ffi::F32>>()     // Lk output
         .Attr<int>("p")
-        .Attr<size_t>("block_size")
         .Attr<size_t>("interactions_per_block")
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});

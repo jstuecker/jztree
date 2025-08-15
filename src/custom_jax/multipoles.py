@@ -34,7 +34,7 @@ def ilist_multipole_to_local(mp, x, interactions=None, iminmax=None, p=1, block_
 ilist_multipole_to_local.jit = jax.jit(ilist_multipole_to_local, static_argnames=("p", "block_size", "eps"))
 
 def ilist_leaf_to_local(xnodes, xpart, mpart, isplit,  interactions, iminmax=None, 
-                        p=1, block_size=32, interactions_per_block=None, eps=1e-2):
+                        p=1, interactions_per_block=None, eps=1e-2):
     assert xnodes.dtype == jnp.float32
     assert xpart.dtype == jnp.float32
     assert mpart.dtype == jnp.float32
@@ -50,13 +50,13 @@ def ilist_leaf_to_local(xnodes, xpart, mpart, isplit,  interactions, iminmax=Non
     if iminmax is None:
         iminmax = jnp.array([0, len(interactions)], dtype=jnp.int32)
     if interactions_per_block is None:
-        interactions_per_block = np.clip(len(interactions) // (8096*block_size), 1, 256)
+        interactions_per_block = np.clip(len(interactions) // (4096), 1, 256)
 
     out_type = jax.ShapeDtypeStruct(xnodes.shape[:-1] + (ncomb,), xnodes.dtype)
     loc = jax.ffi.ffi_call("ilist_leaf2node_m2l", (out_type,))(
-        xnodes, xm, isplit, interactions, iminmax, p=np.int32(p), 
-        block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), 
+        xnodes, xm, isplit, jnp.abs(interactions), iminmax, p=np.int32(p), 
+        interactions_per_block=np.uint64(interactions_per_block), 
         epsilon=np.float32(eps))[0]
     
     return loc
-ilist_leaf_to_local.jit = jax.jit(ilist_leaf_to_local, static_argnames=("p", "block_size", "eps"))
+ilist_leaf_to_local.jit = jax.jit(ilist_leaf_to_local, static_argnames=("p", "eps", "interactions_per_block"))
