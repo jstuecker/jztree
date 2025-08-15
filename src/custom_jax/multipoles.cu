@@ -76,6 +76,20 @@ __device__ __forceinline__ float get_xk(const float3& x, int k) {
     return (k == 0) ? x.x : (k == 1 ? x.y : x.z);
 }
 
+__device__ __forceinline__ float fact_upto6f(unsigned k) {
+    float f = 1.f;
+    f *= (k >= 2) ? 2.f : 1.f;
+    f *= (k >= 3) ? 3.f : 1.f;
+    f *= (k >= 4) ? 4.f : 1.f;
+    f *= (k >= 5) ? 5.f : 1.f;
+    f *= (k >= 6) ? 6.f : 1.f;
+    return f;
+}
+
+__device__ __forceinline__ float fact3f(unsigned kx, unsigned ky, unsigned kz) {
+    return fact_upto6f(kx) * fact_upto6f(ky) * fact_upto6f(kz);
+}
+
 template<int p>
 __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     // Set's up the cartesian derivatives of the Green's function
@@ -83,8 +97,6 @@ __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
     // "The fast multipole method for arbitrary Green’s functions"
     // This works by using a recurrence between the derivatives of the Green's function
     // We start at D0 G(q), go to D1 G(q+1), D2 G(q+2) ...
-
-    // float *dxflat = reinterpret_cast<float*>(&dx);
 
     float r2 = dx.x * dx.x + dx.y * dx.y + dx.z * dx.z;
 
@@ -212,7 +224,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
-
 template<int p>
 __global__ void IlistLeaf2NodeM2LKernel(
         const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, 
@@ -226,8 +237,7 @@ __global__ void IlistLeaf2NodeM2LKernel(
     float invfact[MAXP] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
 
     constexpr int ncomb = NCOMB(p);
-    // __shared__ float Dn[32][ncomb];
-    float Dn[NCOMB(p)];
+    __shared__ float Dn[32][ncomb];
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
         int int_id = imin + iint * gridDim.x + blockIdx.x ; //blockIdx.x * interactions_per_block + iint;
@@ -239,36 +249,34 @@ __global__ void IlistLeaf2NodeM2LKernel(
         int iNode = interaction.x, iLeaf = interaction.y;
         int iPartStart = isplit[iLeaf], iPartEnd = isplit[iLeaf + 1];
 
-        int ipart = threadIdx.x + iPartStart;
-        bool valid = (ipart < iPartEnd);
-        ipart = valid ? ipart : iPartEnd-1; // if not valid, keep in bounds, we discard the result later
+        int ipart = min(threadIdx.x + iPartStart, iPartEnd - 1);
 
         float4 xmpart = xm[ipart];
         float3 xnode = xnodes[iNode];
 
         float3 dx = {xmpart.x - xnode.x, xmpart.y - xnode.y, xmpart.z - xnode.z};
-        setupDnG<p>(dx, epsilon2, Dn);
-
-        /* Calculating the derivative tensor is clearly the bottleneck here, have to optimize it later*/
-        // setupDnG<p>(dx, epsilon2, &Dn[threadIdx.x][0]);
-
+        setupDnG<p>(dx, epsilon2, Dn[threadIdx.x]);
 
         __syncthreads();
         
-        if(valid) {
-            for(int kflat=0; kflat<ncomb; kflat++) {
-                int3 k = flat_to_multi_index[kflat];
-                int ksum = k.x + k.y + k.z;
-                float sign = ksum % 2 == 0 ? -1.f : 1.f;
-                float Lnew = Dn[kflat] * sign * invfact[k.x] * invfact[k.y] * invfact[k.z];
+        // Now sum the Dn and output them
+        // Here, we transpose the problem differently: by components rather than by particles
+        for(int kflat=threadIdx.x; kflat < ncomb; kflat += blocksize) {
+            int3 k = flat_to_multi_index[kflat];
+            int ksum = k.x + k.y + k.z;
 
-                atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew); //Dn[0][k]
+            float Dnksum = 0.;
+            for(int i=0; i < min(32, iPartEnd-iPartStart); i++) {
+                Dnksum += Dn[i][kflat];
             }
+
+            float sign = (ksum & 1) == 0 ? -1.f : 1.f;
+            float Lnew = sign * Dnksum  / fact3f(k.x, k.y, k.z);
+
+            atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew);
         }
     }
 }
-
-
 
 void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
     // This launch mechanic is needed so that p can be treated as a compile time constant
