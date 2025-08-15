@@ -141,8 +141,6 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
 
     constexpr int ncomb = NCOMB(p);
 
-    float invfact[7] = {1.f, 1.f, 1./2.f, 1.f/6.f, 1.f/24.f, 1.f/120.f, 1.f/720.f};
-
     for (int iint = 0; iint < interactions_per_block; iint++) {
         int int_id = imin + blocksize * (blockIdx.x * interactions_per_block + iint) + threadIdx.x;
         if (int_id >= imax) {
@@ -161,25 +159,41 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
             Mp[iM] = mp[iB * ncomb + iM];
         }
 
-
+        int kflat = 0;
         #pragma unroll
-        for (int iL = 0; iL < ncomb; iL++) {
-            float Lnew = 0.f;
-            const int3 k = flat_to_multi<p>(iL);
-            const int ksum = k.x + k.y + k.z;
+        for(int ksum = 0; ksum <= p; ksum++) {
             #pragma unroll
-            for (int iN = 0; iN < NCOMB(p-ksum); iN++) {
-                const int3 n = flat_to_multi<p>(iN);
-                const int nsum = n.x + n.y + n.z;
-                
-                float Dnk = Dn[multi_to_flat(k.x + n.x, k.y + n.y, k.z + n.z)];
-                float Mpn = Mp[iN];
-                
-                Lnew += Dnk * Mpn * (invfact[n.x]*invfact[n.y]*invfact[n.z]);
-            }
+            for(int kz = 0; kz <= ksum; kz++) {
+                #pragma unroll
+                for(int ky = 0; ky <= ksum - kz; ky++) {
+                    const int kx = ksum - ky - kz;
+                    float Lnew = 0.f;
 
-            float sign = ksum % 2 == 0 ? -1.f : 1.f;
-            atomicAdd(&Lout[iA * ncomb + iL], Lnew * sign * invfact[k.x] * invfact[k.y] * invfact[k.z]);
+                    int nflat = 0;
+                    #pragma unroll
+                    for (int nsum = 0; nsum <= p - ksum; nsum++) {
+                        #pragma unroll
+                        for (int nz = 0; nz <= nsum; nz++) {
+                            #pragma unroll
+                            for (int ny = 0; ny <= nsum - nz; ny++) {
+                                const int nx = nsum - ny - nz;
+                                
+                                float Dnk = Dn[multi_to_flat(kx + nx, ky + ny, kz + nz)];
+                                float Mpn = Mp[nflat];
+                                
+                                const float infvac = 1./fact3f(nx, ny, nz);
+                                Lnew += Dnk * Mpn * infvac;
+                                nflat += 1;
+                            }
+                        }
+                    }
+
+                    const float sign = ksum % 2 == 0 ? -1.f : 1.f;
+                    const float fac = sign / fact3f(kx, ky, kz);
+                    atomicAdd(&Lout[iA * ncomb + kflat], Lnew * fac); 
+                    kflat += 1;
+                }
+            }
         }
     }
 }
@@ -314,12 +328,12 @@ void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, 
     // This launch mechanic is needed so that p can be treated as a compile time constant
     // I wish there was a simpler way...
     switch(p) {
-        // case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        // case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        // case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        // case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        // case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        // case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
 
         default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
     }
