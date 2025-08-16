@@ -63,7 +63,7 @@ __global__ void PotentialKernel(const float4 *xm, float *phi, size_t n, float ep
 ffi::Error PotentialHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> phi, size_t block_size, float epsilon) {
     size_t n = x.element_count() / x.dimensions().back();
 
-    const size_t grid_size = (n + (block_size - 1)) / block_size;
+    const size_t grid_size = div_ceil(n, block_size);
 
     auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
     PotentialKernel<<<grid_size, block_size, block_size*sizeof(float4), stream>>>(xm_float4, phi->typed_data(), n, epsilon);
@@ -178,7 +178,7 @@ __global__ void ForceAndPotKernel(const float4 *xm, float4 *fphi, size_t n, floa
 ffi::Error ForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::ResultBuffer<ffi::F32> force, size_t block_size, float epsilon, bool get_potential = false) {
     size_t n = x.element_count() / x.dimensions().back();
 
-    const size_t grid_size = (n + (block_size - 1)) / block_size;
+    const size_t grid_size = div_ceil(n, block_size);
 
     auto* xm_float4 = reinterpret_cast<const float4*>(x.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
     if (get_potential) {
@@ -272,7 +272,7 @@ __global__ void IlistForceAndPotKernel(const float4 *xm, int32_t *isplit, int2 *
 ffi::Error IlistForceHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> fphi, size_t block_size, size_t interactions_per_block, float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
 
-    const size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
+    const size_t grid_size = div_ceil(ninteractions, interactions_per_block);
 
     auto* xm_float4 = reinterpret_cast<const float4*>(xm.typed_data()); // interprete xm as an array of float4. This makes the kernel easier to write.
     auto* fphi_float4 = reinterpret_cast<float4*>(fphi->typed_data());
@@ -394,7 +394,7 @@ __global__ void BwdIlistForceAndPotKernel(const float4 *gfphi, const float4 *xm,
 ffi::Error BwdIlistFPhiHost(cudaStream_t stream, ffi::Buffer<ffi::F32> g, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> gxm_out, size_t block_size, size_t interactions_per_block, float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
 
-    const size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
+    const size_t grid_size = div_ceil(ninteractions, interactions_per_block);
 
     auto g_float4 = reinterpret_cast<const float4*>(g.typed_data()); 
     auto* xm_float4 = reinterpret_cast<const float4*>(xm.typed_data()); 

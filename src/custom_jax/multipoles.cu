@@ -129,7 +129,7 @@ template<int p>
 __global__ void IlistM2LKernel(const float3* __restrict__ x, const float* __restrict__ mp, 
         const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
         float* __restrict__ Lout, size_t interactions_per_block, float epsilon) {
-    const size_t blocksize = blockDim.x;
+    const size_t block_size = blockDim.x;
     float epsilon2 = epsilon * epsilon;
 
     int imin = iminmax[0], imax = iminmax[1];
@@ -137,7 +137,7 @@ __global__ void IlistM2LKernel(const float3* __restrict__ x, const float* __rest
     constexpr int ncomb = NCOMB(p);
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
-        int int_id = imin + blocksize * (blockIdx.x * interactions_per_block + iint) + threadIdx.x;
+        int int_id = imin + block_size * (blockIdx.x * interactions_per_block + iint) + threadIdx.x;
         if (int_id >= imax) {
             return;
         }
@@ -220,7 +220,7 @@ ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffe
         ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, 
         float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
-    const size_t grid_size = (ninteractions + block_size*interactions_per_block - 1) / (block_size*interactions_per_block);
+    const size_t grid_size = div_ceil(ninteractions, block_size*interactions_per_block);
 
     auto* xfloat3 = reinterpret_cast<const float3*>(x.typed_data());
     auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
@@ -276,7 +276,6 @@ __global__ void IlistLeaf2NodeM2LKernel(const float3* __restrict__  xnodes,
         const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
         float* __restrict__ Lout, size_t interactions_per_block, float epsilon
     )  {
-    const int blocksize = blockDim.x;
     float epsilon2 = epsilon * epsilon;
 
     int imin = iminmax[0], imax = iminmax[1];
@@ -301,7 +300,7 @@ __global__ void IlistLeaf2NodeM2LKernel(const float3* __restrict__  xnodes,
 
         float3 xnode = xnodes[iNode];
 
-        for(int poffset=0; poffset < iPartEnd - iPartStart; poffset += blocksize)
+        for(int poffset=0; poffset < iPartEnd - iPartStart; poffset += blockDim.x)
         {
             int ipart = iPartStart + poffset + threadIdx.x;
             bool valid = ipart < iPartEnd;
@@ -317,7 +316,7 @@ __global__ void IlistLeaf2NodeM2LKernel(const float3* __restrict__  xnodes,
         __syncthreads();
 
         // Once we are done with all particles we can ouput the results, split over components
-        for(int kflat=threadIdx.x; kflat < ncomb; kflat += blocksize) {
+        for(int kflat=threadIdx.x; kflat < ncomb; kflat += blockDim.x) {
             int3 k = flat_to_multi<p>(kflat);
             int ksum = k.x + k.y + k.z;
             float sign = (ksum & 1) == 0 ? -1.f : 1.f;
@@ -366,7 +365,7 @@ ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnod
     // can be handled at a smaller cost. I have tested this and found it to be the fastest choice
     size_t block_size = 32;
 
-    size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
+    size_t grid_size = div_ceil(ninteractions, interactions_per_block);
 
     auto* xnodes_float3 = reinterpret_cast<const float3*>(xnodes.typed_data());
     auto* xm_float4 = reinterpret_cast<const float4*>(xm.typed_data());

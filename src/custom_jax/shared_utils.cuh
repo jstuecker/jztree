@@ -13,5 +13,3 @@ nanobind::capsule EncapsulateFfiCall(T *fn) {
 inline int div_ceil(int a, int b) {
     return (a + b - 1) / b;
 }
-
-#define DIV_CEIL(a, b) (((a) + (b) - 1) / (b))
