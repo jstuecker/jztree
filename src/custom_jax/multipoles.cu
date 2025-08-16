@@ -21,7 +21,7 @@ nb::capsule EncapsulateFfiCall(T *fn) {
 #define MAXP 6
 
 template<int p>
-__device__ void setupGn(float r2, float eps2, float* G)
+__device__ void setupGn(float r2, float eps2, float* __restrict__ G)
 {
     // The derivatives of (1/r d/dr)^n G_0  with G_0 = 1/r
     float rinv = rsqrtf(r2 + eps2); 
@@ -90,7 +90,7 @@ __device__ __forceinline__ constexpr  int3 flat_to_multi(const int kflat) {
 
 
 template<int p>
-__device__ void setupDnG(float3 dx, float eps2, float *Dn) {
+__device__ void setupDnG(float3 dx, float eps2, float* __restrict__ Dn) {
     // Set's up the cartesian derivatives of the Green's function
     // Using the method described in Tausch (2003):
     // "The fast multipole method for arbitrary Green’s functions"
@@ -133,7 +133,9 @@ __device__ void setupDnG(float3 dx, float eps2, float *Dn) {
 
 
 template<int p>
-__global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
+__global__ void IlistM2LKernel(const float3* __restrict__ x, const float* __restrict__ mp, 
+        const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
+        float* __restrict__ Lout, size_t interactions_per_block, float epsilon) {
     const size_t blocksize = blockDim.x;
     float epsilon2 = epsilon * epsilon;
 
@@ -198,21 +200,32 @@ __global__ void IlistM2LKernel(const float3 *x, const float *mp, int2 *interacti
     }
 }
 
-void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
+void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
+        const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, 
+        size_t interactions_per_block, float epsilon) {
     // This launch mechanic is needed so that p can be treated as a compile time constant
     // I wish there was a simpler way...
     switch(p) {
-        case 1: IlistM2LKernel<1><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 2: IlistM2LKernel<2><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 3: IlistM2LKernel<3><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 4: IlistM2LKernel<4><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 5: IlistM2LKernel<5><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 6: IlistM2LKernel<6><<<grid_size, block_size, 0, stream>>>(x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 1: IlistM2LKernel<1><<<grid_size, block_size, 0, stream>>>(
+            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 2: IlistM2LKernel<2><<<grid_size, block_size, 0, stream>>>(
+            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 3: IlistM2LKernel<3><<<grid_size, block_size, 0, stream>>>(
+            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 4: IlistM2LKernel<4><<<grid_size, block_size, 0, stream>>>(
+            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 5: IlistM2LKernel<5><<<grid_size, block_size, 0, stream>>>(
+            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 6: IlistM2LKernel<6><<<grid_size, block_size, 0, stream>>>(
+            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
         default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
     }
 }
 
-ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax,  ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, float epsilon) {
+ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, 
+        ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax,  
+        ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, 
+        float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
     const size_t grid_size = (ninteractions + block_size*interactions_per_block - 1) / (block_size*interactions_per_block);
 
@@ -221,7 +234,8 @@ ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffe
 
     cudaMemsetAsync(loc->typed_data(), 0, mp.element_count() * sizeof(float), stream);
 
-    launch_IlistM2LKernel(p, grid_size, block_size, stream, xfloat3, mp.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
+    launch_IlistM2LKernel(p, grid_size, block_size, stream, xfloat3, mp.typed_data(), 
+        interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -264,9 +278,10 @@ __device__ void add_warp_reduced(const float (&Dn)[N], float* __restrict__ Dsum,
 }
 
 template<int p>
-__global__ void IlistLeaf2NodeM2LKernel(
-        const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, 
-        float *Lout, size_t interactions_per_block, float epsilon
+__global__ void IlistLeaf2NodeM2LKernel(const float3* __restrict__  xnodes, 
+        const float4* __restrict__ xm, const int32_t* __restrict__ isplit, 
+        const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
+        float* __restrict__ Lout, size_t interactions_per_block, float epsilon
     )  {
     const int blocksize = blockDim.x;
     float epsilon2 = epsilon * epsilon;
@@ -282,7 +297,7 @@ __global__ void IlistLeaf2NodeM2LKernel(
     __syncthreads();
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
-        int int_id = imin + iint * gridDim.x + blockIdx.x ; //blockIdx.x * interactions_per_block + iint;
+        int int_id = imin + iint * gridDim.x + blockIdx.x ;
         if (int_id >= imax) {
             return;
         }
@@ -324,28 +339,39 @@ __global__ void IlistLeaf2NodeM2LKernel(
     }
 }
 
-void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, float *Lout, size_t interactions_per_block, float epsilon) {
+void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
+    const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, 
+    float *Lout, size_t interactions_per_block, float epsilon) {
     // This launch mechanic is needed so that p can be treated as a compile time constant
     // I wish there was a simpler way...
     switch(p) {
-        case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
+            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
+            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
+            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
+            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
+            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
+        case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
+            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
 
         default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
     }
 }
 
-ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, size_t interactions_per_block, float epsilon) {
+ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, 
+        ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, 
+        ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, 
+        size_t interactions_per_block, float epsilon) {
     size_t ninteractions = interactions.element_count() / 2;
     // Since our kernel uses a lot of registers, we cannot reach full occupancy in general.
     // Therefore it is fine to use block_size = 32 (which usually should be avoided, since it
     // limits maximum occupancy to 50%.) The benefit of this is that leafs that have <= 32 particles
     // can be handled at a smaller cost. I have tested this and found it to be the fastest choice
-    size_t block_size = 32; 
+    size_t block_size = 32;
 
     size_t grid_size = (ninteractions + interactions_per_block - 1) / interactions_per_block;
 
@@ -355,7 +381,9 @@ ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnod
     
     cudaMemsetAsync(loc->typed_data(), 0, loc->element_count() * sizeof(float), stream);
 
-    launch_IlistLeaf2NodeM2LKernel(p, grid_size, block_size, stream, xnodes_float3, xm_float4, isplit.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
+    launch_IlistLeaf2NodeM2LKernel(p, grid_size, block_size, stream, xnodes_float3, xm_float4, 
+        isplit.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), 
+        interactions_per_block, epsilon);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
