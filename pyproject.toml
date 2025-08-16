@@ -12,3 +12,6 @@ requires-python = ">=3.10"
 editable.rebuild = true
 editable.verbose = true
 build-dir = "build"
+
+[project.entry-points."fmdj.plugins"]
+custom_jax = "custom_jax.fmdj_plugin:register"
