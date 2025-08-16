@@ -2,6 +2,7 @@
 
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
+#include "shared_utils.cuh"
 #include <cub/cub.cuh>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -14,20 +15,6 @@
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
-
-// A wrapper to encapsulate an FFI call
-template <typename T>
-nb::capsule EncapsulateFfiCall(T *fn) {
-    static_assert(std::is_invocable_r_v<XLA_FFI_Error *, T, XLA_FFI_CallFrame *>,
-                  "Encapsulated function must be and XLA FFI handler");
-    return nb::capsule(reinterpret_cast<void *>(fn));
-}
-
-// A function calculating the ceil of integer division on CPU
-inline int div_ceil(int a, int b) {
-    return (a + b - 1) / b;
-}
-
 
 __device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
     // Finds the most significant bit that differs between x and y
