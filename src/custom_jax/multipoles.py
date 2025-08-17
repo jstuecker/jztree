@@ -12,7 +12,7 @@ jax.ffi.register_ffi_target("ilist_leaf2node_m2l", nb_multipoles.ilist_leaf2node
 
 # ======= Multipole Translators =======
 
-def ilist_node_to_node(xnodes, multipoles, interactions, irange=None, p=1, block_size=32, interactions_per_block=None, eps=1e-2):
+def ilist_node_to_node(xnodes, multipoles, interactions, irange=None, p=1, block_size=32, interactions_per_block=None, softening=1e-2):
     assert xnodes.dtype == jnp.float32
     assert multipoles.dtype == jnp.float32
     assert xnodes.ndim >= 2 and multipoles.ndim >= 2 and multipoles.ndim >= 2
@@ -28,13 +28,13 @@ def ilist_node_to_node(xnodes, multipoles, interactions, irange=None, p=1, block
         interactions_per_block = np.clip(len(interactions) // (8096*block_size), 1, 256)
 
     out_type = jax.ShapeDtypeStruct(multipoles.shape, multipoles.dtype)
-    loc = jax.ffi.ffi_call("ilist_m2l", (out_type,))(xnodes, multipoles, interactions, irange, p=np.int32(p), block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(eps))[0]
+    loc = jax.ffi.ffi_call("ilist_m2l", (out_type,))(xnodes, multipoles, interactions, irange, p=np.int32(p), block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
     
     return loc
-ilist_node_to_node.jit = jax.jit(ilist_node_to_node, static_argnames=("p", "block_size", "eps"))
+ilist_node_to_node.jit = jax.jit(ilist_node_to_node, static_argnames=("p", "block_size", "softening"))
 
 def ilist_leaf_to_node(xnodes, xpart, mpart, isplit,  interactions, irange=None, 
-                        p=1, interactions_per_block=None, eps=1e-2):
+                        p=1, interactions_per_block=None, softening=1e-2):
     assert xnodes.dtype == jnp.float32
     assert xpart.dtype == jnp.float32
     assert mpart.dtype == jnp.float32
@@ -56,7 +56,7 @@ def ilist_leaf_to_node(xnodes, xpart, mpart, isplit,  interactions, irange=None,
     loc = jax.ffi.ffi_call("ilist_leaf2node_m2l", (out_type,))(
         xnodes, xm, isplit, jnp.abs(interactions), irange, p=np.int32(p), 
         interactions_per_block=np.uint64(interactions_per_block), 
-        epsilon=np.float32(eps))[0]
+        epsilon=np.float32(softening))[0]
     
     return loc
-ilist_leaf_to_node.jit = jax.jit(ilist_leaf_to_node, static_argnames=("p", "eps", "interactions_per_block"))
+ilist_leaf_to_node.jit = jax.jit(ilist_leaf_to_node, static_argnames=("p", "softening", "interactions_per_block"))
