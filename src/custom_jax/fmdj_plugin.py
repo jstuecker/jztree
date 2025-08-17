@@ -1,5 +1,6 @@
 # custom_jax/fmdj_plugin.py
 from fmdj.variants import Variant, VariantManager, vm, has_gpu
+from fmdj import config
 import custom_jax as cj
 import jax.numpy as jnp
 
@@ -16,10 +17,10 @@ def only_register_if(cfg):
 
 variants = VariantManager()
 
-def _ilist_leaf_to_leaf_cj(xpart, mpart, leaf_bounds, interactions, irange, max_leaf_size=64, eps=0.):
-    print("cj ilist_leaf_to_leaf called with eps=%f" % eps)
+def _ilist_leaf_to_leaf_cj(xpart, mpart, leaf_bounds, interactions, irange, cfg : config.Config):
+    print("cj ilist_leaf_to_leaf called with eps=%f" % cfg.softening)
     xm = jnp.concatenate([xpart, mpart[:, None]], axis=-1)
-    return cj.forces.ilist_fphi(xm, leaf_bounds, jnp.abs(interactions), irange, eps=eps)[...,3]*2
+    return cj.forces.ilist_fphi(xm, leaf_bounds, jnp.abs(interactions), irange, eps=cfg.softening)[...,3]
 
 def register():
     if has_gpu():
