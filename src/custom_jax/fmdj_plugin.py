@@ -1,5 +1,5 @@
 # custom_jax/fmdj_plugin.py
-from fmdj.variants import Variant, VariantDict, vm, has_gpu
+from fmdj.variants import Variant, VariantManager, vm, has_gpu
 import custom_jax as cj
 import jax.numpy as jnp
 
@@ -14,7 +14,7 @@ def only_register_if(cfg):
 #     vm.reg
     # register_variant(op, name=name, fn=fn, priority=priority, only_if=only_register_if)
 
-variants = VariantDict()
+variants = VariantManager()
 
 def _ilist_leaf_to_leaf_cj(xpart, mpart, leaf_bounds, interactions, irange, max_leaf_size=64, eps=0.):
     print("cj ilist_leaf_to_leaf called with eps=%f" % eps)
