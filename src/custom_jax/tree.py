@@ -53,16 +53,18 @@ def knn_search(xzsort, xfind, k=4, block_size=64, init_factor=1.0):
     assert xzsort.shape[-1] == xfind.shape[-1] == 3
     assert init_factor >= 0.5
 
-    assert k==4, "only k=4 supported for now"
+    assert k in (4,8,16,32), "so far only k=4,8,16,32 are supported"
 
     nsearch_init = int(np.ceil(init_factor * k) + 1)
+
+    print(f"knn_search: k={k}, block_size={block_size}, nsearch_init={nsearch_init}")
 
     out_type = jax.ShapeDtypeStruct((xzsort.shape[0], k), jnp.int32)
     i1,i2 = jax.ffi.ffi_call("KNNSearch", (out_type, out_type))(
         xzsort, xfind, block_size=np.uint64(block_size), nsearch_init=np.uint64(nsearch_init))
  
     return i1, i2
-knn_search.jit = jax.jit(knn_search, static_argnames=("block_size", "init_factor"))
+knn_search.jit = jax.jit(knn_search, static_argnames=("k", "block_size", "init_factor"))
 
 # ================================= Deprecated functions   ======================================= #
 # They will be deleted later, for now we keep them for comparison purposes

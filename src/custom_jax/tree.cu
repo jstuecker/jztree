@@ -304,6 +304,65 @@ __device__ float distance_squared(const float3 &a, const float3 &b) {
     return dx * dx + dy * dy + dz * dz;
 }
 
+template<int k>
+struct NearestK {
+    float r2s[k];
+    int ids[k];
+
+    int max_idx;
+    float  max_r2;
+
+    __device__ inline void set_without_update(const int i, const float r2, int index) {
+        r2s[i] = r2;
+        ids[i] = index;
+    }
+
+    __device__ inline void rebuild_max() {
+        max_idx = 0; 
+        max_r2 = r2s[0];
+        #pragma unroll
+        for (int i = 1; i < k; i++) {
+            if (r2s[i] > max_r2) { 
+                max_r2 = r2s[i]; 
+                max_idx = i; 
+            }
+        }
+    }
+
+    __device__ inline void consider(float r2, int id) {
+        // If this particle is closer than the furthest one we have, replace it
+        if (r2 <= max_r2) {
+            r2s[max_idx] = r2;
+            ids[max_idx] = id;
+        }
+        else {
+            // Check later whether this return improves things or makes them slower
+            // It is a thread divergence vs. unnecessary work trade-off
+            return; 
+        }
+        
+        rebuild_max(); 
+    }
+    
+    __device__ inline void final_sort() {
+        // simple bubble sort (works well in registers)
+        // optimize later!
+        #pragma unroll
+        for (int i = 0; i < k; i++) {
+            for (int j = i; j < k; j++) {
+                if (r2s[i] > r2s[j]) {
+                    float tmp_r2 = r2s[i];
+                    int tmp_id = ids[i];
+                    r2s[i] = r2s[j];
+                    ids[i] = ids[j];
+                    r2s[j] = tmp_r2;
+                    ids[j] = tmp_id;
+                }
+            }
+        }
+    }
+};
+
 // Following Michael Connor, Piyush Kumar (2009)
 template <int k>
 __global__ void KernelKNNPreSearch(const float3* pos_in, const float3* pos_find, int* knn_guess_out, int npos, int nfind, int nsearch_init) {
@@ -311,30 +370,71 @@ __global__ void KernelKNNPreSearch(const float3* pos_in, const float3* pos_find,
     if (idx >= nfind)
         return;
     float3 pos0 = pos_find[idx];
+    int idpos = idx; // For now we just assume that pos_in and pos_find are the same array
     
     float distance[k];
     int indices[k];
+
+    // We will find the top-k nearest neighbors in pos_in[istart:iend]
+    int istart = max(min(idpos - nsearch_init, npos - 2*nsearch_init), 0);
+    int iend = istart + 2*nsearch_init;
+
+    NearestK<k> nearestK;
+    #pragma unroll
+    for (int i = 0; i < k; i++) {
+        float r2 = distance_squared(pos0, pos_in[istart + i]);
+        nearestK.set_without_update(i, r2, istart + i);
+    }
+    nearestK.rebuild_max();
+    for (int i = k; i < 2*nsearch_init; i++) {
+        float r2 = distance_squared(pos0, pos_in[istart + i]);
+        nearestK.consider(r2, istart + i);
+    }
+
+    nearestK.final_sort();
     
     for(int i = 0; i < k; ++i) {
-        knn_guess_out[idx * k + i] = 0;
+        knn_guess_out[idx * k + i] = nearestK.ids[i];
+    }
+}
+
+void launch_KernelKNNPreSearch(int k,
+        cudaStream_t stream, const float3* pos_in, const float3* pos_find, 
+        int* knn_guess_out, int npos, int nfind, int nsearch_init, size_t block_size) {
+    // KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init);
+    switch(k) {
+        case 4: KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
+        case 8: KernelKNNPreSearch<8><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
+        case 16: KernelKNNPreSearch<16><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
+        case 32: KernelKNNPreSearch<32><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
+        // case 64: KernelKNNPreSearch<64><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
+        default:
+            throw std::runtime_error("Unsupported k value in launch_KernelKNNPreSearch");
+    }
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(last_error));
     }
 }
 
 
-
 ffi::Error HostKNNSearch(
-    cudaStream_t stream, ffi::Buffer<ffi::F32> pos, ffi::Buffer<ffi::F32> pos_find, 
-    ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> id_out2, 
-    size_t block_size, int nsearch_init)
-{
+        cudaStream_t stream, ffi::Buffer<ffi::F32> pos, ffi::Buffer<ffi::F32> pos_find, 
+        ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> id_out2, 
+        int nsearch_init, size_t block_size) {
     
     size_t npos = pos.element_count()/3;
     size_t nfind = pos_find.element_count()/3;
 
+    int k = id_out->dimensions()[id_out->dimensions().size() - 1];
+
     float3* pos_f3 = reinterpret_cast<float3*>(pos.typed_data());
     float3* pos_find_f3 = reinterpret_cast<float3*>(pos_find.typed_data());
     
-    KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_f3, pos_find_f3, id_out->typed_data(), npos, nfind, nsearch_init);
+    // KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_f3, pos_find_f3, id_out->typed_data(), npos, nfind, nsearch_init);
+    launch_KernelKNNPreSearch(k, stream, pos_f3, pos_find_f3, id_out->typed_data(), npos, nfind, 
+        nsearch_init, block_size);
     
     
     cudaError_t last_error = cudaGetLastError();
