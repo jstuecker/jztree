@@ -297,6 +297,66 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 
+__device__ float distance_squared(const float3 &a, const float3 &b) {
+    float dx = a.x - b.x;
+    float dy = a.y - b.y;
+    float dz = a.z - b.z;
+    return dx * dx + dy * dy + dz * dz;
+}
+
+// Following Michael Connor, Piyush Kumar (2009)
+template <int k>
+__global__ void KernelKNNPreSearch(const float3* pos_in, const float3* pos_find, int* knn_guess_out, int npos, int nfind, int nsearch_init) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= nfind)
+        return;
+    float3 pos0 = pos_find[idx];
+    
+    float distance[k];
+    int indices[k];
+    
+    for(int i = 0; i < k; ++i) {
+        knn_guess_out[idx * k + i] = 0;
+    }
+}
+
+
+
+ffi::Error HostKNNSearch(
+    cudaStream_t stream, ffi::Buffer<ffi::F32> pos, ffi::Buffer<ffi::F32> pos_find, 
+    ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> id_out2, 
+    size_t block_size, int nsearch_init)
+{
+    
+    size_t npos = pos.element_count()/3;
+    size_t nfind = pos_find.element_count()/3;
+
+    float3* pos_f3 = reinterpret_cast<float3*>(pos.typed_data());
+    float3* pos_find_f3 = reinterpret_cast<float3*>(pos_find.typed_data());
+    
+    KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_f3, pos_find_f3, id_out->typed_data(), npos, nfind, nsearch_init);
+    
+    
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    KNNSearch, HostKNNSearch,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()
+        .Arg<ffi::Buffer<ffi::F32>>()
+        .Ret<ffi::Buffer<ffi::S32>>()
+        .Ret<ffi::Buffer<ffi::S32>>()
+        .Attr<size_t>("nsearch_init")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
+
 // Include deprecated functions
 // This module includes a bunch of functions that we do not need anymore, but we keep
 // them temporarily for comparison and test purposes
@@ -306,6 +366,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 NB_MODULE(nb_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
+    m.def("KNNSearch", []() { return EncapsulateFfiCall(KNNSearch); });
 
     // A bunch of deprecated functions
     // m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });
