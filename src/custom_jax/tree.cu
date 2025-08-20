@@ -48,20 +48,23 @@ struct PosId {
     int32_t id;
 };
 
+__device__ __forceinline__ bool z_pos_less(float3 pos1, float3 pos2)
+{
+    int msb_x = float_xor_msb(pos1.x, pos2.x);
+    int msb_y = float_xor_msb(pos1.y, pos2.y);
+    int msb_z = float_xor_msb(pos1.z, pos2.z);
+
+    int ms_dim = (msb_x >= msb_y && msb_x >= msb_z) ? 0 : ((msb_y >= msb_z) ? 1 : 2);
+
+    if (ms_dim == 0) return pos1.x < pos2.x;
+    if (ms_dim == 1) return pos1.y < pos2.y;
+    return pos1.z < pos2.z;
+}
+
 struct PosIdLess {
     __device__ __forceinline__
     bool operator()(const PosId &a, const PosId &b) {
-        int msb_x = float_xor_msb(a.pos.x, b.pos.x);
-        int msb_y = float_xor_msb(a.pos.y, b.pos.y);
-        int msb_z = float_xor_msb(a.pos.z, b.pos.z);
-
-        // Find dimension with least clz → most significant differing bit
-        int ms_dim = (msb_x >= msb_y && msb_x >= msb_z) ? 0 : ((msb_y >= msb_z) ? 1 : 2);
-
-        // Perform the comparison on the most significant dimension
-        if (ms_dim == 0) return a.pos.x < b.pos.x;
-        if (ms_dim == 1) return a.pos.y < b.pos.y;
-        return a.pos.z < b.pos.z;
+        return z_pos_less(a.pos, b.pos);
     }
 };
 
@@ -396,6 +399,27 @@ __global__ void KernelKNNPreSearch(const float3* pos_in, const float3* pos_find,
     for(int i = 0; i < k; ++i) {
         knn_guess_out[idx * k + i] = nearestK.ids[i];
     }
+
+    // Next we need to find indices that securely bound the current sphere
+    float R = sqrtf(nearestK.max_r2);
+    float3 xmin = {pos0.x - R, pos0.y - R, pos0.z - R};
+    int lower = istart;
+    int off = 1;
+    while(z_pos_less(xmin, pos_in[lower]) && (lower > 0)) {
+        lower = max(lower - off, 0);
+        off *= 2;
+    }
+
+    float3 xmax = {pos0.x + R, pos0.y + R, pos0.z + R};
+    int upper = iend;
+    off = 1;
+    while(z_pos_less(pos_in[upper], xmax) && (upper < npos-1)) {
+        upper = min(upper + off, npos-1);
+        off *= 2;
+    }
+    
+    knn_guess_out[idx * k] = lower;
+    knn_guess_out[idx * k + 1] = upper;
 }
 
 void launch_KernelKNNPreSearch(int k,
