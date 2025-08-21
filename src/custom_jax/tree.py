@@ -67,22 +67,25 @@ def knn_search(xzsort, xfind, k=4, block_size=64, init_factor=1.0):
     return i1, i2
 knn_search.jit = jax.jit(knn_search, static_argnames=("k", "block_size", "init_factor"))
 
-def ilist_knn_search(xA, xB, isplitA, isplitB, lvlA, ilist, ilist_splitsB, k=32, interactions_per_block=1, boxsize=0.):
+def ilist_knn_search(xT, isplitT, lvlT, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, interactions_per_block=1, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
-    assert xA.dtype == xB.dtype == jnp.float32
-    assert xA.shape[-1] == xB.shape[-1] == 3
-    assert isplitA.dtype == isplitB.dtype == jnp.int32
-    assert lvlA.dtype == ilist.dtype == ilist_splitsB.dtype == jnp.int32
+    if xQ is None: xQ = xT
+    if isplitQ is None: isplitQ = isplitT
+
+    assert xT.dtype == xQ.dtype == jnp.float32
+    assert xT.shape[-1] == xQ.shape[-1] == 3
+    assert isplitT.dtype == isplitQ.dtype == jnp.int32
+    assert lvlT.dtype == ilist.dtype == ilist_splitsB.dtype == jnp.int32
     assert k in (4,8,16,32), "Only k=32 is suppported so far"
     assert interactions_per_block == 1
 
-    x4a = jnp.concatenate((xA, jnp.zeros(xA.shape[:-1])[...,None]), axis=-1)
-    x4b = jnp.concatenate((xB, jnp.zeros(xB.shape[:-1])[...,None]), axis=-1)
+    x4a = jnp.concatenate((xT, jnp.zeros(xT.shape[:-1])[...,None]), axis=-1)
+    x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)
 
-    out_type = jax.ShapeDtypeStruct((xB.shape[0], k, 2), jnp.int32)
+    out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
     knn = jax.ffi.ffi_call("IlistKNNSearch", (out_type, ))(
-        x4a, x4b, isplitA, isplitB, lvlA, ilist, ilist_splitsB,
+        x4a, x4b, isplitT, isplitQ, lvlT, ilist, ilist_splitsB,
         interactions_per_block=np.uint64(interactions_per_block), boxsize=np.float32(boxsize)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
