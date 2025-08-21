@@ -567,6 +567,23 @@ __global__ void KernelIlistKNN(
     }
 }
 
+void launch_KernelIlistKNN(int k, cudaStream_t stream, 
+    int nleavesB, int interactions_per_block,
+    const float4* xA, const float4* xB,
+    const int* isplitA, const int* isplitB, const int* lvlA,
+    const int* ilist, const int* ilist_splitsB,
+    Neighbor* knn, float boxsize) {
+
+    switch(k) {
+        case 4: KernelIlistKNN<4><<< div_ceil(nleavesB, interactions_per_block), 32, 0, stream>>>(xA, xB, isplitA, isplitB, lvlA, ilist, ilist_splitsB, knn, interactions_per_block, boxsize, nleavesB); break;
+        case 8: KernelIlistKNN<8><<< div_ceil(nleavesB, interactions_per_block), 32, 0, stream>>>(xA, xB, isplitA, isplitB, lvlA, ilist, ilist_splitsB, knn, interactions_per_block, boxsize, nleavesB); break;
+        case 16: KernelIlistKNN<16><<< div_ceil(nleavesB, interactions_per_block), 32, 0, stream>>>(xA, xB, isplitA, isplitB, lvlA, ilist, ilist_splitsB, knn, interactions_per_block, boxsize, nleavesB); break;
+        case 32: KernelIlistKNN<32><<< div_ceil(nleavesB, interactions_per_block), 32, 0, stream>>>(xA, xB, isplitA, isplitB, lvlA, ilist, ilist_splitsB, knn, interactions_per_block, boxsize, nleavesB); break;
+        default:
+            throw std::runtime_error("Unsupported k value in launch_KernelIlistKNN");
+    }
+}
+
 ffi::Error HostIlistKNNSearch(
         cudaStream_t stream, 
         ffi::Buffer<ffi::F32> xA, 
@@ -589,13 +606,19 @@ ffi::Error HostIlistKNNSearch(
 
     size_t block_size = 32;
     
-    KernelIlistKNN<32><<< div_ceil(nleavesB, interactions_per_block), block_size, 0, stream>>>(
+    // KernelIlistKNN<32><<< div_ceil(nleavesB, interactions_per_block), block_size, 0, stream>>>(
+    //     xAf4, xBf4,
+    //     isplitA.typed_data(), isplitB.typed_data(),
+    //     lvlA.typed_data(), ilist.typed_data(), ilist_splitsB.typed_data(),
+    //     knn_ptr, interactions_per_block, 
+    //     boxsize, nleavesB
+    // );
+
+    launch_KernelIlistKNN(k, stream, nleavesB, interactions_per_block,
         xAf4, xBf4,
         isplitA.typed_data(), isplitB.typed_data(),
         lvlA.typed_data(), ilist.typed_data(), ilist_splitsB.typed_data(),
-        knn_ptr, interactions_per_block, 
-        boxsize, nleavesB
-    );
+        knn_ptr, boxsize);
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
