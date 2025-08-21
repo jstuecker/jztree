@@ -85,9 +85,9 @@ def ilist_knn_search(xA, xB, isplitA, isplitB, lvlA, ilist, ilist_splitsB, k=32,
         x4a, x4b, isplitA, isplitB, lvlA, ilist, ilist_splitsB,
         interactions_per_block=np.uint64(interactions_per_block), boxsize=np.float32(boxsize)
     )[0]
-    iknn, rknn = knn[...,0].view(jnp.int32), knn[...,1].view(jnp.float32)
+    rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
  
-    return iknn, rknn
+    return rknn, iknn
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "interactions_per_block", "boxsize"))
 
 

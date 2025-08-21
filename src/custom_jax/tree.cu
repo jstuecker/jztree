@@ -307,6 +307,11 @@ __device__ float distance_squared(const float3 &a, const float3 &b) {
     return dx * dx + dy * dy + dz * dz;
 }
 
+struct Neighbor {
+    float r2;
+    int id;
+};
+
 template<int k>
 struct NearestK {
     float r2s[k];
@@ -321,6 +326,8 @@ struct NearestK {
             r2s[i] = r2;
             ids[i] = index;
         }
+        max_idx = 0;
+        max_r2 = r2;
     }
 
     __device__ inline void set_without_update(const int i, const float r2, int index) {
@@ -408,26 +415,26 @@ __global__ void KernelKNNPreSearch(const float3* pos_in, const float3* pos_find,
         knn_guess_out[idx * k + i] = nearestK.ids[i];
     }
 
-    // Next we need to find indices that securely bound the current sphere
-    float R = sqrtf(nearestK.max_r2);
-    float3 xmin = {pos0.x - R, pos0.y - R, pos0.z - R};
-    int lower = istart;
-    int off = 1;
-    while(z_pos_less(xmin, pos_in[lower]) && (lower > 0)) {
-        lower = max(lower - off, 0);
-        off *= 2;
-    }
+    // // Next we need to find indices that securely bound the current sphere
+    // float R = sqrtf(nearestK.max_r2);
+    // float3 xmin = {pos0.x - R, pos0.y - R, pos0.z - R};
+    // int lower = istart;
+    // int off = 1;
+    // while(z_pos_less(xmin, pos_in[lower]) && (lower > 0)) {
+    //     lower = max(lower - off, 0);
+    //     off *= 2;
+    // }
 
-    float3 xmax = {pos0.x + R, pos0.y + R, pos0.z + R};
-    int upper = iend;
-    off = 1;
-    while(z_pos_less(pos_in[upper], xmax) && (upper < npos-1)) {
-        upper = min(upper + off, npos-1);
-        off *= 2;
-    }
+    // float3 xmax = {pos0.x + R, pos0.y + R, pos0.z + R};
+    // int upper = iend;
+    // off = 1;
+    // while(z_pos_less(pos_in[upper], xmax) && (upper < npos-1)) {
+    //     upper = min(upper + off, npos-1);
+    //     off *= 2;
+    // }
     
-    knn_guess_out[idx * k] = lower;
-    knn_guess_out[idx * k + 1] = upper;
+    // knn_guess_out[idx * k] = lower;
+    // knn_guess_out[idx * k + 1] = upper;
 }
 
 void launch_KernelKNNPreSearch(int k,
@@ -489,46 +496,74 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
-struct Neighbor {
-    int id;
-    float r2;
-};
-
 template <int k>
 __global__ void KernelIlistKNN(
-    const float4* xA,    // input positions
-    const float4* xB,    // query positions
-    const int* isplitA,  // leaf-ranges in A
-    const int* isplitB,  // leaf-ranges in B
-    const int* lvlA,     // binary levels of A
-    const int* ilist,    // interaction list
-    const int* ilist_splitsB, // B leaf-ranges in ilist. Interactions to evaluate are ilist[ilist_splitsB[i]:ilist_splitsB[i+1]]
-    Neighbor* knn, // output knn list
+    const float4* xA,           // input positions
+    const float4* xB,           // query positions
+    const int* isplitA,         // leaf-ranges in A
+    const int* isplitB,         // leaf-ranges in B
+    const int* lvlA,            // binary levels of A
+    const int* ilist,           // interaction list
+    const int* ilist_splitsB,   // B leaf-ranges in ilist
+    Neighbor* knn,              // output knn list
     int interactions_per_block, // 1 for now
-    float boxsize, // ignored for now
-    int nleavesB // number of leaves in B
+    float boxsize,              // ignored for now
+    int nleavesB                // number of leaves in B
 ) {
-    __shared__ float4 xA_shared[32];
+    __shared__ float3 xA_shared[32];
 
     // for now we assume interactions_per_block == 1
-    int ileaf = blockIdx.x;
-    if (ileaf >= nleavesB) {
+    int ileafB = blockIdx.x;
+    if (ileafB >= nleavesB) {
         return; // No work to do
     }
     
-    int ileaf_start = isplitB[ileaf], ileaf_end = isplitB[ileaf + 1];
-    int npart = ileaf_end - ileaf_start;
+    int ileafB_start = isplitB[ileafB], ileafB_end = isplitB[ileafB + 1];
+    int npartB = ileafB_end - ileafB_start;
 
-    int ipart = ileaf_start + min(threadIdx.x, npart - 1);
+    if (npartB <= 0) {
+        return; // No particles in this leaf
+    }
 
-    float4 posB = xB[ipart];
+    int ipart = ileafB_start + min(threadIdx.x, npartB - 1);
+
+    float4 posBf4 = xB[ipart];
+    float3 posB = make_float3(posBf4.x, posBf4.y, posBf4.z);
+    // float rmin = posBf4.w; // Will use this later, but not for now
+
     NearestK<k> nearestK;
     nearestK.init();
 
-    Neighbor pneigh = {ipart, 1.0f}; // Initialize with a large distance
+    int ilist_start = ilist_splitsB[ileafB], ilist_end = ilist_splitsB[ileafB + 1];
+    int ninteractions = ilist_end - ilist_start;
+    for(int i = 0; i < ninteractions; i++) {
+        int ileafA = ilist[ilist_start + i];
 
-    if (threadIdx.x < npart) {
-        knn[k*ipart] = pneigh; // test output
+        // Load the positions of particles in leaf A into shared memory
+        int ileafA_start = isplitA[ileafA], ileafA_end = isplitA[ileafA + 1];
+        int npartA = ileafA_end - ileafA_start;
+
+        __syncthreads();
+        if (threadIdx.x < npartA) {
+            float4 xload = xA[ileafA_start + threadIdx.x];
+            xA_shared[threadIdx.x] = make_float3(xload.x, xload.y, xload.z);
+        }
+        __syncthreads();
+
+        // Now search for the nearest neighbors in A
+        for (int j = 0; j < npartA; j++) {
+            float3 posA = xA_shared[j];
+            float r2 = distance_squared(posA, posB);
+            nearestK.consider(r2, ileafA_start + j);
+        }
+    }
+
+    nearestK.final_sort();
+    
+    if(threadIdx.x < npartB) {
+        for(int i = 0; i < k; ++i) {
+            knn[ipart * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
+        }
     }
 }
 
