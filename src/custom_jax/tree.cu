@@ -315,6 +315,14 @@ struct NearestK {
     int max_idx;
     float  max_r2;
 
+    __device__ inline void init(float r2=1e10, int index=-1) {
+        #pragma unroll
+        for (int i = 0; i < k; i++) {
+            r2s[i] = r2;
+            ids[i] = index;
+        }
+    }
+
     __device__ inline void set_without_update(const int i, const float r2, int index) {
         r2s[i] = r2;
         ids[i] = index;
@@ -443,6 +451,7 @@ void launch_KernelKNNPreSearch(int k,
 }
 
 
+
 ffi::Error HostKNNSearch(
         cudaStream_t stream, ffi::Buffer<ffi::F32> pos, ffi::Buffer<ffi::F32> pos_find, 
         ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> id_out2, 
@@ -480,6 +489,101 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+struct Neighbor {
+    int id;
+    float r2;
+};
+
+template <int k>
+__global__ void KernelIlistKNN(
+    const float4* xA,    // input positions
+    const float4* xB,    // query positions
+    const int* isplitA,  // leaf-ranges in A
+    const int* isplitB,  // leaf-ranges in B
+    const int* lvlA,     // binary levels of A
+    const int* ilist,    // interaction list
+    const int* ilist_splitsB, // B leaf-ranges in ilist. Interactions to evaluate are ilist[ilist_splitsB[i]:ilist_splitsB[i+1]]
+    Neighbor* knn, // output knn list
+    int interactions_per_block, // 1 for now
+    float boxsize, // ignored for now
+    int nleavesB // number of leaves in B
+) {
+    __shared__ float4 xA_shared[32];
+
+    // for now we assume interactions_per_block == 1
+    int ileaf = blockIdx.x;
+    if (ileaf >= nleavesB) {
+        return; // No work to do
+    }
+    
+    int ileaf_start = isplitB[ileaf], ileaf_end = isplitB[ileaf + 1];
+    int npart = ileaf_end - ileaf_start;
+
+    int ipart = ileaf_start + min(threadIdx.x, npart - 1);
+
+    float4 posB = xB[ipart];
+    NearestK<k> nearestK;
+    nearestK.init();
+
+    Neighbor pneigh = {ipart, 1.0f}; // Initialize with a large distance
+
+    if (threadIdx.x < npart) {
+        knn[k*ipart] = pneigh; // test output
+    }
+}
+
+ffi::Error HostIlistKNNSearch(
+        cudaStream_t stream, 
+        ffi::Buffer<ffi::F32> xA, 
+        ffi::Buffer<ffi::F32> xB, 
+        ffi::Buffer<ffi::S32> isplitA,
+        ffi::Buffer<ffi::S32> isplitB,
+        ffi::Buffer<ffi::S32> lvlA,
+        ffi::Buffer<ffi::S32> ilist,
+        ffi::Buffer<ffi::S32> ilist_splitsB,
+        ffi::ResultBuffer<ffi::S32> knn,
+        size_t interactions_per_block,
+        float boxsize
+    ) {
+    int k = knn->dimensions()[knn->dimensions().size() - 2];
+    size_t nleavesB = isplitB.element_count() - 1;
+
+    float4* xAf4 = reinterpret_cast<float4*>(xA.typed_data());
+    float4* xBf4 = reinterpret_cast<float4*>(xB.typed_data());
+    Neighbor* knn_ptr = reinterpret_cast<Neighbor*>(knn->typed_data());
+
+    size_t block_size = 32;
+    
+    KernelIlistKNN<32><<< div_ceil(nleavesB, interactions_per_block), block_size, 0, stream>>>(
+        xAf4, xBf4,
+        isplitA.typed_data(), isplitB.typed_data(),
+        lvlA.typed_data(), ilist.typed_data(), ilist_splitsB.typed_data(),
+        knn_ptr, interactions_per_block, 
+        boxsize, nleavesB
+    );
+    
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    IlistKNNSearch, HostIlistKNNSearch,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>() // xA : input positions
+        .Arg<ffi::Buffer<ffi::F32>>() // xB : eval positions
+        .Arg<ffi::Buffer<ffi::S32>>() // isplitA : leaf-ranges in A
+        .Arg<ffi::Buffer<ffi::S32>>() // isplitB : leaf-ranges in B
+        .Arg<ffi::Buffer<ffi::S32>>() // lvlA : levels of A, used to determine the extend
+        .Arg<ffi::Buffer<ffi::S32>>() // ilist : interaction list
+        .Arg<ffi::Buffer<ffi::S32>>() // ilist_splitsB : leaf-ranges in ilist
+        .Ret<ffi::Buffer<ffi::S32>>() // knn : output knn list
+        .Attr<size_t>("interactions_per_block")
+        .Attr<float>("boxsize"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
 
 // Include deprecated functions
 // This module includes a bunch of functions that we do not need anymore, but we keep
@@ -491,6 +595,7 @@ NB_MODULE(nb_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
     m.def("KNNSearch", []() { return EncapsulateFfiCall(KNNSearch); });
+    m.def("IlistKNNSearch", []() { return EncapsulateFfiCall(IlistKNNSearch); });
 
     // A bunch of deprecated functions
     // m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });
