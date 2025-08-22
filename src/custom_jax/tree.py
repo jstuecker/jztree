@@ -7,7 +7,6 @@ import custom_jax.nb_tree as nb_tree
 
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
-jax.ffi.register_ffi_target("KNNSearch", nb_tree.KNNSearch(), platform="CUDA")
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_tree.IlistKNNSearch(), platform="CUDA")
 
 def pos_zorder_sort(x, block_size=64):
@@ -47,25 +46,6 @@ def build_ztree(x, block_size=64):
     return ztree
 build_ztree.jit = jax.jit(build_ztree, static_argnames=("block_size",))
 
-def knn_search(xzsort, xfind, k=4, block_size=64, init_factor=1.0):
-    """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
-    """
-    assert xzsort.dtype == xfind.dtype == jnp.float32
-    assert xzsort.shape[-1] == xfind.shape[-1] == 3
-    assert init_factor >= 0.5
-
-    assert k in (4,8,16,32), "so far only k=4,8,16,32 are supported"
-
-    nsearch_init = int(np.ceil(init_factor * k) + 1)
-
-    print(f"knn_search: k={k}, block_size={block_size}, nsearch_init={nsearch_init}")
-
-    out_type = jax.ShapeDtypeStruct((xzsort.shape[0], k), jnp.int32)
-    i1,i2 = jax.ffi.ffi_call("KNNSearch", (out_type, out_type))(
-        xzsort, xfind, block_size=np.uint64(block_size), nsearch_init=np.uint64(nsearch_init))
- 
-    return i1, i2
-knn_search.jit = jax.jit(knn_search, static_argnames=("k", "block_size", "init_factor"))
 
 def ilist_knn_search(xT, isplitT, lvlT, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, interactions_per_block=1, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort

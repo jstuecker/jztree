@@ -381,120 +381,6 @@ struct NearestK {
     }
 };
 
-// Following Michael Connor, Piyush Kumar (2009)
-template <int k>
-__global__ void KernelKNNPreSearch(const float3* pos_in, const float3* pos_find, int* knn_guess_out, int npos, int nfind, int nsearch_init) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= nfind)
-        return;
-    float3 pos0 = pos_find[idx];
-    int idpos = idx; // For now we just assume that pos_in and pos_find are the same array
-    
-    float distance[k];
-    int indices[k];
-
-    // We will find the top-k nearest neighbors in pos_in[istart:iend]
-    int istart = max(min(idpos - nsearch_init, npos - 2*nsearch_init), 0);
-    int iend = istart + 2*nsearch_init;
-
-    NearestK<k> nearestK;
-    #pragma unroll
-    for (int i = 0; i < k; i++) {
-        float r2 = distance_squared(pos0, pos_in[istart + i]);
-        nearestK.set_without_update(i, r2, istart + i);
-    }
-    nearestK.rebuild_max();
-    for (int i = k; i < 2*nsearch_init; i++) {
-        float r2 = distance_squared(pos0, pos_in[istart + i]);
-        nearestK.consider(r2, istart + i);
-    }
-
-    nearestK.final_sort();
-    
-    for(int i = 0; i < k; ++i) {
-        knn_guess_out[idx * k + i] = nearestK.ids[i];
-    }
-
-    // // Next we need to find indices that securely bound the current sphere
-    // float R = sqrtf(nearestK.max_r2);
-    // float3 xmin = {pos0.x - R, pos0.y - R, pos0.z - R};
-    // int lower = istart;
-    // int off = 1;
-    // while(z_pos_less(xmin, pos_in[lower]) && (lower > 0)) {
-    //     lower = max(lower - off, 0);
-    //     off *= 2;
-    // }
-
-    // float3 xmax = {pos0.x + R, pos0.y + R, pos0.z + R};
-    // int upper = iend;
-    // off = 1;
-    // while(z_pos_less(pos_in[upper], xmax) && (upper < npos-1)) {
-    //     upper = min(upper + off, npos-1);
-    //     off *= 2;
-    // }
-    
-    // knn_guess_out[idx * k] = lower;
-    // knn_guess_out[idx * k + 1] = upper;
-}
-
-void launch_KernelKNNPreSearch(int k,
-        cudaStream_t stream, const float3* pos_in, const float3* pos_find, 
-        int* knn_guess_out, int npos, int nfind, int nsearch_init, size_t block_size) {
-    // KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init);
-    switch(k) {
-        case 4: KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
-        case 8: KernelKNNPreSearch<8><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
-        case 16: KernelKNNPreSearch<16><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
-        case 32: KernelKNNPreSearch<32><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
-        // case 64: KernelKNNPreSearch<64><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_in, pos_find, knn_guess_out, npos, nfind, nsearch_init); break;
-        default:
-            throw std::runtime_error("Unsupported k value in launch_KernelKNNPreSearch");
-    }
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        throw std::runtime_error(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-}
-
-
-
-ffi::Error HostKNNSearch(
-        cudaStream_t stream, ffi::Buffer<ffi::F32> pos, ffi::Buffer<ffi::F32> pos_find, 
-        ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> id_out2, 
-        int nsearch_init, size_t block_size) {
-    
-    size_t npos = pos.element_count()/3;
-    size_t nfind = pos_find.element_count()/3;
-
-    int k = id_out->dimensions()[id_out->dimensions().size() - 1];
-
-    float3* pos_f3 = reinterpret_cast<float3*>(pos.typed_data());
-    float3* pos_find_f3 = reinterpret_cast<float3*>(pos_find.typed_data());
-    
-    // KernelKNNPreSearch<4><<< div_ceil(nfind, block_size), block_size, 0, stream>>>(pos_f3, pos_find_f3, id_out->typed_data(), npos, nfind, nsearch_init);
-    launch_KernelKNNPreSearch(k, stream, pos_f3, pos_find_f3, id_out->typed_data(), npos, nfind, 
-        nsearch_init, block_size);
-    
-    
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    KNNSearch, HostKNNSearch,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()
-        .Arg<ffi::Buffer<ffi::F32>>()
-        .Ret<ffi::Buffer<ffi::S32>>()
-        .Ret<ffi::Buffer<ffi::S32>>()
-        .Attr<size_t>("nsearch_init")
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
 
 template <int k>
 __global__ void KernelIlistKNN(
@@ -653,7 +539,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 NB_MODULE(nb_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
-    m.def("KNNSearch", []() { return EncapsulateFfiCall(KNNSearch); });
     m.def("IlistKNNSearch", []() { return EncapsulateFfiCall(IlistKNNSearch); });
 
     // A bunch of deprecated functions
