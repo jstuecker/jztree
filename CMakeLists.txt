@@ -33,10 +33,11 @@ message(STATUS "XLA include directory: ${XLA_DIR}")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 
 # Define a list of modules and their source files
-set(MODULES nb_forces nb_tree nb_multipoles)
+set(MODULES nb_forces nb_tree nb_multipoles nb_knn)
 set(MODULE_PATHS src/custom_jax/forces.cu
     src/custom_jax/tree.cu
     src/custom_jax/multipoles.cu
+    src/custom_jax/knn.cu
 )
 
 foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)

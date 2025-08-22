@@ -4,10 +4,11 @@ import jax
 import jax.numpy as jnp
 
 import custom_jax.nb_tree as nb_tree
+import custom_jax.nb_knn as nb_knn
 
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
-jax.ffi.register_ffi_target("IlistKNNSearch", nb_tree.IlistKNNSearch(), platform="CUDA")
+jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
 
 def pos_zorder_sort(x, block_size=64):
     assert x.dtype == jnp.float32
