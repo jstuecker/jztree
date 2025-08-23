@@ -200,14 +200,6 @@ ffi::Error HostIlistKNNSearch(
     Neighbor* knn_ptr = reinterpret_cast<Neighbor*>(knn->typed_data());
 
     size_t block_size = 32;
-    
-    // KernelIlistKNN<32><<< div_ceil(nleavesQ, interactions_per_block), block_size, 0, stream>>>(
-    //     xAf4, xBf4,
-    //     isplitT.typed_data(), isplitQ.typed_data(),
-    //     lvlT.typed_data(), ilist.typed_data(), ilist_splitsQ.typed_data(),
-    //     knn_ptr, interactions_per_block, 
-    //     boxsize, nleavesQ
-    // );
 
     launch_KernelIlistKNN(k, stream, nleavesQ, interactions_per_block,
         xAf4, xBf4,
