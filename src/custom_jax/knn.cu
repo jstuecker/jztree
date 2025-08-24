@@ -100,6 +100,57 @@ struct Node {
     int level;
 };
 
+__device__ __forceinline__ float3 LvlToHalfExt(int level) {
+    int olvl = level / 3;
+    int omod = level - olvl * 3;
+    int lx = olvl;
+    int ly = olvl + (omod >= 2 ? 1 : 0);
+    int lz = olvl + (omod >= 1 ? 1 : 0);
+    
+    return make_float3(ldexpf(1.0f, lx-1), ldexpf(1.0f, ly-1), ldexpf(1.0f, lz-1));
+}
+
+__device__ __forceinline__ float mindist(float x1, float x2, float width_half) {
+    return max(fabsf(x1-x2) - width_half, 0.0f);
+}
+
+__device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part) {
+    float3 half_ext = LvlToHalfExt(node.level);
+
+    float dx = mindist(part.x, node.center.x, half_ext.x);
+    float dy = mindist(part.y, node.center.y, half_ext.y);
+    float dz = mindist(part.z, node.center.z, half_ext.z);
+
+    return dx*dx + dy*dy + dz*dz;
+}
+
+__device__ __forceinline__ int get_next_leaf(
+    const Node* __restrict__ leaves,
+    const int* __restrict__ ilist,
+    int &ileaf_out,
+    float3 xpart, 
+    float r2max,
+    int &icur,
+    int iend
+) {
+    while(icur < iend) {
+        ileaf_out = ilist[icur];
+        Node leaf = leaves[ileaf_out];
+        
+        float r2leaf = NodePartMinDist2(leaf, xpart);
+        
+        bool accept = (r2leaf <= r2max);
+
+        bool any_accept = syncthreads_or(accept);
+
+        icur += 1;
+        if(any_accept) {
+            return true;
+        }
+    }
+    return false;
+}
+
 template <int k>
 __global__ void KernelIlistKNN(
     const float4* xT,           // input positions
@@ -117,39 +168,34 @@ __global__ void KernelIlistKNN(
     int istart = blockIdx.x * interactions_per_block;
     int iend = min(istart + interactions_per_block, nleavesQ);
 
-    __shared__ int2 _seg_spaceQ[8];
-    SegmentManager<8, true> segmentsQ(nullptr, isplitQ, _seg_spaceQ, istart, iend);
+    for(int ileafQ = istart; ileafQ < iend; ileafQ += 1) {
+        int iqstart = isplitQ[ileafQ], iqend = isplitQ[ileafQ + 1];
+        int ipartQ = min(iqstart + threadIdx.x, iqend - 1);
+        bool validQ = iqstart + threadIdx.x < iqend;
 
-    while(!segmentsQ.finished()) {
-        int2 ipartQ = segmentsQ.next();
-        int ileafQ = ipartQ.y;
-
-        float4 posQf4 = ipartQ.x >= 0 ? xQ[ipartQ.x] : make_float4(0.f,0.f,0.f,0.f);
+        float4 posQf4 = xQ[ipartQ];
         float3 posQ = {posQf4.x, posQf4.y, posQf4.z};
 
         NearestK<k> nearestK;
         nearestK.init();
 
-        __shared__ int2 _seg_spaceT[16];
-        SegmentManager<16, false> segmentsT(ilist, isplitT, _seg_spaceT, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
-
         __shared__ Particle particles[32];
 
-        while(!segmentsT.finished()) {
-            __syncthreads();
-            int ipartT = segmentsT.next().x;
+        int iqmin = ilist_splitsQ[ileafQ], iqmax = ilist_splitsQ[ileafQ + 1];
+        int ileafT = 0;
 
-            if (ipartT >= 0) {
+        while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2, iqmin, iqmax)) {
+            int ipartT = isplitT[ileafT] + threadIdx.x;
+            int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
+
+            if (threadIdx.x < npartT) {
                 float4 xload = xT[ipartT];
                 particles[threadIdx.x] = {make_float3(xload.x, xload.y, xload.z), ipartT};
             }
             __syncthreads();
 
-            if(ipartQ.x < 0)
-                continue; // skip if no valid query point
-
             // Now search for the nearest neighbors in A
-            for (int j = 0; j < segmentsT.nids_loaded(); j++) {
+            for (int j = 0; j < npartT; j++) {
                 Particle p = particles[j];
                 float r2 = distance_squared(p.pos, posQ);
                 nearestK.consider(r2, p.id);
@@ -158,9 +204,9 @@ __global__ void KernelIlistKNN(
 
         nearestK.final_sort();
         
-        if(ipartQ.x >= 0) {
+        if(validQ) {
             for(int i = 0; i < k; i++) {
-                knn[ipartQ.x * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
+                knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
             }
         }
     }
