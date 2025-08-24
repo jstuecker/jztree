@@ -16,7 +16,6 @@ def ilist_knn_search(xT, isplitT, lvlT, ilist, ilist_splitsB, xQ=None,  isplitQ=
     assert isplitT.dtype == isplitQ.dtype == jnp.int32
     assert lvlT.dtype == ilist.dtype == ilist_splitsB.dtype == jnp.int32
     assert k in (4,8,16,32), "Only k=32 is suppported so far"
-    assert interactions_per_block == 1
 
     x4a = jnp.concatenate((xT, jnp.zeros(xT.shape[:-1])[...,None]), axis=-1)
     x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)

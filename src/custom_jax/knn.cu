@@ -109,50 +109,51 @@ __global__ void KernelIlistKNN(
     float boxsize,              // ignored for now
     int nleavesQ                // number of leaves in B
 ) {
-    // for now we assume interactions_per_block == 1
-    int ileafQ = blockIdx.x;
-    if (ileafQ >= nleavesQ) {
-        return; // No work to do
-    }
+    int istart = blockIdx.x * interactions_per_block;
+    int iend = min(istart + interactions_per_block, nleavesQ);
 
-    __shared__ int2 _seg_spaceQ[2];
-    SegmentManager<2, true> segmentsQ(nullptr, isplitQ, _seg_spaceQ, ileafQ, ileafQ+1);
-    int ipartQ = segmentsQ.next();
+    __shared__ int2 _seg_spaceQ[8];
+    SegmentManager<8, true> segmentsQ(nullptr, isplitQ, _seg_spaceQ, istart, iend);
 
-    float4 posQf4 = ipartQ >= 0 ? xQ[ipartQ] : make_float4(0.f,0.f,0.f,0.f);
-    float3 posQ = {posQf4.x, posQf4.y, posQf4.z};
+    while(!segmentsQ.finished()) {
+        int2 ipartQ = segmentsQ.next();
+        int ileafQ = ipartQ.y;
 
-    NearestK<k> nearestK;
-    nearestK.init();
+        float4 posQf4 = ipartQ.x >= 0 ? xQ[ipartQ.x] : make_float4(0.f,0.f,0.f,0.f);
+        float3 posQ = {posQf4.x, posQf4.y, posQf4.z};
 
-    __shared__ int2 _seg_spaceT[16];
-    SegmentManager<16, false> segmentsT(ilist, isplitT, _seg_spaceT, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
+        NearestK<k> nearestK;
+        nearestK.init();
 
-    __shared__ Particle particles[32];
+        __shared__ int2 _seg_spaceT[16];
+        SegmentManager<16, false> segmentsT(ilist, isplitT, _seg_spaceT, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
-    while(!segmentsT.finished()) {
-        int ipartT = segmentsT.next();
+        __shared__ Particle particles[32];
 
-        __syncthreads();
-        if (ipartT >= 0) {
-            float4 xload = xT[ipartT];
-            particles[threadIdx.x] = {make_float3(xload.x, xload.y, xload.z), ipartT};
+        while(!segmentsT.finished()) {
+            int ipartT = segmentsT.next().x;
+
+            __syncthreads();
+            if (ipartT >= 0) {
+                float4 xload = xT[ipartT];
+                particles[threadIdx.x] = {make_float3(xload.x, xload.y, xload.z), ipartT};
+            }
+            __syncthreads();
+
+            // Now search for the nearest neighbors in A
+            for (int j = 0; j < segmentsT.nids_loaded(); j++) {
+                Particle p = particles[j];
+                float r2 = distance_squared(p.pos, posQ);
+                nearestK.consider(r2, p.id);
+            }
         }
-        __syncthreads();
 
-        // Now search for the nearest neighbors in A
-        for (int j = 0; j < segmentsT.nids_loaded(); j++) {
-            Particle p = particles[j];
-            float r2 = distance_squared(p.pos, posQ);
-            nearestK.consider(r2, p.id);
-        }
-    }
-
-    nearestK.final_sort();
-    
-    if(ipartQ >= 0) {
-        for(int i = 0; i < k; i++) {
-            knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
+        nearestK.final_sort();
+        
+        if(ipartQ.x >= 0) {
+            for(int i = 0; i < k; i++) {
+                knn[ipartQ.x * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
+            }
         }
     }
 }
