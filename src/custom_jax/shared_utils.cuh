@@ -14,18 +14,19 @@ inline int div_ceil(int a, int b) {
     return (a + b - 1) / b;
 }
 
-template <int nload>
+template <int NLOAD, bool SINGLE = false>
 __device__ struct SegmentManager {
     // Manages a pointer based segment list so that it can be traversed with threads
     // almost as if it was a linear structure
     // each segment goes from isplits[i] to isplits[i+1]
     // inodes contains the indices of the segments to be processed
     // istart, iend define the range of inodes to be processed
+    // if SINGLE is set, only particles in one segment are loaded at a time
 
     int istart, iend;                     // indices into inodes[]
     const int* __restrict__ inodes;       // segment indices to visit
     const int* __restrict__ isplits;      // global segment offsets
-    int2* __restrict__ segments;          // -> shared buffer [nload], allocated externally
+    int2* __restrict__ segments;          // -> shared buffer [NLOAD], allocated externally
     int seg_loaded;                       // how many segments resident in shared
 
     // internal state:
@@ -33,7 +34,7 @@ __device__ struct SegmentManager {
     int seg_offset = 0;
     int num_loaded = 0;
     
-    __device__ __forceinline__ void init(const int* inodes_, const int* isplits_, int2* segments_, int istart_, int iend_) {
+    __device__ __forceinline__ SegmentManager(const int* inodes_, const int* isplits_, int2* segments_, int istart_, int iend_) {
         inodes = inodes_;
         isplits = isplits_;
         segments = segments_;
@@ -45,7 +46,7 @@ __device__ struct SegmentManager {
     }
 
     __device__ __forceinline__ void loadSegments() {
-        seg_loaded = min(nload, iend-istart);
+        seg_loaded = min(NLOAD, iend-istart);
         if(threadIdx.x < seg_loaded) {
             int segment_idx = inodes[istart + threadIdx.x];
             int i0 = isplits[segment_idx];
@@ -81,6 +82,9 @@ __device__ struct SegmentManager {
             }
             seg_offset = 0;
             next_seg += 1;
+
+            if(SINGLE) 
+                break; // only load at most one segment at a time
         }
 
         return id;

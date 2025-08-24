@@ -134,8 +134,7 @@ __global__ void KernelIlistKNN(
     int ilist_start = ilist_splitsQ[ileafQ], ilist_end = ilist_splitsQ[ileafQ + 1];
 
     __shared__ int2 _seg_space[16];
-    SegmentManager<16> segments;
-    segments.init(ilist, isplitT, _seg_space, ilist_start, ilist_end);
+    SegmentManager<16, false> segments(ilist, isplitT, _seg_space, ilist_start, ilist_end);
 
     __shared__ Particle particles[32];
 
