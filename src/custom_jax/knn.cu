@@ -131,14 +131,17 @@ __global__ void KernelIlistKNN(
         __shared__ Particle particles[32];
 
         while(!segmentsT.finished()) {
+            __syncthreads();
             int ipartT = segmentsT.next().x;
 
-            __syncthreads();
             if (ipartT >= 0) {
                 float4 xload = xT[ipartT];
                 particles[threadIdx.x] = {make_float3(xload.x, xload.y, xload.z), ipartT};
             }
             __syncthreads();
+
+            if(ipartQ.x < 0)
+                continue; // skip if no valid query point
 
             // Now search for the nearest neighbors in A
             for (int j = 0; j < segmentsT.nids_loaded(); j++) {
