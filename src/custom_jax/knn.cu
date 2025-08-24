@@ -114,32 +114,24 @@ __global__ void KernelIlistKNN(
     if (ileafQ >= nleavesQ) {
         return; // No work to do
     }
-    
-    int ileafQ_start = isplitQ[ileafQ], ileafQ_end = isplitQ[ileafQ + 1];
-    int npartQ = ileafQ_end - ileafQ_start;
 
-    if (npartQ <= 0) {
-        return; // No particles in this leaf
-    }
+    __shared__ int2 _seg_spaceQ[2];
+    SegmentManager<2, true> segmentsQ(nullptr, isplitQ, _seg_spaceQ, ileafQ, ileafQ+1);
+    int ipartQ = segmentsQ.next();
 
-    int ipart = ileafQ_start + min(threadIdx.x, npartQ - 1);
-
-    float4 posQf4 = xQ[ipart];
-    float3 posQ = make_float3(posQf4.x, posQf4.y, posQf4.z);
-    // float rmin = posQf4.w; // Will use this later, but not for now
+    float4 posQf4 = ipartQ >= 0 ? xQ[ipartQ] : make_float4(0.f,0.f,0.f,0.f);
+    float3 posQ = {posQf4.x, posQf4.y, posQf4.z};
 
     NearestK<k> nearestK;
     nearestK.init();
 
-    int ilist_start = ilist_splitsQ[ileafQ], ilist_end = ilist_splitsQ[ileafQ + 1];
-
-    __shared__ int2 _seg_space[16];
-    SegmentManager<16, false> segments(ilist, isplitT, _seg_space, ilist_start, ilist_end);
+    __shared__ int2 _seg_spaceT[16];
+    SegmentManager<16, false> segmentsT(ilist, isplitT, _seg_spaceT, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
     __shared__ Particle particles[32];
 
-    while(!segments.finished()) {
-        int ipartT = segments.next();
+    while(!segmentsT.finished()) {
+        int ipartT = segmentsT.next();
 
         __syncthreads();
         if (ipartT >= 0) {
@@ -149,7 +141,7 @@ __global__ void KernelIlistKNN(
         __syncthreads();
 
         // Now search for the nearest neighbors in A
-        for (int j = 0; j < segments.nids_loaded(); j++) {
+        for (int j = 0; j < segmentsT.nids_loaded(); j++) {
             Particle p = particles[j];
             float r2 = distance_squared(p.pos, posQ);
             nearestK.consider(r2, p.id);
@@ -158,9 +150,9 @@ __global__ void KernelIlistKNN(
 
     nearestK.final_sort();
     
-    if(threadIdx.x < npartQ) {
+    if(ipartQ >= 0) {
         for(int i = 0; i < k; i++) {
-            knn[ipart * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
+            knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
         }
     }
 }

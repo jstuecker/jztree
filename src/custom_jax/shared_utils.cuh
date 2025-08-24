@@ -24,7 +24,7 @@ __device__ struct SegmentManager {
     // if SINGLE is set, only particles in one segment are loaded at a time
 
     int istart, iend;                     // indices into inodes[]
-    const int* __restrict__ inodes;       // segment indices to visit
+    const int* __restrict__ inodes;       // segment indices to visit (defaults to 0,1,... if nullptr)
     const int* __restrict__ isplits;      // global segment offsets
     int2* __restrict__ segments;          // -> shared buffer [NLOAD], allocated externally
     int seg_loaded;                       // how many segments resident in shared
@@ -48,7 +48,7 @@ __device__ struct SegmentManager {
     __device__ __forceinline__ void loadSegments() {
         seg_loaded = min(NLOAD, iend-istart);
         if(threadIdx.x < seg_loaded) {
-            int segment_idx = inodes[istart + threadIdx.x];
+            int segment_idx = inodes ? inodes[istart + threadIdx.x] : istart + threadIdx.x;
             int i0 = isplits[segment_idx];
             int i1 = isplits[segment_idx + 1];
             int2 segment = {i0, i1 - i0};
