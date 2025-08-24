@@ -5,24 +5,36 @@ import custom_jax.nb_knn as nb_knn
 
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
 
-def ilist_knn_search(xT, isplitT, lvlT, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, interactions_per_block=1, boxsize=0.):
+def lvl_to_ext(level_binary):
+    olvl, omod = level_binary//3, level_binary % 3
+    levels_3d = jnp.stack((olvl, olvl + (omod >= 2).astype(jnp.int32), olvl + (omod >= 1).astype(jnp.int32)),axis=-1)
+    return 2.**levels_3d
+
+def get_node_box(x, level_binary):
+    node_size = lvl_to_ext(level_binary)
+    node_cent = (jnp.floor(x / node_size) + 0.5) * node_size
+    return node_cent, node_size
+
+def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, interactions_per_block=1, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
     if xQ is None: xQ = xT
     if isplitQ is None: isplitQ = isplitT
 
     assert xT.dtype == xQ.dtype == jnp.float32
-    assert xT.shape[-1] == xQ.shape[-1] == 3
+    assert xT.shape[-1] == xQ.shape[-1] == xleaf.shape[-1] == 3
     assert isplitT.dtype == isplitQ.dtype == jnp.int32
-    assert lvlT.dtype == ilist.dtype == ilist_splitsB.dtype == jnp.int32
+    assert lvl_leaf.dtype == ilist.dtype == ilist_splitsB.dtype == jnp.int32
     assert k in (4,8,16,32), "Only k=32 is suppported so far"
 
     x4a = jnp.concatenate((xT, jnp.zeros(xT.shape[:-1])[...,None]), axis=-1)
     x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)
 
+    x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
+
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
     knn = jax.ffi.ffi_call("IlistKNNSearch", (out_type, ))(
-        x4a, x4b, isplitT, isplitQ, lvlT, ilist, ilist_splitsB,
+        x4a, x4b, isplitT, isplitQ, x4leaf, ilist, ilist_splitsB,
         interactions_per_block=np.uint64(interactions_per_block), boxsize=np.float32(boxsize)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)

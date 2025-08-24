@@ -95,13 +95,18 @@ struct Particle {
     int id;
 };
 
+struct Node {
+    float3 center;
+    int level;
+};
+
 template <int k>
 __global__ void KernelIlistKNN(
     const float4* xT,           // input positions
     const float4* xQ,           // query positions
     const int* isplitT,         // leaf-ranges in A
     const int* isplitQ,         // leaf-ranges in B
-    const int* lvlT,            // binary levels of A
+    const Node* leaves,         // binary levels of A
     const int* ilist,           // interaction list
     const int* ilist_splitsQ,   // B leaf-ranges in ilist
     Neighbor* knn,              // output knn list
@@ -164,15 +169,15 @@ __global__ void KernelIlistKNN(
 void launch_KernelIlistKNN(int k, cudaStream_t stream, 
     int nleavesQ, int interactions_per_block,
     const float4* xT, const float4* xQ,
-    const int* isplitT, const int* isplitQ, const int* lvlT,
+    const int* isplitT, const int* isplitQ, const Node* leaves,
     const int* ilist, const int* ilist_splitsQ,
     Neighbor* knn, float boxsize) {
 
     switch(k) {
-        case 4: KernelIlistKNN<4><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, lvlT, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 8: KernelIlistKNN<8><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, lvlT, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 16: KernelIlistKNN<16><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, lvlT, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 32: KernelIlistKNN<32><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, lvlT, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
+        case 4: KernelIlistKNN<4><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
+        case 8: KernelIlistKNN<8><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
+        case 16: KernelIlistKNN<16><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
+        case 32: KernelIlistKNN<32><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
         default:
             throw std::runtime_error("Unsupported k value in launch_KernelIlistKNN");
     }
@@ -184,7 +189,7 @@ ffi::Error HostIlistKNNSearch(
         ffi::Buffer<ffi::F32> xQ, 
         ffi::Buffer<ffi::S32> isplitT,
         ffi::Buffer<ffi::S32> isplitQ,
-        ffi::Buffer<ffi::S32> lvlT,
+        ffi::Buffer<ffi::F32> leaves,
         ffi::Buffer<ffi::S32> ilist,
         ffi::Buffer<ffi::S32> ilist_splitsQ,
         ffi::ResultBuffer<ffi::S32> knn,
@@ -197,13 +202,14 @@ ffi::Error HostIlistKNNSearch(
     float4* xAf4 = reinterpret_cast<float4*>(xT.typed_data());
     float4* xBf4 = reinterpret_cast<float4*>(xQ.typed_data());
     Neighbor* knn_ptr = reinterpret_cast<Neighbor*>(knn->typed_data());
+    Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
 
     size_t block_size = 32;
 
     launch_KernelIlistKNN(k, stream, nleavesQ, interactions_per_block,
         xAf4, xBf4,
         isplitT.typed_data(), isplitQ.typed_data(),
-        lvlT.typed_data(), ilist.typed_data(), ilist_splitsQ.typed_data(),
+        leaves_ptr, ilist.typed_data(), ilist_splitsQ.typed_data(),
         knn_ptr, boxsize);
     
     cudaError_t last_error = cudaGetLastError();
@@ -221,7 +227,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::F32>>() // xQ : eval positions
         .Arg<ffi::Buffer<ffi::S32>>() // isplitT : leaf-ranges in A
         .Arg<ffi::Buffer<ffi::S32>>() // isplitQ : leaf-ranges in B
-        .Arg<ffi::Buffer<ffi::S32>>() // lvlT : levels of A, used to determine the extend
+        .Arg<ffi::Buffer<ffi::F32>>() // leaves : pos and levels of leaves
         .Arg<ffi::Buffer<ffi::S32>>() // ilist : interaction list
         .Arg<ffi::Buffer<ffi::S32>>() // ilist_splitsQ : leaf-ranges in ilist
         .Ret<ffi::Buffer<ffi::S32>>() // knn : output knn list
