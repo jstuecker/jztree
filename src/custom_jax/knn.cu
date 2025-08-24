@@ -89,7 +89,6 @@ struct NearestK {
     }
 };
 
-
 template <int k>
 __global__ void KernelIlistKNN(
     const float4* xT,           // input positions
@@ -229,7 +228,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("interactions_per_block")
         .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible});
-
 
 NB_MODULE(nb_knn, m) {
     m.def("IlistKNNSearch", []() { return EncapsulateFfiCall(IlistKNNSearch); });
