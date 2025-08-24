@@ -100,6 +100,11 @@ struct Node {
     int level;
 };
 
+struct PosR {
+    float3 pos;
+    float r;
+};
+
 __device__ __forceinline__ float3 LvlToHalfExt(int level) {
     int olvl = level / 3;
     int omod = level - olvl * 3;
@@ -153,8 +158,8 @@ __device__ __forceinline__ int get_next_leaf(
 
 template <int k>
 __global__ void KernelIlistKNN(
-    const float4* xT,           // input positions
-    const float4* xQ,           // query positions
+    const PosR* xT,             // input positions
+    const PosR* xQ,             // query positions
     const int* isplitT,         // leaf-ranges in A
     const int* isplitQ,         // leaf-ranges in B
     const Node* leaves,         // binary levels of A
@@ -173,8 +178,7 @@ __global__ void KernelIlistKNN(
         int ipartQ = min(iqstart + threadIdx.x, iqend - 1);
         bool validQ = iqstart + threadIdx.x < iqend;
 
-        float4 posQf4 = xQ[ipartQ];
-        float3 posQ = {posQf4.x, posQf4.y, posQf4.z};
+        float3 posQ = xQ[ipartQ].pos;
 
         NearestK<k> nearestK;
         nearestK.init();
@@ -189,8 +193,7 @@ __global__ void KernelIlistKNN(
             int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
 
             if (threadIdx.x < npartT) {
-                float4 xload = xT[ipartT];
-                particles[threadIdx.x] = {make_float3(xload.x, xload.y, xload.z), ipartT};
+                particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
             }
             __syncthreads();
 
@@ -214,7 +217,7 @@ __global__ void KernelIlistKNN(
 
 void launch_KernelIlistKNN(int k, cudaStream_t stream, 
     int nleavesQ, int interactions_per_block,
-    const float4* xT, const float4* xQ,
+    const PosR* xT, const PosR* xQ,
     const int* isplitT, const int* isplitQ, const Node* leaves,
     const int* ilist, const int* ilist_splitsQ,
     Neighbor* knn, float boxsize) {
@@ -245,8 +248,8 @@ ffi::Error HostIlistKNNSearch(
     int k = knn->dimensions()[knn->dimensions().size() - 2];
     size_t nleavesQ = isplitQ.element_count() - 1;
 
-    float4* xAf4 = reinterpret_cast<float4*>(xT.typed_data());
-    float4* xBf4 = reinterpret_cast<float4*>(xQ.typed_data());
+    PosR* xAf4 = reinterpret_cast<PosR*>(xT.typed_data());
+    PosR* xBf4 = reinterpret_cast<PosR*>(xQ.typed_data());
     Neighbor* knn_ptr = reinterpret_cast<Neighbor*>(knn->typed_data());
     Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
 
