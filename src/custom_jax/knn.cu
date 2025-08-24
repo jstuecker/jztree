@@ -15,6 +15,7 @@ __device__ float distance_squared(const float3 &a, const float3 &b) {
     return dx * dx + dy * dy + dz * dz;
 }
 
+
 struct Neighbor {
     float r2;
     int id;
@@ -89,6 +90,11 @@ struct NearestK {
     }
 };
 
+struct Particle {
+    float3 pos;
+    int id;
+};
+
 template <int k>
 __global__ void KernelIlistKNN(
     const float4* xT,           // input positions
@@ -126,36 +132,35 @@ __global__ void KernelIlistKNN(
     nearestK.init();
 
     int ilist_start = ilist_splitsQ[ileafQ], ilist_end = ilist_splitsQ[ileafQ + 1];
-    int ninteractions = ilist_end - ilist_start;
 
-    __shared__ float3 xT_shared[32];
+    __shared__ int2 _seg_space[16];
+    SegmentManager<16> segments;
+    segments.init(ilist, isplitT, _seg_space, ilist_start, ilist_end);
 
-    for(int i = 0; i < ninteractions; i++) {
-        int ileafT = ilist[ilist_start + i];
+    __shared__ Particle particles[32];
 
-        // Load the positions of particles in leaf A into shared memory
-        int ileafT_start = isplitT[ileafT], ileafT_end = isplitT[ileafT + 1];
-        int npartT = ileafT_end - ileafT_start;
+    while(!segments.finished()) {
+        int ipartT = segments.next();
 
         __syncthreads();
-        if (threadIdx.x < npartT) {
-            float4 xload = xT[ileafT_start + threadIdx.x];
-            xT_shared[threadIdx.x] = make_float3(xload.x, xload.y, xload.z);
+        if (ipartT >= 0) {
+            float4 xload = xT[ipartT];
+            particles[threadIdx.x] = {make_float3(xload.x, xload.y, xload.z), ipartT};
         }
         __syncthreads();
 
         // Now search for the nearest neighbors in A
-        for (int j = 0; j < npartT; j++) {
-            float3 posT = xT_shared[j];
-            float r2 = distance_squared(posT, posQ);
-            nearestK.consider(r2, ileafT_start + j);
+        for (int j = 0; j < segments.nids_loaded(); j++) {
+            Particle p = particles[j];
+            float r2 = distance_squared(p.pos, posQ);
+            nearestK.consider(r2, p.id);
         }
     }
 
     nearestK.final_sort();
     
     if(threadIdx.x < npartQ) {
-        for(int i = 0; i < k; ++i) {
+        for(int i = 0; i < k; i++) {
             knn[ipart * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
         }
     }
