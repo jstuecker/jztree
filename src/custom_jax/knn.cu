@@ -8,7 +8,30 @@
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
-__device__ __forceinline__ float wrap(float dx, float boxsize) {
+struct Neighbor {
+    float r2;
+    int id;
+};
+
+struct Particle {
+    float3 pos;
+    int id;
+};
+
+struct Node {
+    float3 center;
+    int level;
+};
+
+struct PosR {
+    float3 pos;
+    float r;
+};
+
+__device__ __forceinline__ float wrap(float dx, const float boxsize) {
+    // wraps a coordinate difference into the interval [-boxsize/2, boxsize/2)
+    // Note: in principle this code would be slightly more optimal if we decided at compile time
+    // whether we are periodic. However, my tests suggest that this would only be 3% or so.
     if(boxsize > 0.f) {
         float bh = 0.5f * boxsize;
         dx = dx < -bh ? dx + boxsize : dx;
@@ -26,10 +49,32 @@ __device__ __forceinline__ float distance_squared(const float3 &a, const float3 
     return dx * dx + dy * dy + dz * dz;
 }
 
-struct Neighbor {
-    float r2;
-    int id;
-};
+__device__ __forceinline__ float3 LvlToHalfExt(int level) {
+    // Converts a node's or leaf's binary level to its half of its extend per dimension
+    int olvl = level / 3;
+    int omod = level - olvl * 3;
+    int lx = olvl;
+    int ly = olvl + (omod >= 2 ? 1 : 0);
+    int lz = olvl + (omod >= 1 ? 1 : 0);
+    
+    return make_float3(ldexpf(1.0f, lx-1), ldexpf(1.0f, ly-1), ldexpf(1.0f, lz-1));
+}
+
+__device__ __forceinline__ float mindist(float x1, float x2, float width_half, float boxsize=0.f) {
+    // Minimum distance per dimension between a point and a box
+    return max(fabsf(wrap(x1-x2, boxsize)) - width_half, 0.0f);
+}
+
+__device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part, float boxsize=0.f) {
+    // Minimum squared distance between a node and a particle
+    float3 half_ext = LvlToHalfExt(node.level);
+
+    float dx = mindist(part.x, node.center.x, half_ext.x, boxsize);
+    float dy = mindist(part.y, node.center.y, half_ext.y, boxsize);
+    float dz = mindist(part.z, node.center.z, half_ext.z, boxsize);
+
+    return dx*dx + dy*dy + dz*dz;
+}
 
 template<int K>
 struct SortedNearestK {
@@ -79,60 +124,23 @@ struct SortedNearestK {
     }
 };
 
-struct Particle {
-    float3 pos;
-    int id;
-};
-
-struct Node {
-    float3 center;
-    int level;
-};
-
-struct PosR {
-    float3 pos;
-    float r;
-};
-
-__device__ __forceinline__ float3 LvlToHalfExt(int level) {
-    int olvl = level / 3;
-    int omod = level - olvl * 3;
-    int lx = olvl;
-    int ly = olvl + (omod >= 2 ? 1 : 0);
-    int lz = olvl + (omod >= 1 ? 1 : 0);
-    
-    return make_float3(ldexpf(1.0f, lx-1), ldexpf(1.0f, ly-1), ldexpf(1.0f, lz-1));
-}
-
-__device__ __forceinline__ float mindist(float x1, float x2, float width_half, float boxsize=0.f) {
-    return max(fabsf(wrap(x1-x2, boxsize)) - width_half, 0.0f);
-}
-
-__device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part, float boxsize=0.f) {
-    float3 half_ext = LvlToHalfExt(node.level);
-
-    float dx = mindist(part.x, node.center.x, half_ext.x, boxsize);
-    float dy = mindist(part.y, node.center.y, half_ext.y, boxsize);
-    float dz = mindist(part.z, node.center.z, half_ext.z, boxsize);
-
-    return dx*dx + dy*dy + dz*dz;
-}
-
 __device__ __forceinline__ int get_next_leaf(
     const Node* __restrict__ leaves,
     const int* __restrict__ ilist,
     int &ileaf_out,
-    float3 xpart, 
+    float3 xpart,  
     float r2max,
     int &icur,
     int iend,
     float boxsize = 0.f
 ) {
+    // "Yields" the index of the next leaf that is at least within the range of one particle
+
     while(icur < iend) {
         ileaf_out = ilist[icur];
         Node leaf = leaves[ileaf_out];
         
-        float r2leaf = NodePartMinDist2(leaf, xpart);
+        float r2leaf = NodePartMinDist2(leaf, xpart, boxsize);
         
         bool accept = (r2leaf <= r2max);
 
