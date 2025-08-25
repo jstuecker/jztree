@@ -8,13 +8,23 @@
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
-__device__ float distance_squared(const float3 &a, const float3 &b) {
-    float dx = a.x - b.x;
-    float dy = a.y - b.y;
-    float dz = a.z - b.z;
-    return dx * dx + dy * dy + dz * dz;
+__device__ __forceinline__ float wrap(float dx, float boxsize) {
+    if(boxsize > 0.f) {
+        float bh = 0.5f * boxsize;
+        dx = dx < -bh ? dx + boxsize : dx;
+        dx = dx >= bh ? dx - boxsize : dx;
+    }
+
+    return dx;
 }
 
+__device__ __forceinline__ float distance_squared(const float3 &a, const float3 &b, const float boxsize) {
+    float dx = wrap(a.x - b.x, boxsize);
+    float dy = wrap(a.y - b.y, boxsize);
+    float dz = wrap(a.z - b.z, boxsize);
+
+    return dx * dx + dy * dy + dz * dz;
+}
 
 struct Neighbor {
     float r2;
@@ -94,16 +104,16 @@ __device__ __forceinline__ float3 LvlToHalfExt(int level) {
     return make_float3(ldexpf(1.0f, lx-1), ldexpf(1.0f, ly-1), ldexpf(1.0f, lz-1));
 }
 
-__device__ __forceinline__ float mindist(float x1, float x2, float width_half) {
-    return max(fabsf(x1-x2) - width_half, 0.0f);
+__device__ __forceinline__ float mindist(float x1, float x2, float width_half, float boxsize=0.f) {
+    return max(fabsf(wrap(x1-x2, boxsize)) - width_half, 0.0f);
 }
 
-__device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part) {
+__device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part, float boxsize=0.f) {
     float3 half_ext = LvlToHalfExt(node.level);
 
-    float dx = mindist(part.x, node.center.x, half_ext.x);
-    float dy = mindist(part.y, node.center.y, half_ext.y);
-    float dz = mindist(part.z, node.center.z, half_ext.z);
+    float dx = mindist(part.x, node.center.x, half_ext.x, boxsize);
+    float dy = mindist(part.y, node.center.y, half_ext.y, boxsize);
+    float dz = mindist(part.z, node.center.z, half_ext.z, boxsize);
 
     return dx*dx + dy*dy + dz*dz;
 }
@@ -115,7 +125,8 @@ __device__ __forceinline__ int get_next_leaf(
     float3 xpart, 
     float r2max,
     int &icur,
-    int iend
+    int iend,
+    float boxsize = 0.f
 ) {
     while(icur < iend) {
         ileaf_out = ilist[icur];
@@ -163,19 +174,20 @@ __global__ void KernelIlistKNN(
     int iqmin = ilist_splitsQ[ileafQ], iqmax = ilist_splitsQ[ileafQ + 1];
     int ileafT = 0;
 
-    while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2(), iqmin, iqmax)) {
+    while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2(), iqmin, iqmax, boxsize)) {
         int ipartT = isplitT[ileafT] + threadIdx.x;
         int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
 
         if (threadIdx.x < npartT) {
             particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
         }
+
         __syncthreads();
 
         // Now search for the nearest neighbors in A
         for (int j = 0; j < npartT; j++) {
             Particle p = particles[j];
-            float r2 = distance_squared(p.pos, posQ);
+            float r2 = distance_squared(p.pos, posQ, boxsize);
             nearestK.consider(r2, p.id);
         }
     }
