@@ -90,6 +90,76 @@ struct NearestK {
     }
 };
 
+template<int k>
+struct SortedNearestK {
+    float r2s[k];
+    int ids[k];
+
+    __device__ inline void init(float r2=1e10, int index=-1) {
+        #pragma unroll
+        for (int i = 0; i < k; i++) {
+            r2s[i] = r2;
+            ids[i] = index;
+        }
+    }
+
+    // __device__ inline void set_without_update(const int i, const float r2, int index) {
+    //     r2s[i] = r2;
+    //     ids[i] = index;
+    // }
+
+    __device__ inline float max_r2() const {
+        return r2s[k-1];
+    }
+
+    // __device__ inline void consider(float r2, int id) {
+    //     // If this particle is closer than the furthest one we have, replace it
+    //     if (r2 <= r2s[k-1]) {
+    //         // We walk the array backwards and insert the new element in the right place
+    //         // This is efficient if we tend to insert particles at the end
+    //         #pragma unroll
+    //         for(int i = k-2; i >= 0; i--) {
+    //             if (r2 < r2s[i]) {
+    //                 r2s[i+1] = r2s[i];
+    //                 ids[i+1] = ids[i];
+    //             }
+    //             else {
+    //                 r2s[i+1] = r2;
+    //                 ids[i+1] = id;
+    //                 return;
+    //             }
+    //         }
+    //         r2s[0] = r2;
+    //         ids[0] = id;
+    //     }
+    // }
+
+    // Insert (r2,id) if it belongs; keeps array ascending and evicts the largest.
+    __device__ __forceinline__ void consider(float r2, int id){
+        if (r2 > r2s[k-1]) return; // fast reject, ok
+
+        float carry_r2 = r2; int carry_id = id;
+
+        #pragma unroll
+        for (int i = k-2; i >= 0; --i) {
+            float ai = r2s[i]; int bi = ids[i];
+            bool shift = (carry_r2 < ai);          // need to shift ai right?
+
+            // Write position i+1
+            r2s[i+1] = shift ? ai  : carry_r2;
+            ids[i+1] = shift ? bi  : carry_id;
+
+            // Update carry (if we placed carry at i+1, we now carry ai toward earlier slots)
+            carry_r2 = shift ? carry_r2 : ai;
+            carry_id = shift ? carry_id : bi;
+        }
+        // Finally place remaining carry at slot 0
+        r2s[0] = carry_r2;
+        ids[0] = carry_id;
+    }
+
+};
+
 struct Particle {
     float3 pos;
     int id;
@@ -180,7 +250,7 @@ __global__ void KernelIlistKNN(
 
         float3 posQ = xQ[ipartQ].pos;
 
-        NearestK<k> nearestK;
+        SortedNearestK<k> nearestK;
         nearestK.init();
 
         __shared__ Particle particles[32];
@@ -188,7 +258,7 @@ __global__ void KernelIlistKNN(
         int iqmin = ilist_splitsQ[ileafQ], iqmax = ilist_splitsQ[ileafQ + 1];
         int ileafT = 0;
 
-        while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2, iqmin, iqmax)) {
+        while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2(), iqmin, iqmax)) {
             int ipartT = isplitT[ileafT] + threadIdx.x;
             int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
 
@@ -205,7 +275,7 @@ __global__ void KernelIlistKNN(
             }
         }
 
-        nearestK.final_sort();
+        // nearestK.final_sort();
         
         if(validQ) {
             for(int i = 0; i < k; i++) {
