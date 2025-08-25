@@ -21,126 +21,11 @@ struct Neighbor {
     int id;
 };
 
-template<int k>
-struct NearestK {
-    float r2s[k];
-    int ids[k];
-
-    int max_idx;
-    float  max_r2;
-
-    __device__ inline void init(float r2=1e10, int index=-1) {
-        #pragma unroll
-        for (int i = 0; i < k; i++) {
-            r2s[i] = r2;
-            ids[i] = index;
-        }
-        max_idx = 0;
-        max_r2 = r2;
-    }
-
-    __device__ inline void set_without_update(const int i, const float r2, int index) {
-        r2s[i] = r2;
-        ids[i] = index;
-    }
-
-    __device__ inline void rebuild_max() {
-        max_idx = 0; 
-        max_r2 = r2s[0];
-        #pragma unroll
-        for (int i = 1; i < k; i++) {
-            if (r2s[i] > max_r2) { 
-                max_r2 = r2s[i]; 
-                max_idx = i; 
-            }
-        }
-    }
-
-    __device__ inline void consider(float r2, int id) {
-        // If this particle is closer than the furthest one we have, replace it
-        if (r2 <= max_r2) {
-            r2s[max_idx] = r2;
-            ids[max_idx] = id;
-        }
-        else {
-            // Check later whether this return improves things or makes them slower
-            // It is a thread divergence vs. unnecessary work trade-off
-            return; 
-        }
-        
-        rebuild_max(); 
-    }
-    
-    __device__ inline void final_sort() {
-        // simple bubble sort (works well in registers)
-        // optimize later!
-        #pragma unroll
-        for (int i = 0; i < k; i++) {
-            for (int j = i; j < k; j++) {
-                if (r2s[i] > r2s[j]) {
-                    float tmp_r2 = r2s[i];
-                    int tmp_id = ids[i];
-                    r2s[i] = r2s[j];
-                    ids[i] = ids[j];
-                    r2s[j] = tmp_r2;
-                    ids[j] = tmp_id;
-                }
-            }
-        }
-    }
-};
-
-template<int k>
-struct SortedNearestK {
-    float r2s[k];
-    int ids[k];
-
-    __device__ inline void init(float r2=1e10, int index=-1) {
-        #pragma unroll
-        for (int i = 0; i < k; i++) {
-            r2s[i] = r2;
-            ids[i] = index;
-        }
-    }
-
-    // __device__ inline void set_without_update(const int i, const float r2, int index) {
-    //     r2s[i] = r2;
-    //     ids[i] = index;
-    // }
-
-    __device__ inline float max_r2() const {
-        return r2s[k-1];
-    }
-
-
-    // Insert (r2,id) if it belongs; keeps array ascending and evicts the largest.
-    __device__ __forceinline__ void consider(float r2, int id){
-        if (r2 > r2s[k-1]) return; // fast reject, ok
-
-        float carry_r2 = r2; int carry_id = id;
-
-        #pragma unroll
-        for (int i = k-2; i >= 0; --i) {
-            float ai = r2s[i]; int bi = ids[i];
-            bool shift = (carry_r2 < ai);          // need to shift ai right?
-
-            // Write position i+1
-            r2s[i+1] = shift ? ai  : carry_r2;
-            ids[i+1] = shift ? bi  : carry_id;
-
-            // Update carry (if we placed carry at i+1, we now carry ai toward earlier slots)
-            carry_r2 = shift ? carry_r2 : ai;
-            carry_id = shift ? carry_id : bi;
-        }
-        // Finally place remaining carry at slot 0
-        r2s[0] = carry_r2;
-        ids[0] = carry_id;
-    }
-
-};
-
 template<int K>
-struct SortedNearestKMasked {
+struct SortedNearestK {
+    // Keeps track of the nearest K neighbors that we have seen so far in ascending order of r2.
+    // Offers efficient insertion of new candidates
+
     float r2s[K];
     int   ids[K];
 
@@ -157,38 +42,30 @@ struct SortedNearestKMasked {
     }
 
     // Insert (r2,id) into ascending r2s[], evicting the largest.
-    // Early-exit effect via an "active" mask; no dynamic indexing, no returns in the loop.
+    // I have tried many different variants of this function and this turned out to be the fastest.
+    // Important aspects:
+    // * no dynamic indexing
+    // * no breaks/returns in the loop (stops the compiler from unrolling)
+    // * It seems the pattern with the mask helps the compiler to skip unnecessary work
+    //   -- effectively achieving an early exit (still not totally sure how it works though...)
     __device__ __forceinline__ void consider(float r2, int id) {
         if (r2 > r2s[K-1]) return;
 
-        float carry_r2 = r2; 
-        int   carry_id = id;
         bool  active   = true;  // true until we've placed the item
 
         #pragma unroll
         for (int i = K-2; i >= 0; --i) {
-            // only meaningful while active
-            bool take = active && (carry_r2 < r2s[i]);
+            bool take = active && (r2 < r2s[i]);
 
-            // write i+1 only while active
-            float out_r2 = take ? (float)r2s[i] : carry_r2;
-            int   out_id = take ? (int)  ids[i] : carry_id;
+            r2s[i+1] = active ? (take ? r2s[i] : r2) : r2s[i+1];
+            ids[i+1] = active ? (take ? ids[i]  : id) : ids[i+1];
 
-            // predicated stores keep it register-only
-            r2s[i+1] = active ? out_r2 : r2s[i+1];
-            ids[i+1] = active ? out_id : ids[i+1];
-
-            // if we didn't take (and were active), we've placed; turn off further work
-            active = active && take;
-
-            // update carry only while still active (otherwise irrelevant)
-            carry_r2 = active ? carry_r2 : carry_r2; // no-op when inactive
-            carry_id = active ? carry_id : carry_id; // (kept for symmetry)
+            active = take;
         }
 
         // If we never placed, item belongs at slot 0
-        r2s[0] = active ? carry_r2 : r2s[0];
-        ids[0] = active ? carry_id : ids[0];
+        r2s[0] = active ? r2 : r2s[0];
+        ids[0] = active ? id : ids[0];
     }
 };
 
@@ -282,7 +159,7 @@ __global__ void KernelIlistKNN(
 
         float3 posQ = xQ[ipartQ].pos;
 
-        SortedNearestKMasked<k> nearestK;
+        SortedNearestK<k> nearestK;
         nearestK.init();
 
         __shared__ Particle particles[32];
