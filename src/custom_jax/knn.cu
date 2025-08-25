@@ -139,6 +139,59 @@ struct SortedNearestK {
 
 };
 
+template<int K>
+struct SortedNearestKMasked {
+    float r2s[K];
+    int   ids[K];
+
+    __device__ __forceinline__ void init(float r2=1e10f, int idx=-1){
+        #pragma unroll
+        for (int i=0;i<K;++i){ 
+            r2s[i]=r2;
+            ids[i]=idx;
+        }
+    }
+
+    __device__ __forceinline__ float max_r2() const {
+        return r2s[K-1]; 
+    }
+
+    // Insert (r2,id) into ascending r2s[], evicting the largest.
+    // Early-exit effect via an "active" mask; no dynamic indexing, no returns in the loop.
+    __device__ __forceinline__ void consider(float r2, int id) {
+        if (r2 > r2s[K-1]) return;
+
+        float carry_r2 = r2; 
+        int   carry_id = id;
+        bool  active   = true;  // true until we've placed the item
+
+        #pragma unroll
+        for (int i = K-2; i >= 0; --i) {
+            // only meaningful while active
+            bool take = active && (carry_r2 < r2s[i]);
+
+            // write i+1 only while active
+            float out_r2 = take ? (float)r2s[i] : carry_r2;
+            int   out_id = take ? (int)  ids[i] : carry_id;
+
+            // predicated stores keep it register-only
+            r2s[i+1] = active ? out_r2 : r2s[i+1];
+            ids[i+1] = active ? out_id : ids[i+1];
+
+            // if we didn't take (and were active), we've placed; turn off further work
+            active = active && take;
+
+            // update carry only while still active (otherwise irrelevant)
+            carry_r2 = active ? carry_r2 : carry_r2; // no-op when inactive
+            carry_id = active ? carry_id : carry_id; // (kept for symmetry)
+        }
+
+        // If we never placed, item belongs at slot 0
+        r2s[0] = active ? carry_r2 : r2s[0];
+        ids[0] = active ? carry_id : ids[0];
+    }
+};
+
 struct Particle {
     float3 pos;
     int id;
@@ -229,7 +282,7 @@ __global__ void KernelIlistKNN(
 
         float3 posQ = xQ[ipartQ].pos;
 
-        SortedNearestK<k> nearestK;
+        SortedNearestKMasked<k> nearestK;
         nearestK.init();
 
         __shared__ Particle particles[32];
