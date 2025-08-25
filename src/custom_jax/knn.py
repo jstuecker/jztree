@@ -15,7 +15,7 @@ def get_node_box(x, level_binary):
     node_cent = (jnp.floor(x / node_size) + 0.5) * node_size
     return node_cent, node_size
 
-def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, interactions_per_block=1, boxsize=0.):
+def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
     if xQ is None: xQ = xT
@@ -35,12 +35,12 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
     knn = jax.ffi.ffi_call("IlistKNNSearch", (out_type, ))(
         x4a, x4b, isplitT, isplitQ, x4leaf, ilist, ilist_splitsB,
-        interactions_per_block=np.uint64(interactions_per_block), boxsize=np.float32(boxsize)
+        boxsize=np.float32(boxsize)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
  
     return rknn, iknn
-ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "interactions_per_block", "boxsize"))
+ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
 
 
 def box_dist2(c1, c2, s1, s2, mode="shortest"):

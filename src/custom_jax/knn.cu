@@ -145,69 +145,63 @@ __global__ void KernelIlistKNN(
     const int* ilist,           // interaction list
     const int* ilist_splitsQ,   // B leaf-ranges in ilist
     Neighbor* knn,              // output knn list
-    int interactions_per_block, // 1 for now
-    float boxsize,              // ignored for now
-    int nleavesQ                // number of leaves in B
+    float boxsize               // ignored for now
 ) {
-    int istart = blockIdx.x * interactions_per_block;
-    int iend = min(istart + interactions_per_block, nleavesQ);
+    int ileafQ = blockIdx.x;
 
-    for(int ileafQ = istart; ileafQ < iend; ileafQ += 1) {
-        int iqstart = isplitQ[ileafQ], iqend = isplitQ[ileafQ + 1];
-        int ipartQ = min(iqstart + threadIdx.x, iqend - 1);
-        bool validQ = iqstart + threadIdx.x < iqend;
+    int iqstart = isplitQ[ileafQ], iqend = isplitQ[ileafQ + 1];
+    int ipartQ = min(iqstart + threadIdx.x, iqend - 1);
+    bool validQ = iqstart + threadIdx.x < iqend;
 
-        float3 posQ = xQ[ipartQ].pos;
+    float3 posQ = xQ[ipartQ].pos;
 
-        SortedNearestK<k> nearestK;
-        nearestK.init();
+    SortedNearestK<k> nearestK;
+    nearestK.init();
 
-        __shared__ Particle particles[32];
+    __shared__ Particle particles[32];
 
-        int iqmin = ilist_splitsQ[ileafQ], iqmax = ilist_splitsQ[ileafQ + 1];
-        int ileafT = 0;
+    int iqmin = ilist_splitsQ[ileafQ], iqmax = ilist_splitsQ[ileafQ + 1];
+    int ileafT = 0;
 
-        while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2(), iqmin, iqmax)) {
-            int ipartT = isplitT[ileafT] + threadIdx.x;
-            int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
+    while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2(), iqmin, iqmax)) {
+        int ipartT = isplitT[ileafT] + threadIdx.x;
+        int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
 
-            if (threadIdx.x < npartT) {
-                particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
-            }
-            __syncthreads();
-
-            // Now search for the nearest neighbors in A
-            for (int j = 0; j < npartT; j++) {
-                Particle p = particles[j];
-                float r2 = distance_squared(p.pos, posQ);
-                nearestK.consider(r2, p.id);
-            }
+        if (threadIdx.x < npartT) {
+            particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
         }
+        __syncthreads();
 
-        // nearestK.final_sort();
-        
-        if(validQ) {
-            for(int i = 0; i < k; i++) {
-                knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
-            }
+        // Now search for the nearest neighbors in A
+        for (int j = 0; j < npartT; j++) {
+            Particle p = particles[j];
+            float r2 = distance_squared(p.pos, posQ);
+            nearestK.consider(r2, p.id);
+        }
+    }
+    
+    if(validQ) {
+        #pragma unroll
+        for(int i = 0; i < k; i++) {
+            knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
         }
     }
 }
 
-void launch_KernelIlistKNN(int k, cudaStream_t stream, 
-    int nleavesQ, int interactions_per_block,
+void launch_KernelIlistKNN(
+    int k, cudaStream_t stream, int nleavesQ, 
     const PosR* xT, const PosR* xQ,
     const int* isplitT, const int* isplitQ, const Node* leaves,
     const int* ilist, const int* ilist_splitsQ,
     Neighbor* knn, float boxsize) {
 
     switch(k) {
-        case 4: KernelIlistKNN<4><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 8: KernelIlistKNN<8><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 12: KernelIlistKNN<12><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 16: KernelIlistKNN<16><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 32: KernelIlistKNN<32><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
-        case 64: KernelIlistKNN<64><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
+        case 4: KernelIlistKNN<4><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, boxsize); break;
+        case 8: KernelIlistKNN<8><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, boxsize); break;
+        case 12: KernelIlistKNN<12><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, boxsize); break;
+        case 16: KernelIlistKNN<16><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, boxsize); break;
+        case 32: KernelIlistKNN<32><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, boxsize); break;
+        case 64: KernelIlistKNN<64><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, boxsize); break;
         default:
             throw std::runtime_error("Unsupported k value in launch_KernelIlistKNN");
     }
@@ -223,7 +217,6 @@ ffi::Error HostIlistKNNSearch(
         ffi::Buffer<ffi::S32> ilist,
         ffi::Buffer<ffi::S32> ilist_splitsQ,
         ffi::ResultBuffer<ffi::S32> knn,
-        size_t interactions_per_block,
         float boxsize
     ) {
     int k = knn->dimensions()[knn->dimensions().size() - 2];
@@ -236,7 +229,7 @@ ffi::Error HostIlistKNNSearch(
 
     size_t block_size = 32;
 
-    launch_KernelIlistKNN(k, stream, nleavesQ, interactions_per_block,
+    launch_KernelIlistKNN(k, stream, nleavesQ,
         xAf4, xBf4,
         isplitT.typed_data(), isplitQ.typed_data(),
         leaves_ptr, ilist.typed_data(), ilist_splitsQ.typed_data(),
@@ -261,7 +254,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>() // ilist : interaction list
         .Arg<ffi::Buffer<ffi::S32>>() // ilist_splitsQ : leaf-ranges in ilist
         .Ret<ffi::Buffer<ffi::S32>>() // knn : output knn list
-        .Attr<size_t>("interactions_per_block")
         .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
