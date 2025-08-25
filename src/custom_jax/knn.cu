@@ -112,27 +112,6 @@ struct SortedNearestK {
         return r2s[k-1];
     }
 
-    // __device__ inline void consider(float r2, int id) {
-    //     // If this particle is closer than the furthest one we have, replace it
-    //     if (r2 <= r2s[k-1]) {
-    //         // We walk the array backwards and insert the new element in the right place
-    //         // This is efficient if we tend to insert particles at the end
-    //         #pragma unroll
-    //         for(int i = k-2; i >= 0; i--) {
-    //             if (r2 < r2s[i]) {
-    //                 r2s[i+1] = r2s[i];
-    //                 ids[i+1] = ids[i];
-    //             }
-    //             else {
-    //                 r2s[i+1] = r2;
-    //                 ids[i+1] = id;
-    //                 return;
-    //             }
-    //         }
-    //         r2s[0] = r2;
-    //         ids[0] = id;
-    //     }
-    // }
 
     // Insert (r2,id) if it belongs; keeps array ascending and evicts the largest.
     __device__ __forceinline__ void consider(float r2, int id){
@@ -295,8 +274,10 @@ void launch_KernelIlistKNN(int k, cudaStream_t stream,
     switch(k) {
         case 4: KernelIlistKNN<4><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
         case 8: KernelIlistKNN<8><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
+        case 12: KernelIlistKNN<12><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
         case 16: KernelIlistKNN<16><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
         case 32: KernelIlistKNN<32><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
+        case 64: KernelIlistKNN<64><<< div_ceil(nleavesQ, interactions_per_block), 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ilist_splitsQ, knn, interactions_per_block, boxsize, nleavesQ); break;
         default:
             throw std::runtime_error("Unsupported k value in launch_KernelIlistKNN");
     }

@@ -25,7 +25,7 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None
     assert xT.shape[-1] == xQ.shape[-1] == xleaf.shape[-1] == 3
     assert isplitT.dtype == isplitQ.dtype == jnp.int32
     assert lvl_leaf.dtype == ilist.dtype == ilist_splitsB.dtype == jnp.int32
-    assert k in (4,8,16,32), "Only k=32 is suppported so far"
+    assert k in (4,8,12,16,32,64), "Only k=4,8,12,16,32,64 supported"
 
     x4a = jnp.concatenate((xT, jnp.zeros(xT.shape[:-1])[...,None]), axis=-1)
     x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)
