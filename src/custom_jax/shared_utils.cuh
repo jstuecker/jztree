@@ -99,3 +99,122 @@ __device__ struct SegmentManager {
         return num_loaded;
     }
 };
+
+template <typename T>
+__device__ struct PrefetchList {
+    T const* __restrict__ data;
+    T local;
+    int icur, iend;
+    int loff;
+
+    __device__ __forceinline__ PrefetchList(const T* __restrict__ data_, const int istart_, const int iend_) {
+        data = data_;
+        icur = istart_;
+        iend = iend_;
+        loff = 0;
+
+        if(icur + threadIdx.x < iend) {
+            local = data[icur + threadIdx.x];
+        }
+    }
+
+    __device__ __forceinline__ T next() {
+        if(loff >= blockDim.x) {
+            icur += blockDim.x;
+            if(icur + threadIdx.x < iend) {
+                local = data[icur + threadIdx.x];
+            }
+            loff = 0;
+        }
+        
+        return __shfl_sync(0xFFFFFFFF, local, loff++);
+    }
+
+    __device__ __forceinline__ bool finished() const {
+        return icur + loff >= iend;
+    }
+};
+
+template <class T>
+__device__ inline T warp_broadcast(const T& x, int src_lane, unsigned mask = __activemask()) {
+    static_assert(std::is_trivially_copyable<T>::value,
+                  "T must be trivially copyable (POD-like).");
+
+    // Fast paths for common sizes
+    if constexpr (sizeof(T) == 4) {
+        uint32_t w;
+        memcpy(&w, &x, 4);
+        w = __shfl_sync(mask, w, src_lane);
+        T out;
+        memcpy(&out, &w, 4);
+        return out;
+    } else if constexpr (sizeof(T) == 8) {
+        uint32_t w0, w1;
+        memcpy(&w0, &x, 4);
+        memcpy(&w1, (const char*)&x + 4, 4);
+        w0 = __shfl_sync(mask, w0, src_lane);
+        w1 = __shfl_sync(mask, w1, src_lane);
+        T out;
+        memcpy(&out, &w0, 4);
+        memcpy((char*)&out + 4, &w1, 4);
+        return out;
+    } else {
+        constexpr int W = (sizeof(T) + 3) / 4;  // number of 32-bit words
+        uint32_t in_words[W];
+        memcpy(in_words, &x, sizeof(T));
+        uint32_t out_words[W];
+        #pragma unroll
+        for (int i = 0; i < W; ++i)
+            out_words[i] = __shfl_sync(mask, in_words[i], src_lane);
+        T out;
+        memcpy(&out, out_words, sizeof(T));
+        return out;
+    }
+}
+
+template <typename T>
+__device__ struct PointedPrefetchList {
+    const T* __restrict__ data;
+    const int* __restrict__ ptrs;
+
+    T local;
+    int icur, iend;
+    int loff;
+    int plocal;
+    int pcur;
+
+    __device__ __forceinline__ PointedPrefetchList(const int* __restrict__ ptrs_, const T* __restrict__ data_, const int istart_, const int iend_) {
+        data = data_;
+        ptrs = ptrs_;
+        icur = istart_;
+        iend = iend_;
+        loff = 0;
+
+        if(icur + threadIdx.x < iend) {
+            plocal = ptrs[icur + threadIdx.x];
+            local = data[plocal];
+        }
+    }
+
+    __device__ __forceinline__ T next() {
+        if(loff >= blockDim.x) {
+            icur += blockDim.x;
+            if(icur + threadIdx.x < iend) {
+                plocal = ptrs[icur + threadIdx.x];
+                local = data[plocal];
+            }
+            loff = 0;
+        }
+        
+        pcur = __shfl_sync(0xFFFFFFFF, plocal, loff);
+        // return __shfl_sync(0xFFFFFFFF, local, loff++);
+        return warp_broadcast<T>(local, loff++);
+    }
+    __device__ __forceinline__ int current_ptr() const {
+        return pcur;
+    }
+
+    __device__ __forceinline__ bool finished() const {
+        return icur + loff >= iend;
+    }
+};

@@ -124,35 +124,6 @@ struct SortedNearestK {
     }
 };
 
-__device__ __forceinline__ int get_next_leaf(
-    const Node* __restrict__ leaves,
-    const int* __restrict__ ilist,
-    int &ileaf_out,
-    float3 xpart,  
-    float r2max,
-    int &icur,
-    int iend,
-    float boxsize = 0.f
-) {
-    // "Yields" the index of the next leaf that is at least within the range of one particle
-
-    while(icur < iend) {
-        ileaf_out = ilist[icur];
-        Node leaf = leaves[ileaf_out];
-        
-        float r2leaf = NodePartMinDist2(leaf, xpart, boxsize);
-        
-        bool accept = (r2leaf <= r2max);
-
-        bool any_accept = syncthreads_or(accept);
-
-        icur += 1;
-        if(any_accept) {
-            return true;
-        }
-    }
-    return false;
-}
 
 template <int k>
 __global__ void KernelIlistKNN(
@@ -179,10 +150,22 @@ __global__ void KernelIlistKNN(
 
     __shared__ Particle particles[32];
 
-    int iqmin = ilist_splitsQ[ileafQ], iqmax = ilist_splitsQ[ileafQ + 1];
-    int ileafT = 0;
+    PrefetchList<int> pf_ilist(ilist, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
-    while(get_next_leaf(leaves, ilist, ileafT, posQ, nearestK.max_r2(), iqmin, iqmax, boxsize)) {
+    while(!pf_ilist.finished()) {
+        int ileafT = pf_ilist.next();
+
+        /* First check whether any particle needs to interact with the leaf*/
+        Node leaf = leaves[ileafT];
+        float r2leaf = NodePartMinDist2(leaf, posQ, boxsize);
+        bool accept = (r2leaf <= nearestK.max_r2());
+        bool any_accept = syncthreads_or(accept);
+
+        if(!any_accept) {
+            continue;
+        }
+
+        /* Now load the leaf */
         int ipartT = isplitT[ileafT] + threadIdx.x;
         int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
 
