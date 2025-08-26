@@ -84,7 +84,7 @@ struct SortedNearestK {
     float r2s[K];
     int   ids[K];
 
-    __device__ __forceinline__ void init(float r2=1e10f, int idx=-1){
+    __device__ __forceinline__ SortedNearestK(float r2=1e10f, int idx=-1){
         #pragma unroll
         for (int i=0;i<K;++i){ 
             r2s[i]=r2;
@@ -141,12 +141,10 @@ __global__ void KernelIlistKNN(
 
     int iqstart = isplitQ[ileafQ], iqend = isplitQ[ileafQ + 1];
     int ipartQ = min(iqstart + threadIdx.x, iqend - 1);
-    bool validQ = iqstart + threadIdx.x < iqend;
 
     float3 posQ = xQ[ipartQ].pos;
 
-    SortedNearestK<k> nearestK;
-    nearestK.init();
+    SortedNearestK<k> nearestK(1e38, -1);
 
     __shared__ Particle particles[32];
 
@@ -160,19 +158,15 @@ __global__ void KernelIlistKNN(
         float r2leaf = NodePartMinDist2(leaf, posQ, boxsize);
         bool accept = (r2leaf <= nearestK.max_r2());
         bool any_accept = syncthreads_or(accept);
-
-        if(!any_accept) {
+        if(!any_accept) 
             continue;
-        }
 
         /* Now load the leaf */
         int ipartT = isplitT[ileafT] + threadIdx.x;
         int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
 
-        if (threadIdx.x < npartT) {
+        if (threadIdx.x < npartT)
             particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
-        }
-
         __syncthreads();
 
         // Now search for the nearest neighbors in A
@@ -183,7 +177,7 @@ __global__ void KernelIlistKNN(
         }
     }
     
-    if(validQ) {
+    if(iqstart + threadIdx.x < iqend) {
         #pragma unroll
         for(int i = 0; i < k; i++) {
             knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
