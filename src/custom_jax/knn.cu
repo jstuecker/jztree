@@ -28,6 +28,7 @@ struct PosR {
     float r;
 };
 
+
 __device__ __forceinline__ float wrap(float dx, const float boxsize) {
     // wraps a coordinate difference into the interval [-boxsize/2, boxsize/2)
     // Note: in principle this code would be slightly more optimal if we decided at compile time
@@ -254,6 +255,120 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+/* A histogram that can live in registers. As usual with complex data structures in registers,
+   we have to do some extra work when updating, so that we can work with static indices only.
+*/
+template<int BINS>
+struct CumHist {
+    int c[BINS];
+    __device__ CumHist() {
+        #pragma unroll
+        for (int i=0; i<BINS; i++) 
+            c[i] = 0;
+    }
+    __device__ inline void add(int b) {
+        // Updates all counters with predication; stays in registers when unrolled.
+        #pragma unroll
+        for (int i=0; i<BINS; i++)
+            c[i] += (int)(b >= i);
+    }
+};
+
+
+// template <int RBINS>
+__global__ void KernelCountInteractions(
+    const Node* leaves,
+    const int* leaves_npart,
+    const int* isplit,
+    const int* node_ilist,
+    const int* node_ilist_splits,
+    int* interaction_count,
+    float* rmax,
+    int k,
+    float boxsize
+) {
+    int nodeQ = blockIdx.x;
+    int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
+    int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
+
+    constexpr int RBINS = 16;
+
+    CumHist<RBINS> rhist;
+
+    PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+
+    __shared__ int counts[RBINS];
+
+    while(!pf_ilist.finished()) {
+        int nodeT = pf_ilist.next();
+        int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+
+        rhist.add(1);
+    }
+
+    // interaction_count[ileafQ] = rhist.c[2];
+    interaction_count[threadIdx.x] = threadIdx.x;
+}
+
+ffi::Error HostConstructIlist(
+        cudaStream_t stream,
+        ffi::Buffer<ffi::F32> leaves,
+        ffi::Buffer<ffi::S32> leaves_npart,
+        ffi::Buffer<ffi::S32> isplit,
+        ffi::Buffer<ffi::S32> node_ilist,
+        ffi::Buffer<ffi::S32> node_ilist_splits,
+        ffi::ResultBuffer<ffi::S32> temp_buffer,
+        ffi::ResultBuffer<ffi::S32> leaf_ilist,
+        ffi::ResultBuffer<ffi::S32> leaf_ilist_splits,
+        int k,
+        float boxsize
+    )
+{
+    Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
+    int nnodes = isplit.element_count() - 1;
+    int nleaves = leaves_npart.element_count();
+
+    int* counts_ptr = temp_buffer->typed_data();
+    float* rmax_ptr = reinterpret_cast<float*>(&counts_ptr[nleaves]);
+
+    KernelCountInteractions<<< nnodes, 32, 0, stream>>>(
+        leaves_ptr,
+        leaves_npart.typed_data(),
+        isplit.typed_data(),
+        node_ilist.typed_data(),
+        node_ilist_splits.typed_data(),
+        counts_ptr,
+        rmax_ptr,
+        k,
+        boxsize
+    );
+    
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    ConstructIlist, HostConstructIlist,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>() 
+        .Arg<ffi::Buffer<ffi::F32>>() 
+        .Arg<ffi::Buffer<ffi::S32>>() 
+        .Arg<ffi::Buffer<ffi::S32>>()
+        .Arg<ffi::Buffer<ffi::S32>>()
+        .Arg<ffi::Buffer<ffi::S32>>()
+        .Ret<ffi::Buffer<ffi::S32>>()
+        .Ret<ffi::Buffer<ffi::S32>>()
+        .Ret<ffi::Buffer<ffi::S32>>()
+        .Attr<int>("k")
+        .Attr<float>("boxsize"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
+
 NB_MODULE(nb_knn, m) {
     m.def("IlistKNNSearch", []() { return EncapsulateFfiCall(IlistKNNSearch); });
+    m.def("ConstructIlist", []() { return EncapsulateFfiCall(ConstructIlist); });
 }

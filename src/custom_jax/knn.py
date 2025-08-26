@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import custom_jax.nb_knn as nb_knn
 
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
+jax.ffi.register_ffi_target("ConstructIlist", nb_knn.ConstructIlist(), platform="CUDA")
 
 def lvl_to_ext(level_binary):
     olvl, omod = level_binary//3, level_binary % 3
@@ -41,6 +42,21 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None
  
     return rknn, iknn
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
+
+
+def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits, k=32, boxsize=0.):
+    x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
+
+    tmp_buf = jax.ShapeDtypeStruct((2, len(xleaf)), jnp.int32)
+    leaf_ilist = jax.ShapeDtypeStruct((128 * len(xleaf),), jnp.int32)
+    leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
+
+    res = jax.ffi.ffi_call("ConstructIlist", (tmp_buf, leaf_ilist, leaf_ilist_splits))(
+        x4leaf, npart_leaf, isplit, node_ilist, node_ilist_splits,
+        k=np.int32(k), boxsize=np.float32(boxsize)
+    )
+
+    return res
 
 
 def box_dist2(c1, c2, s1, s2, mode="shortest"):
