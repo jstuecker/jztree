@@ -145,3 +145,17 @@ def knn_interactions(xcent, dx, npart, bins=None, k=32, batch_size=128, alloc_fa
 
     return rneed, interactions, offsets
 knn_interactions.jit = jax.jit(knn_interactions, static_argnames=["k", "batch_size", "alloc_fac"])
+
+def brute_force_node_ilist_prep(octree, k=16):
+    """Helps preparing the inputs for build_ilist_knn"""
+    npart_leaf = octree.leaf_particle_bounds[1:] - octree.leaf_particle_bounds[:-1]
+    level_leaf = octree.level_binary[octree.node_of_leaf] - 1
+    leaf_cent, leaf_ext = get_node_box(octree.xleaf, level_leaf)
+
+    nleaves = int(octree.nnodes - 1 )
+    nnodes = nleaves // 32 + 1
+    isplit = jnp.clip(jnp.arange(0, nnodes+1, dtype=jnp.int32)*32, 0, nleaves)
+    node_ilist = jnp.array((jnp.arange(nnodes, dtype=jnp.int32),)*nnodes)
+    node_ilist_splits = jnp.arange(nnodes+1, dtype=jnp.int32)*nnodes
+
+    return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits

@@ -551,7 +551,7 @@ ffi::Error HostConstructIlist(
             ffi::ErrorCode::kOutOfRange,
             "Allocation factor is too small! Interactions needed: " + std::to_string(ntot) +
             ", Interactions allocated: " + std::to_string(leaf_ilist->element_count()) +
-            "Please increase at least by a factor of " + 
+            " Please increase alloc_fac at least by a factor of " + 
             std::to_string(float(ntot)/float(leaf_ilist->element_count()))
         );
     }
@@ -570,6 +570,7 @@ ffi::Error HostConstructIlist(
         sort
     );
 
+    
     if(sort) {
         size_t   temp_storage_bytes = 0;
         cub::DeviceSegmentedSort::SortPairs(
@@ -587,7 +588,7 @@ ffi::Error HostConstructIlist(
                 std::to_string(temp_storage_bytes) + " bytes. " +
                 "Temp space available: " +
                 std::to_string(bytes_have) + " bytes. "  +
-                "Please increas sort_alloc_fac at least by a factor of " +
+                " Please increase sort_alloc_fac at least by a factor of " +
                 std::to_string((float)temp_storage_bytes / (float)bytes_have)
             );
         }
