@@ -47,18 +47,16 @@ ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"
 def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits, k=32, boxsize=0.):
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
 
-    tmp_buf = jax.ShapeDtypeStruct((2, len(xleaf)), jnp.int32)
+    tmp_buf = jax.ShapeDtypeStruct((len(xleaf),), jnp.float32)
     leaf_ilist = jax.ShapeDtypeStruct((128 * len(xleaf),), jnp.int32)
     leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
 
-    cr, il, ispl = jax.ffi.ffi_call("ConstructIlist", (tmp_buf, leaf_ilist, leaf_ilist_splits))(
+    radii, il, ispl = jax.ffi.ffi_call("ConstructIlist", (tmp_buf, leaf_ilist, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ilist_splits,
         k=np.int32(k), boxsize=np.float32(boxsize)
     )
-    
-    counts, radii = cr[0], cr[1].view(jnp.float32)
 
-    return counts, radii, il, ispl
+    return radii, il, ispl
 
 
 def box_dist2(c1, c2, s1, s2, mode="shortest"):

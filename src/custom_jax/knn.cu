@@ -4,6 +4,8 @@
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 #include "shared_utils.cuh"
+#include <thrust/device_ptr.h>
+#include <thrust/scan.h>
 
 #define INFTY  INFINITY //__int_as_float(0x7f800000)
 
@@ -353,7 +355,6 @@ struct LogBinMap {
     }
 };
 
-
 // template <int RBINS>
 __global__ void KernelCountInteractions(
     const Node* leaves,
@@ -453,7 +454,7 @@ ffi::Error HostConstructIlist(
         ffi::Buffer<ffi::S32> isplit,
         ffi::Buffer<ffi::S32> node_ilist,
         ffi::Buffer<ffi::S32> node_ilist_splits,
-        ffi::ResultBuffer<ffi::S32> temp_buffer,
+        ffi::ResultBuffer<ffi::F32> radii,
         ffi::ResultBuffer<ffi::S32> leaf_ilist,
         ffi::ResultBuffer<ffi::S32> leaf_ilist_splits,
         int k,
@@ -464,8 +465,10 @@ ffi::Error HostConstructIlist(
     int nnodes = isplit.element_count() - 1;
     int nleaves = leaves_npart.element_count();
 
-    int* counts_ptr = temp_buffer->typed_data();
-    float* rmax_ptr = reinterpret_cast<float*>(&counts_ptr[nleaves]);
+    float* rmax_ptr = radii->typed_data();
+
+    int* lsplits_ptr = leaf_ilist_splits->typed_data();
+    cudaMemsetAsync(lsplits_ptr, 0, sizeof(int)*(nleaves+1), stream);
 
     KernelCountInteractions<<< nnodes, 32, 0, stream>>>(
         leaves_ptr,
@@ -473,11 +476,13 @@ ffi::Error HostConstructIlist(
         isplit.typed_data(),
         node_ilist.typed_data(),
         node_ilist_splits.typed_data(),
-        counts_ptr,
+        lsplits_ptr + 1,
         rmax_ptr,
         k,
         boxsize
     );
+    
+    thrust::inclusive_scan(thrust::cuda::par.on(stream), lsplits_ptr + 1, lsplits_ptr + nleaves + 1, lsplits_ptr + 1);
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -496,7 +501,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>()
         .Arg<ffi::Buffer<ffi::S32>>()
         .Arg<ffi::Buffer<ffi::S32>>()
-        .Ret<ffi::Buffer<ffi::S32>>()
+        .Ret<ffi::Buffer<ffi::F32>>()
         .Ret<ffi::Buffer<ffi::S32>>()
         .Ret<ffi::Buffer<ffi::S32>>()
         .Attr<int>("k")
