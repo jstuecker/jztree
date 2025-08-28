@@ -4,8 +4,8 @@
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 #include "shared_utils.cuh"
-#include <thrust/device_ptr.h>
 #include <thrust/scan.h>
+#include <cub/cub.cuh>
 
 #define INFTY  INFINITY //__int_as_float(0x7f800000)
 
@@ -571,10 +571,33 @@ ffi::Error HostConstructIlist(
     );
 
     if(sort) {
-        // Now use  cub::DeviceSegmentedRadixSort to sort the interaction list segments by radius
-        
+        size_t   temp_storage_bytes = 0;
+        cub::DeviceSegmentedSort::SortPairs(
+            nullptr, temp_storage_bytes,
+            leaf_ilist_rad->typed_data(), leaf_ilist_rad->typed_data(), // keys i/o
+            leaf_ilist->typed_data(), leaf_ilist->typed_data(), // values i/o
+            leaf_ilist->element_count(), nleaves + 1, lsplits_ptr, lsplits_ptr + 1);
+
+        size_t bytes_have = 4*(leaf_ilist_rad->element_count()-leaf_ilist->element_count());
+
+        if(bytes_have < temp_storage_bytes) {
+            return ffi::Error(
+                ffi::ErrorCode::kOutOfRange,
+                "Allocation factor is too small! Temp. space needed: " + 
+                std::to_string(temp_storage_bytes) + " bytes. " +
+                "Temp space available: " +
+                std::to_string(bytes_have) + " bytes. "  +
+                "Please increas sort_alloc_fac at least by a factor of " +
+                std::to_string((float)temp_storage_bytes / (float)bytes_have)
+            );
+        }
+
+        cub::DeviceSegmentedSort::SortPairs(
+            leaf_ilist_rad->typed_data() + leaf_ilist->element_count(), bytes_have,
+            leaf_ilist_rad->typed_data(), leaf_ilist_rad->typed_data(), // keys i/o
+            leaf_ilist->typed_data(), leaf_ilist->typed_data(), // values i/o
+            leaf_ilist->element_count(), nleaves + 1, lsplits_ptr, lsplits_ptr + 1, stream);
     }
-    
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
