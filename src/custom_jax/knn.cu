@@ -362,10 +362,9 @@ __global__ void KernelCountInteractions(
     const int* node_ilist,
     const int* node_ilist_splits,
     int* interaction_count,
-    float* rmax,
+    float* rmax_out,
     int k,
-    float boxsize,
-    int* counts_tmp
+    float boxsize
 ) {
     // Finds the minimal radius at which we are guaranteed to have at least k neighbors for any
     // point of a leaf
@@ -380,7 +379,7 @@ __global__ void KernelCountInteractions(
     // We will define bins in units of the diagonal size of leafQ
     // This is the radius at which every point in Q would include every other point in Q
     float rbase2 = NodeNodeMaxDist2(leafQ, leafQ, boxsize);
-
+    
     LogBinMap<20> binmap(rbase2, 4.0f);
 
     CumHist<20> rhist;
@@ -410,15 +409,40 @@ __global__ void KernelCountInteractions(
         __syncthreads();
     }
 
+    int ibin = rhist.find(k);
+    float rmax = binmap.bin_end(ibin);
+    float rmax2 = rmax*rmax;
+
+    // Now we have to go again through all leaves and count how many we need to interact with
+    // Note that here we need to use the minimal distance, not the maximal one
+    // since we need to include any leaf that may contain particles within rmax
+    int ncount = 0;
+
+    PrefetchList<int> pf_ilist2(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    while(!pf_ilist2.finished()) {
+        int nodeT = pf_ilist2.next();
+        int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+        int nleavesT = ileafT_end - ileafT_start;
+
+        __shared__ Node LeafT[32];
+        if(threadIdx.x < nleavesT) {
+            LeafT[threadIdx.x] = leaves[ileafT_start + threadIdx.x];
+        }
+        __syncthreads();
+        
+        for(int j = 0; j < nleavesT; j++) {
+            Node leafT = LeafT[j];
+            float r2 = NodeNodeMinDist2(leafQ, leafT, boxsize);
+
+            ncount += (r2 <= rmax2);
+        }
+        __syncthreads();
+    }
+
+    // Output our results:
     if(threadIdx.x <= ileafQ_end - ileafQ_start) {
-        int ibin = rhist.find(k);
-
-        interaction_count[ileafQ] = rhist.get(ibin);
-        rmax[ileafQ] = binmap.bin_end(ibin);
-
-        #pragma unroll
-        for(int b = 0; b < 20; b++)
-            counts_tmp[ileafQ*20 + b] = rhist.c[b];
+        rmax_out[ileafQ] = rmax;
+        interaction_count[ileafQ] = ncount;
     }
 }
 
@@ -452,8 +476,7 @@ ffi::Error HostConstructIlist(
         counts_ptr,
         rmax_ptr,
         k,
-        boxsize,
-        leaf_ilist->typed_data()
+        boxsize
     );
     
     cudaError_t last_error = cudaGetLastError();
