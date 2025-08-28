@@ -455,7 +455,9 @@ __global__ void KernelInsertInteractions(
     const int* out_splits,
     const float* rmax,
     int* ilist_out,
-    float boxsize
+    float* ilist_radii,
+    float boxsize,
+    bool get_radii=false
 ) {
     int nodeQ = blockIdx.x;
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
@@ -481,6 +483,15 @@ __global__ void KernelInsertInteractions(
             float r2 = NodeNodeMinDist2(leafQ, leafT, boxsize);
 
             if(r2 <= rmaxQ2){
+                if(get_radii){
+                    if(r2 == 0.f) {
+                        // For the direct neighbourhood we add a tiny contribution of the maximum
+                        // distance so that sorting guarantees that we start with the leaf itself
+                        r2 = 1e-10f*NodeNodeMaxDist2(leafQ, leafT, boxsize);
+                    }
+                    ilist_radii[out_splits[ileafQ] + ninserted] = r2;
+                }
+
                 ilist_out[out_splits[ileafQ] + ninserted] = ileafT_start + j;
                 ninserted += 1;
             }
@@ -497,9 +508,11 @@ ffi::Error HostConstructIlist(
         ffi::Buffer<ffi::S32> node_ilist_splits,
         ffi::ResultBuffer<ffi::F32> radii,
         ffi::ResultBuffer<ffi::S32> leaf_ilist,
+        ffi::ResultBuffer<ffi::F32> leaf_ilist_rad,
         ffi::ResultBuffer<ffi::S32> leaf_ilist_splits,
         int k,
-        float boxsize
+        float boxsize,
+        bool sort
     )
 {
     Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
@@ -533,8 +546,16 @@ ffi::Error HostConstructIlist(
         lsplits_ptr,
         rmax_ptr,
         leaf_ilist->typed_data(),
-        boxsize
+        leaf_ilist_rad->typed_data(),
+        boxsize,
+        sort
     );
+
+    if(sort) {
+        // Now use  cub::DeviceSegmentedRadixSort to sort the interaction list segments by radius
+        
+    }
+    
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -555,9 +576,11 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>()
         .Ret<ffi::Buffer<ffi::F32>>()
         .Ret<ffi::Buffer<ffi::S32>>()
+        .Ret<ffi::Buffer<ffi::F32>>()
         .Ret<ffi::Buffer<ffi::S32>>()
         .Attr<int>("k")
-        .Attr<float>("boxsize"),
+        .Attr<float>("boxsize")
+        .Attr<bool>("sort"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 
