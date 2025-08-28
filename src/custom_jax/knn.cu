@@ -311,6 +311,41 @@ struct CumHist {
         }
         return ibin;
     }
+
+    __device__ __forceinline__  int get(int b) const {
+        // get the value, using static indexing only
+        int val = 0;
+        #pragma unroll
+        for(int i = BINS-1; i >= 0; i--) {
+            val = (i == b) ? c[i] : val;
+        }
+        return val;
+    }
+};
+
+template <int BINS>
+struct LogBinMap {
+    float logrbase2;
+    float bins_per_log2;
+    #define OFFSET 0.99f
+    // We use the OFFSET to make the first bin almost exclusively contain the rbase2 case
+    // This helps to not include unnecessary leaves when the immediate neighboord is sufficient
+
+    __device__ __forceinline__ LogBinMap(float rbase2, float bins_per_log2) {
+        this->logrbase2 = __log2f(rbase2);
+        this->bins_per_log2 = bins_per_log2;
+    }
+
+    __device__ __forceinline__ int r2_to_bin(float r2)
+    {
+        float logr2 = __log2f(r2);
+        return __float2int_rd((logr2 - logrbase2) * 0.5f * bins_per_log2 + OFFSET);
+    }
+
+    __device__ __forceinline__ float bin_end(int ibin)
+    {
+        return __powf(2.0f, 0.5f*logrbase2 + float(ibin+1.0f-OFFSET)*(1.0f/bins_per_log2));
+    }
 };
 
 
@@ -340,9 +375,11 @@ __global__ void KernelCountInteractions(
     // We will measure all distances in units of the diagonal size of leafQ
     // This is the radius at which every point in Q would include every other point in Q
     float rbase2 = NodeNodeMaxDist2(leafQ, leafQ, boxsize);
-    float logrbase2 = __log2f(rbase2);
+    // float logrbase2 = __log2f(rbase2);
 
-    constexpr float BINS_PER_LOG2 = 4.0f;
+    LogBinMap<20> binmap(rbase2, 4.0f);
+
+    // constexpr float BINS_PER_LOG2 = 4.0f;
 
     CumHist<20> rhist;
 
@@ -364,19 +401,20 @@ __global__ void KernelCountInteractions(
         for(int j = 0; j < nleavesT; j++) {
             Node leafT = LeafT[j];
             float r2 = NodeNodeMaxDist2(leafQ, leafT, boxsize);
-            float logr2 = __log2f(r2);
-            int bin = __float2int_rd((logr2 - logrbase2) * (0.5*BINS_PER_LOG2)); // 0.5 to get rid of the square
+
+            int bin = binmap.r2_to_bin(r2);
             rhist.insert(bin, npartT[j]);
         }
         __syncthreads();
     }
 
     int ibin = rhist.find(k);
-    float radius = __powf(2.0f, 0.5*logrbase2 + float(ibin)*(1.0f/BINS_PER_LOG2));
+    // float radius = __powf(2.0f, 0.5f*logrbase2 + float(ibin+1.0f)*(1.0f/BINS_PER_LOG2));
+    float radius = binmap.bin_end(ibin);
 
     float3 ext = LvlToHalfExt(leafQ.level);
     if(threadIdx.x <= ileafQ_end - ileafQ_start) {
-        interaction_count[ileafQ] = ibin;
+        interaction_count[ileafQ] = rhist.get(ibin);
         rmax[ileafQ] = radius;
 
         #pragma unroll

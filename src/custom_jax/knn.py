@@ -99,7 +99,7 @@ def knn_interactions(xcent, dx, npart, bins=None, k=32, batch_size=128, alloc_fa
 
         dist2 = box_dist2(xcent[ileaf], xcent, dx, dx, mode="longest")
 
-        dratio2 = dist2 * (1./ rbase2)
+        dratio2 = dist2 / rbase2
 
         # bins, nkincl tells us how many neighbours are at least included at which distance:
         nkincl = jnp.cumsum(jnp.histogram(dratio2, bins=bins, weights=npart)[0])
@@ -133,4 +133,4 @@ def knn_interactions(xcent, dx, npart, bins=None, k=32, batch_size=128, alloc_fa
     interactions = jax.lax.fori_loop(0, nleaves, insert_interactions, interactions)
 
     return rneed, interactions, offsets
-knn_interactions.jit = jax.jit(knn_interactions, static_argnames=["bins", "k", "batch_size", "alloc_fac"])
+knn_interactions.jit = jax.jit(knn_interactions, static_argnames=["k", "batch_size", "alloc_fac"])
