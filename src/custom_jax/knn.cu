@@ -483,16 +483,17 @@ __global__ void KernelInsertInteractions(
             float r2 = NodeNodeMinDist2(leafQ, leafT, boxsize);
 
             if(r2 <= rmaxQ2){
+                int offset = out_splits[ileafQ] + ninserted;
+
                 if(get_radii){
                     if(r2 == 0.f) {
                         // For the direct neighbourhood we add a tiny contribution of the maximum
                         // distance so that sorting guarantees that we start with the leaf itself
                         r2 = 1e-10f*NodeNodeMaxDist2(leafQ, leafT, boxsize);
                     }
-                    ilist_radii[out_splits[ileafQ] + ninserted] = r2;
+                    ilist_radii[offset] = r2;
                 }
-
-                ilist_out[out_splits[ileafQ] + ninserted] = ileafT_start + j;
+                ilist_out[offset] = ileafT_start + j;
                 ninserted += 1;
             }
         }
@@ -538,6 +539,24 @@ ffi::Error HostConstructIlist(
     
     thrust::inclusive_scan(thrust::cuda::par.on(stream), lsplits_ptr + 1, lsplits_ptr + nleaves + 1, lsplits_ptr + 1);
 
+    // Check whether the allocated array is large enough
+    int32_t ntot = 0;
+    cudaMemcpyAsync(&ntot, lsplits_ptr + nleaves, sizeof(int32_t), cudaMemcpyDeviceToHost, stream);
+    auto st = cudaStreamSynchronize(stream);
+    if (st != cudaSuccess) {
+        return ffi::Error(ffi::ErrorCode::kInternal, cudaGetErrorString(st));
+    }
+    if (ntot >= leaf_ilist->element_count()) {
+        return ffi::Error(
+            ffi::ErrorCode::kOutOfRange,
+            "Allocation factor is too small! Interactions needed: " + std::to_string(ntot) +
+            ", Interactions allocated: " + std::to_string(leaf_ilist->element_count()) +
+            "Please increase at least by a factor of " + 
+            std::to_string(float(ntot)/float(leaf_ilist->element_count()))
+        );
+    }
+
+    // Runt the insertion kernel
     KernelInsertInteractions<<< nnodes, 32, 0, stream>>>(
         leaves_ptr,
         isplit.typed_data(),

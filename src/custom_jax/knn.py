@@ -44,19 +44,19 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
 
 
-def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits, k=32, boxsize=0., sort=False):
+def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits, k=32, boxsize=0., alloc_fac=128, sort=False):
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
 
     rbuf = jax.ShapeDtypeStruct((len(xleaf),), jnp.float32)
-    leaf_ilist = jax.ShapeDtypeStruct((128 * len(xleaf),), jnp.int32)
+    leaf_ilist = jax.ShapeDtypeStruct((alloc_fac * len(xleaf),), jnp.int32)
     leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
     if sort:
         # If sort is active, we sort interactions by distance, thereforew we need
         # to store the distances in the ilist as well
         # furthe we need some temporary storage for sorting
-        leaf_ilist_rad = jax.ShapeDtypeStruct((3*128 * len(xleaf),), jnp.float32)
+        leaf_ilist_rad = jax.ShapeDtypeStruct((3*alloc_fac * len(xleaf),), jnp.float32)
     else:
-        leaf_ilist_rad = jax.ShapeDtypeStruct((0,), jnp.int32)
+        leaf_ilist_rad = jax.ShapeDtypeStruct((0,), jnp.float32)
 
     radii, il, ilr, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ilist_splits,
@@ -67,6 +67,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
         return radii, il, ilr[0:len(il)], ispl
     else:
         return radii, il, ispl
+build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac", "sort"])
 
 
 def box_dist2(c1, c2, s1, s2, mode="shortest"):
