@@ -1,9 +1,11 @@
 #include <type_traits>
 
+#include <cmath>
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 #include "shared_utils.cuh"
 
+#define INFTY  INFINITY //__int_as_float(0x7f800000)
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
@@ -114,7 +116,7 @@ struct SortedNearestK {
     float r2s[K];
     int   ids[K];
 
-    __device__ __forceinline__ SortedNearestK(float r2=1e10f, int idx=-1){
+    __device__ __forceinline__ SortedNearestK(float r2=INFTY, int idx=-1){
         #pragma unroll
         for (int i=0;i<K;++i){ 
             r2s[i]=r2;
@@ -174,7 +176,7 @@ __global__ void KernelIlistKNN(
 
     float3 posQ = xQ[ipartQ].pos;
 
-    SortedNearestK<k> nearestK(1e38, -1);
+    SortedNearestK<k> nearestK(INFTY, -1);
 
     __shared__ Particle particles[32];
 
@@ -344,7 +346,10 @@ struct LogBinMap {
 
     __device__ __forceinline__ float bin_end(int ibin)
     {
-        return __powf(2.0f, 0.5f*logrbase2 + float(ibin+1.0f-OFFSET)*(1.0f/bins_per_log2));
+        if(ibin < BINS)
+            return __powf(2.0f, 0.5f*logrbase2 + float(ibin+1.0f-OFFSET)*(1.0f/bins_per_log2));
+        else
+            return INFTY;
     }
 };
 
@@ -372,14 +377,11 @@ __global__ void KernelCountInteractions(
     int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
     Node leafQ = leaves[ileafQ];
 
-    // We will measure all distances in units of the diagonal size of leafQ
+    // We will define bins in units of the diagonal size of leafQ
     // This is the radius at which every point in Q would include every other point in Q
     float rbase2 = NodeNodeMaxDist2(leafQ, leafQ, boxsize);
-    // float logrbase2 = __log2f(rbase2);
 
     LogBinMap<20> binmap(rbase2, 4.0f);
-
-    // constexpr float BINS_PER_LOG2 = 4.0f;
 
     CumHist<20> rhist;
 
@@ -408,14 +410,11 @@ __global__ void KernelCountInteractions(
         __syncthreads();
     }
 
-    int ibin = rhist.find(k);
-    // float radius = __powf(2.0f, 0.5f*logrbase2 + float(ibin+1.0f)*(1.0f/BINS_PER_LOG2));
-    float radius = binmap.bin_end(ibin);
-
-    float3 ext = LvlToHalfExt(leafQ.level);
     if(threadIdx.x <= ileafQ_end - ileafQ_start) {
+        int ibin = rhist.find(k);
+
         interaction_count[ileafQ] = rhist.get(ibin);
-        rmax[ileafQ] = radius;
+        rmax[ileafQ] = binmap.bin_end(ibin);
 
         #pragma unroll
         for(int b = 0; b < 20; b++)
