@@ -447,6 +447,47 @@ __global__ void KernelCountInteractions(
     }
 }
 
+__global__ void KernelInsertInteractions(
+    const Node* leaves,
+    const int* isplit,
+    const int* node_ilist,
+    const int* node_ilist_splits,
+    const int* out_splits,
+    const float* rmax,
+    int* ilist_out,
+    float boxsize
+) {
+    int nodeQ = blockIdx.x;
+    int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
+    int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
+    Node leafQ = leaves[ileafQ];
+    float rmaxQ2 = rmax[ileafQ]*rmax[ileafQ];
+
+    int ninserted = 0;
+
+    PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    while(!pf_ilist.finished()) {
+        int nodeT = pf_ilist.next();
+        int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+        int nleavesT = ileafT_end - ileafT_start;
+
+        __shared__ Node LeafT[32];
+        if(threadIdx.x < nleavesT) {
+            LeafT[threadIdx.x] = leaves[ileafT_start + threadIdx.x];
+        }
+        __syncthreads();
+        for(int j = 0; j < nleavesT; j++) {
+            Node leafT = LeafT[j];
+            float r2 = NodeNodeMinDist2(leafQ, leafT, boxsize);
+
+            if(r2 <= rmaxQ2){
+                ilist_out[out_splits[ileafQ] + ninserted] = ileafT_start + j;
+                ninserted += 1;
+            }
+        }
+    }
+}
+
 ffi::Error HostConstructIlist(
         cudaStream_t stream,
         ffi::Buffer<ffi::F32> leaves,
@@ -483,6 +524,17 @@ ffi::Error HostConstructIlist(
     );
     
     thrust::inclusive_scan(thrust::cuda::par.on(stream), lsplits_ptr + 1, lsplits_ptr + nleaves + 1, lsplits_ptr + 1);
+
+    KernelInsertInteractions<<< nnodes, 32, 0, stream>>>(
+        leaves_ptr,
+        isplit.typed_data(),
+        node_ilist.typed_data(),
+        node_ilist_splits.typed_data(),
+        lsplits_ptr,
+        rmax_ptr,
+        leaf_ilist->typed_data(),
+        boxsize
+    );
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
