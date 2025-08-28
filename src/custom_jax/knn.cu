@@ -52,29 +52,58 @@ __device__ __forceinline__ float distance_squared(const float3 &a, const float3 
 
 __device__ __forceinline__ float3 LvlToHalfExt(int level) {
     // Converts a node's or leaf's binary level to its half of its extend per dimension
-    int olvl = level / 3;
+
+    // CUDA's integer division does not what we want for negative numbers. 
+    // e.g. -4/3 = -1 whereas what we want is python behaviour: -4//3 = -2
+    // We add an offset to ensure that CUDA divides positive integers only:
+    int olvl = (level + 3000) / 3 - 1000;
     int omod = level - olvl * 3;
     int lx = olvl;
-    int ly = olvl + (omod >= 2 ? 1 : 0);
-    int lz = olvl + (omod >= 1 ? 1 : 0);
+    int ly = olvl + (omod >= 2);
+    int lz = olvl + (omod >= 1);
     
     return make_float3(ldexpf(1.0f, lx-1), ldexpf(1.0f, ly-1), ldexpf(1.0f, lz-1));
 }
 
-__device__ __forceinline__ float mindist(float x1, float x2, float width_half, float boxsize=0.f) {
-    // Minimum distance per dimension between a point and a box
-    return max(fabsf(wrap(x1-x2, boxsize)) - width_half, 0.0f);
+__device__ __forceinline__ float mindist2(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
+    float dx =  max(fabsf(wrap(x1.x-x2.x, boxsize)) - width_half.x, 0.0f);
+    float dy =  max(fabsf(wrap(x1.y-x2.y, boxsize)) - width_half.y, 0.0f);
+    float dz =  max(fabsf(wrap(x1.z-x2.z, boxsize)) - width_half.z, 0.0f);
+
+    return dx*dx + dy*dy + dz*dz;
+}
+
+__device__ __forceinline__ float maxdist2(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
+    float dx =  fabsf(wrap(x1.x-x2.x, boxsize)) + width_half.x;
+    float dy =  fabsf(wrap(x1.y-x2.y, boxsize)) + width_half.y;
+    float dz =  fabsf(wrap(x1.z-x2.z, boxsize)) + width_half.z;
+
+    return dx*dx + dy*dy + dz*dz;
 }
 
 __device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part, float boxsize=0.f) {
     // Minimum squared distance between a node and a particle
     float3 half_ext = LvlToHalfExt(node.level);
 
-    float dx = mindist(part.x, node.center.x, half_ext.x, boxsize);
-    float dy = mindist(part.y, node.center.y, half_ext.y, boxsize);
-    float dz = mindist(part.z, node.center.z, half_ext.z, boxsize);
+    return mindist2(part, node.center, half_ext, boxsize);
+}
 
-    return dx*dx + dy*dy + dz*dz;
+__device__ __forceinline__ float NodeNodeMinDist2(const Node& nodeA, const Node& nodeB, float boxsize=0.f) {
+    // The distance between the closest points inside two nodes
+    float3 hA = LvlToHalfExt(nodeA.level);
+    float3 hB = LvlToHalfExt(nodeB.level);
+    float3 half_ext = make_float3(hA.x + hB.x, hA.y + hB.y, hA.z + hB.z);
+
+    return mindist2(nodeA.center, nodeB.center, half_ext, boxsize);
+}
+
+__device__ __forceinline__ float NodeNodeMaxDist2(const Node& nodeA, const Node& nodeB, float boxsize=0.f) {
+    // The distance between the closest points inside two nodes
+    float3 hA = LvlToHalfExt(nodeA.level);
+    float3 hB = LvlToHalfExt(nodeB.level);
+    float3 half_ext = make_float3(hA.x + hB.x, hA.y + hB.y, hA.z + hB.z);
+
+    return maxdist2(nodeA.center, nodeB.center, half_ext, boxsize);
 }
 
 template<int K>
@@ -261,16 +290,26 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 template<int BINS>
 struct CumHist {
     int c[BINS];
-    __device__ CumHist() {
+    __device__ __forceinline__ CumHist() {
         #pragma unroll
         for (int i=0; i<BINS; i++) 
             c[i] = 0;
     }
-    __device__ inline void add(int b) {
-        // Updates all counters with predication; stays in registers when unrolled.
+    __device__ __forceinline__ void insert(int b, int num=1) {
         #pragma unroll
-        for (int i=0; i<BINS; i++)
-            c[i] += (int)(b >= i);
+        for (int i=0; i<BINS; i++) {
+            c[i] += num*(i >= b);
+        }
+    }
+
+    __device__ __forceinline__  int find(int b) const {
+        // Find the smallest bin that is >= b
+        int ibin = BINS;
+        #pragma unroll
+        for(int i = BINS-1; i >= 0; i--) {
+            ibin = (c[i] >= b) ? i : ibin;
+        }
+        return ibin;
     }
 };
 
@@ -285,29 +324,65 @@ __global__ void KernelCountInteractions(
     int* interaction_count,
     float* rmax,
     int k,
-    float boxsize
+    float boxsize,
+    int* counts_tmp
 ) {
+    // Finds the minimal radius at which we are guaranteed to have at least k neighbors for any
+    // point of a leaf
+    // also calculates the number of other leaves that need to be evaluated at that distance
+    // this is done with the help of a histogram of distances to other leaves
+
     int nodeQ = blockIdx.x;
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
     int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
+    Node leafQ = leaves[ileafQ];
 
-    constexpr int RBINS = 16;
+    // We will measure all distances in units of the diagonal size of leafQ
+    // This is the radius at which every point in Q would include every other point in Q
+    float rbase2 = NodeNodeMaxDist2(leafQ, leafQ, boxsize);
+    float logrbase2 = __log2f(rbase2);
 
-    CumHist<RBINS> rhist;
+    constexpr float BINS_PER_LOG2 = 4.0f;
+
+    CumHist<20> rhist;
 
     PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
-
-    __shared__ int counts[RBINS];
 
     while(!pf_ilist.finished()) {
         int nodeT = pf_ilist.next();
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+        int nleavesT = ileafT_end - ileafT_start;
 
-        rhist.add(1);
+        __shared__ Node LeafT[32];
+        __shared__ int npartT[32];
+        if(threadIdx.x < nleavesT) {
+            LeafT[threadIdx.x] = leaves[ileafT_start + threadIdx.x];
+            npartT[threadIdx.x] = leaves_npart[ileafT_start + threadIdx.x];
+        }
+        __syncthreads();
+        
+        for(int j = 0; j < nleavesT; j++) {
+            Node leafT = LeafT[j];
+            float r2 = NodeNodeMaxDist2(leafQ, leafT, boxsize);
+            float logr2 = __log2f(r2);
+            int bin = __float2int_rd((logr2 - logrbase2) * (0.5*BINS_PER_LOG2)); // 0.5 to get rid of the square
+            rhist.insert(bin, npartT[j]);
+        }
+        __syncthreads();
     }
 
-    // interaction_count[ileafQ] = rhist.c[2];
-    interaction_count[threadIdx.x] = threadIdx.x;
+    int ibin = rhist.find(k);
+    float radius = __powf(2.0f, 0.5*logrbase2 + float(ibin)*(1.0f/BINS_PER_LOG2));
+
+    float3 ext = LvlToHalfExt(leafQ.level);
+    if(threadIdx.x <= ileafQ_end - ileafQ_start) {
+        interaction_count[ileafQ] = ibin;
+        rmax[ileafQ] = radius;
+
+        #pragma unroll
+        for(int b = 0; b < 20; b++)
+            counts_tmp[ileafQ*20 + b] = rhist.c[b];
+    }
 }
 
 ffi::Error HostConstructIlist(
@@ -340,7 +415,8 @@ ffi::Error HostConstructIlist(
         counts_ptr,
         rmax_ptr,
         k,
-        boxsize
+        boxsize,
+        leaf_ilist->typed_data()
     );
     
     cudaError_t last_error = cudaGetLastError();
