@@ -6,7 +6,7 @@ import custom_jax.nb_tree as nb_tree
 
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
-
+jax.ffi.register_ffi_target("SummarizeLeaves", nb_tree.SummarizeLeaves(), platform="CUDA")
 
 def pos_zorder_sort(x, block_size=64):
     assert x.dtype == jnp.float32
@@ -45,6 +45,29 @@ def build_ztree(x, block_size=64):
     return ztree
 build_ztree.jit = jax.jit(build_ztree, static_argnames=("block_size",))
 
+def div_ceil(a, b):
+    return (a + b - 1) // b
+
+def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64):
+    """Summarizes leaf nodes into parent nodes
+    """
+    if nleaf is None:
+        nleaf = jnp.ones((xleaf.shape[0],), dtype=jnp.int32)
+
+    assert xleaf.dtype == jnp.float32
+    assert xleaf.shape[-1] == 3
+
+    xnleaf = jnp.concatenate((xleaf, nleaf[:,None].view(jnp.float32)), axis=-1)
+
+    max_nodes = div_ceil(xnleaf.shape[0], div_ceil(max_size, 2))
+    out_type = jax.ShapeDtypeStruct((max_nodes, 4), jnp.float32)
+    out_splits_type = jax.ShapeDtypeStruct((max_nodes+1,), jnp.int32)
+
+    xnnode, splits_node = jax.ffi.ffi_call("SummarizeLeaves", (out_type, out_splits_type))(
+        xnleaf, block_size=np.uint64(block_size), max_leaf_size=np.uint64(max_size))
+    
+    return xnnode, splits_node
+summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size",))
 
 # ================================= Deprecated functions   ======================================= #
 # They will be deleted later, for now we keep them for comparison purposes

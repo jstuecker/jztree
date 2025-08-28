@@ -304,11 +304,69 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 // them temporarily for comparison and test purposes
 // #include "tree_deprecated.cu"
 
+struct PosN {
+    float3 pos;
+    int32_t n;
+};
+
+template<int BLOCK_SIZE>
+__global__ void KernelSummarizeLeaves(
+    const PosN* xnleaf, 
+    PosN* xnnode, 
+    int32_t* splits, 
+    size_t max_leaf_size,
+    size_t n_leaves
+) {
+    int leaf_idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    splits[leaf_idx] = threadIdx.x;
+}
+
+ffi::Error HostSummarizeLeaves(
+    cudaStream_t stream, 
+    ffi::Buffer<ffi::F32> xnleaf,
+    ffi::ResultBuffer<ffi::F32> xnnode,
+    ffi::ResultBuffer<ffi::S32> splits,
+    size_t block_size,
+    size_t max_leaf_size
+) {
+    cudaError_t last_error = cudaGetLastError();
+
+    size_t n_leaves = xnleaf.element_count()/4;
+
+    constexpr size_t block = 64;
+
+    KernelSummarizeLeaves<block><<< div_ceil(n_leaves, block), block, 0, stream>>>(
+        reinterpret_cast<const PosN*>(xnleaf.typed_data()),
+        reinterpret_cast<PosN*>(xnnode->typed_data()),
+        splits->typed_data(),
+        max_leaf_size,
+        n_leaves
+    );
+
+
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SummarizeLeaves, HostSummarizeLeaves,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()        // xleaf
+        .Ret<ffi::Buffer<ffi::F32>>()        // xnode
+        .Ret<ffi::Buffer<ffi::S32>>()        // splits
+        .Attr<size_t>("block_size")
+        .Attr<size_t>("max_leaf_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
 
 NB_MODULE(nb_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
-
+    m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
     // A bunch of deprecated functions
     // m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });
     // m.def("OldI3zsort", []() { return EncapsulateFfiCall(OldI3zsort); });
