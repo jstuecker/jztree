@@ -61,10 +61,11 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64):
 
     max_nodes = div_ceil(xnleaf.shape[0], div_ceil(max_size, 2))
     out_type = jax.ShapeDtypeStruct((max_nodes, 4), jnp.float32)
-    out_splits_type = jax.ShapeDtypeStruct((max_nodes+1,), jnp.int32)
+    # out_splits_type = jax.ShapeDtypeStruct((max_nodes+1,), jnp.int32)
+    out_splits_type = jax.ShapeDtypeStruct((xnleaf.shape[0],), jnp.int32)
 
     xnnode, splits_node = jax.ffi.ffi_call("SummarizeLeaves", (out_type, out_splits_type))(
-        xnleaf, block_size=np.uint64(block_size), max_leaf_size=np.uint64(max_size))
+        xnleaf, block_size=np.uint64(block_size), max_size=np.uint64(max_size))
     
     return xnnode, splits_node
 summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size",))

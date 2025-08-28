@@ -309,17 +309,73 @@ struct PosN {
     int32_t n;
 };
 
-template<int BLOCK_SIZE>
+template<int BLOCK_SIZE, int SCAN_SIZE>
 __global__ void KernelSummarizeLeaves(
-    const PosN* xnleaf, 
-    PosN* xnnode, 
-    int32_t* splits, 
-    size_t max_leaf_size,
+    const PosN* xnleaf,
+    int32_t* keep, 
+    size_t max_size,
     size_t n_leaves
 ) {
     int leaf_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    splits[leaf_idx] = threadIdx.x;
+    // Load data preceding and following our block into shared memory
+    constexpr int nload = BLOCK_SIZE + 2*SCAN_SIZE + 1;
+    __shared__ PosN xn[nload];
+    __shared__ int level[nload - 1];
+    // __shared__ bool flag_keep[BLOCK_SIZE];
+
+    // int istart = max(blockIdx.x * BLOCK_SIZE - SCAN_SIZE, 0);
+    // int iend = min((blockIdx.x + 1) * BLOCK_SIZE + SCAN_SIZE, (int)n_leaves);
+    int ioff = blockIdx.x * BLOCK_SIZE - SCAN_SIZE;
+    
+    // Note: we may load some points duplicate at the boundary, but that is ok (they will have 
+    // level 0). Keeping it this way simplifies the indexing logic later
+    for(int i = threadIdx.x; i < nload; i += BLOCK_SIZE) {
+        int ifrom = ioff + i;
+        if(ifrom < 0)
+            xn[i] = {xnleaf[0].pos, 0};
+        else if(ifrom >= n_leaves)
+            xn[i] = {xnleaf[n_leaves - 1].pos, 0};
+        else
+            xn[i] = xnleaf[ifrom];
+    }
+
+    __syncthreads();
+    for(int i = threadIdx.x; i < nload-1; i += BLOCK_SIZE) {
+        level[i] = msb_diff_level(xn[i].pos, xn[i + 1].pos);
+    }
+    // flag_keep[threadIdx.x] = true;
+    // __syncthreads();
+
+    // Find the boundaries of each node
+    int lbound = 0, lsize = 0;
+    int idx = threadIdx.x + SCAN_SIZE;
+    int mylevel = level[idx];
+    for(int i = idx - SCAN_SIZE; i < idx; i++) {
+        lbound = level[i] > mylevel ? i : lbound;
+        lsize = xn[i+1].n + (level[i] >= mylevel ? 0 : lsize);
+    }
+    int rbound = 0, rsize = 0;
+    for(int i = idx + SCAN_SIZE; i > idx; i--) {
+        rbound = level[i] > mylevel ? i : rbound;
+        rsize = xn[i-1].n + (level[i] >= mylevel ? 0 : rsize);
+    }
+
+    // Now deactivate all leaves that are contained within a larger node that is <= max_size
+    // This can be made much cheaper e.g. by transmitting several flags at once using a bitmask
+    bool size_ok = lsize + rsize <= max_size;
+    bool flag_keep = true;
+    for(int i = 0; i < BLOCK_SIZE; i++) {
+        bool deactivate = size_ok & (SCAN_SIZE + i > lbound) & (SCAN_SIZE + i < rbound);
+        deactivate = __syncthreads_or(deactivate);
+        if(deactivate && (threadIdx.x == i)) {
+            flag_keep = !deactivate;
+        }
+    }
+
+    if (leaf_idx < n_leaves) {
+        keep[leaf_idx] = flag_keep;//[threadIdx.x];
+    }
 }
 
 ffi::Error HostSummarizeLeaves(
@@ -328,19 +384,20 @@ ffi::Error HostSummarizeLeaves(
     ffi::ResultBuffer<ffi::F32> xnnode,
     ffi::ResultBuffer<ffi::S32> splits,
     size_t block_size,
-    size_t max_leaf_size
+    size_t max_size
 ) {
     cudaError_t last_error = cudaGetLastError();
 
     size_t n_leaves = xnleaf.element_count()/4;
 
     constexpr size_t block = 64;
+    constexpr size_t scan_size = 64;
 
-    KernelSummarizeLeaves<block><<< div_ceil(n_leaves, block), block, 0, stream>>>(
+    KernelSummarizeLeaves<block,scan_size><<< div_ceil(n_leaves, block), block, 0, stream>>>(
         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
-        reinterpret_cast<PosN*>(xnnode->typed_data()),
+        // reinterpret_cast<PosN*>(xnnode->typed_data()),
         splits->typed_data(),
-        max_leaf_size,
+        max_size,
         n_leaves
     );
 
@@ -359,7 +416,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::F32>>()        // xnode
         .Ret<ffi::Buffer<ffi::S32>>()        // splits
         .Attr<size_t>("block_size")
-        .Attr<size_t>("max_leaf_size"),
+        .Attr<size_t>("max_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 
