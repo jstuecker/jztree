@@ -3,10 +3,12 @@ import jax
 import jax.numpy as jnp
 
 import custom_jax.nb_tree as nb_tree
+from .knn import get_node_box
 
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
 jax.ffi.register_ffi_target("SummarizeLeaves", nb_tree.SummarizeLeaves(), platform="CUDA")
+
 
 def pos_zorder_sort(x, block_size=64):
     assert x.dtype == jnp.float32
@@ -48,27 +50,101 @@ build_ztree.jit = jax.jit(build_ztree, static_argnames=("block_size",))
 def div_ceil(a, b):
     return (a + b - 1) // b
 
-def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64):
+def prepend_num(arr, val=0):
+    return jnp.concatenate([jnp.asarray([val], dtype=arr.dtype), arr], axis=0)
+
+def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, max_new_leaves=None):
     """Summarizes leaf nodes into parent nodes
     """
     if nleaf is None:
         nleaf = jnp.ones((xleaf.shape[0],), dtype=jnp.int32)
+        num = jnp.arange(0, len(xleaf)+1, dtype=jnp.int32)
+    else:
+        num = prepend_num(jnp.cumsum(nleaf), 0)
+    
+    if max_new_leaves is None:
+        max_new_leaves = div_ceil(len(xleaf), np.maximum(max_size//2, 1))
 
     assert xleaf.dtype == jnp.float32
     assert xleaf.shape[-1] == 3
 
     xnleaf = jnp.concatenate((xleaf, nleaf[:,None].view(jnp.float32)), axis=-1)
 
-    max_nodes = div_ceil(xnleaf.shape[0], div_ceil(max_size, 2))
-    out_type = jax.ShapeDtypeStruct((max_nodes, 4), jnp.float32)
-    # out_splits_type = jax.ShapeDtypeStruct((max_nodes+1,), jnp.int32)
     out_splits_type = jax.ShapeDtypeStruct((xnleaf.shape[0],), jnp.int32)
 
-    xnnode, splits_node = jax.ffi.ffi_call("SummarizeLeaves", (out_type, out_splits_type))(
-        xnleaf, block_size=np.uint64(block_size), max_size=np.uint64(max_size))
-    
-    return xnnode, splits_node
+    flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,))(
+        xnleaf, block_size=np.uint64(block_size), max_size=np.uint64(max_size))[0]
+
+    # Get the splitting points of leaves
+    flag_split = prepend_num(flag_split, 1)
+    splits = jnp.where(flag_split > 0, size=max_new_leaves+1, fill_value=len(xnleaf))[0]
+
+    new_nleaf = num[splits[1:]] - num[splits[:-1]]
+    new_leaf_lvl = ztree_diff_level(xleaf[splits[:-1]], xleaf[splits[1:]-1])
+    new_leaf_cent = get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
+
+    return splits, new_nleaf, new_leaf_lvl, new_leaf_cent
+
 summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size",))
+
+# Matches CUDA's float32 behavior
+def float_xor_msb(a, b):
+    """
+    Finds the most significant differing bit "level" between two float32s.
+    Returns 128 if sign bits differ, otherwise follows the exponent/mantissa logic.
+    Works with broadcasting over arrays.
+    """
+    a = jnp.asarray(a, jnp.float32)
+    b = jnp.asarray(b, jnp.float32)
+
+    # If sign bits differ, return 128
+    sign_diff = jnp.not_equal(jnp.signbit(a), jnp.signbit(b))
+
+    # Bitcast |a| and |b| to uint32
+    a_bits = jax.lax.bitcast_convert_type(jnp.abs(a), jnp.uint32)
+    b_bits = jax.lax.bitcast_convert_type(jnp.abs(b), jnp.uint32)
+
+    # Extract unbiased exponents: (bits >> 23) - 127
+    a_exp = (a_bits >> jnp.uint32(23)).astype(jnp.int32) - jnp.int32(127)
+    b_exp = (b_bits >> jnp.uint32(23)).astype(jnp.int32) - jnp.int32(127)
+
+    same_exp = a_exp == b_exp
+
+    # If exponents equal, compare mantissas via XOR, then use leading zeros
+    xor_bits = jnp.bitwise_xor(a_bits, b_bits)
+    # lax.clz counts leading zeros on unsigned integers
+    clz = jax.lax.clz(xor_bits).astype(jnp.int32)
+
+    # CUDA comment: "There will always be 8 leading zeros due to the exponent"
+    # (sign bit is removed by fabsf, so sign is zero as well)
+    mantissa_term = a_exp + (jnp.int32(8) - clz)
+
+    # If exponents differ, choose the larger exponent
+    larger_exp = jnp.maximum(a_exp, b_exp)
+
+    result = jnp.where(same_exp, mantissa_term, larger_exp)
+    result = jnp.where(sign_diff, jnp.int32(128), result)
+    return result
+
+def ztree_diff_level(p1, p2):
+    """
+    p1, p2: (..., 3) float32 arrays (or anything broadcastable to that)
+    Returns the level: max(3*msb_x+3, 3*msb_y+2, 3*msb_z+1)
+    """
+    p1 = jnp.asarray(p1, jnp.float32)
+    p2 = jnp.asarray(p2, jnp.float32)
+
+    msb_x = float_xor_msb(p1[..., 0], p2[..., 0])
+    msb_y = float_xor_msb(p1[..., 1], p2[..., 1])
+    msb_z = float_xor_msb(p1[..., 2], p2[..., 2])
+
+    level = jnp.maximum(
+        3 * msb_x + 3,
+        jnp.maximum(3 * msb_y + 2, 3 * msb_z + 1),
+    )
+    return level
+ztree_diff_level.jit = jax.jit(ztree_diff_level)
+
 
 # ================================= Deprecated functions   ======================================= #
 # They will be deleted later, for now we keep them for comparison purposes

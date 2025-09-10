@@ -109,7 +109,7 @@ ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, 
         );
     }
     
-    // This is how we ould allocate if we could. (Note that doing this breaks jit in some cases!)
+    // This is how we would allocate if we could. (Note that doing this breaks jit in some cases!)
     // cudaMallocAsync(&d_temp_storage, required_storage_bytes, stream); 
 
     // Run the sort
@@ -312,20 +312,19 @@ struct PosN {
 template<int BLOCK_SIZE, int SCAN_SIZE>
 __global__ void KernelSummarizeLeaves(
     const PosN* xnleaf,
-    int32_t* keep, 
+    int32_t* split_flags, 
     size_t max_size,
     size_t n_leaves
 ) {
-    int leaf_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    // Finds splitting points where the group of particles between each splitting point
+    // can be summarized into a single leaf node that represents <= max_size particles
+    int node_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Load data preceding and following our block into shared memory
     constexpr int nload = BLOCK_SIZE + 2*SCAN_SIZE + 1;
     __shared__ PosN xn[nload];
     __shared__ int level[nload - 1];
-    // __shared__ bool flag_keep[BLOCK_SIZE];
 
-    // int istart = max(blockIdx.x * BLOCK_SIZE - SCAN_SIZE, 0);
-    // int iend = min((blockIdx.x + 1) * BLOCK_SIZE + SCAN_SIZE, (int)n_leaves);
     int ioff = blockIdx.x * BLOCK_SIZE - SCAN_SIZE;
     
     // Note: we may load some points duplicate at the boundary, but that is ok (they will have 
@@ -344,8 +343,6 @@ __global__ void KernelSummarizeLeaves(
     for(int i = threadIdx.x; i < nload-1; i += BLOCK_SIZE) {
         level[i] = msb_diff_level(xn[i].pos, xn[i + 1].pos);
     }
-    // flag_keep[threadIdx.x] = true;
-    // __syncthreads();
 
     // Find the boundaries of each node
     int lbound = 0, lsize = 0;
@@ -361,28 +358,19 @@ __global__ void KernelSummarizeLeaves(
         rsize = xn[i-1].n + (level[i] >= mylevel ? 0 : rsize);
     }
 
-    // Now deactivate all leaves that are contained within a larger node that is <= max_size
-    // This can be made much cheaper e.g. by transmitting several flags at once using a bitmask
-    bool size_ok = lsize + rsize <= max_size;
-    bool flag_keep = true;
-    for(int i = 0; i < BLOCK_SIZE; i++) {
-        bool deactivate = size_ok & (SCAN_SIZE + i > lbound) & (SCAN_SIZE + i < rbound);
-        deactivate = __syncthreads_or(deactivate);
-        if(deactivate && (threadIdx.x == i)) {
-            flag_keep = !deactivate;
-        }
-    }
+    // Each maximum size node that is <= max_size is bounded by nodes that are > max_size
+    // Therefore, we can find their splitting points by simply flagging all nodes that are > max_size
+    bool is_split = lsize + rsize > max_size;
 
-    if (leaf_idx < n_leaves) {
-        keep[leaf_idx] = flag_keep;//[threadIdx.x];
+    if (node_idx < n_leaves-1) {
+        split_flags[node_idx] = is_split ? 1 : 0;
     }
 }
 
 ffi::Error HostSummarizeLeaves(
     cudaStream_t stream, 
     ffi::Buffer<ffi::F32> xnleaf,
-    ffi::ResultBuffer<ffi::F32> xnnode,
-    ffi::ResultBuffer<ffi::S32> splits,
+    ffi::ResultBuffer<ffi::S32> flags_split,
     size_t block_size,
     size_t max_size
 ) {
@@ -393,14 +381,16 @@ ffi::Error HostSummarizeLeaves(
     constexpr size_t block = 64;
     constexpr size_t scan_size = 64;
 
+    if (max_size >= scan_size) {
+        return ffi::Error::InvalidArgument("max_size must be < 64 for now. Will improve it later.");
+    }
+
     KernelSummarizeLeaves<block,scan_size><<< div_ceil(n_leaves, block), block, 0, stream>>>(
         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
-        // reinterpret_cast<PosN*>(xnnode->typed_data()),
-        splits->typed_data(),
+        flags_split->typed_data(),
         max_size,
         n_leaves
     );
-
 
     if (last_error != cudaSuccess) {
         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
@@ -413,8 +403,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::Buffer<ffi::F32>>()        // xleaf
-        .Ret<ffi::Buffer<ffi::F32>>()        // xnode
-        .Ret<ffi::Buffer<ffi::S32>>()        // splits
+        .Ret<ffi::Buffer<ffi::S32>>()        // flags_split
         .Attr<size_t>("block_size")
         .Attr<size_t>("max_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
