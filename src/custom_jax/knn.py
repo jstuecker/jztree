@@ -46,6 +46,8 @@ ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"
 
 def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits, k=32, boxsize=0., 
                     alloc_fac=128, sort_alloc_fac=2.2, sort=False):
+    assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
+
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
 
     rbuf = jax.ShapeDtypeStruct((len(xleaf),), jnp.float32)
@@ -146,6 +148,11 @@ def knn_interactions(xcent, dx, npart, bins=None, k=32, batch_size=128, alloc_fa
     return rneed, interactions, offsets
 knn_interactions.jit = jax.jit(knn_interactions, static_argnames=["k", "batch_size", "alloc_fac"])
 
+def dense_ilist(num):
+    ilist = jnp.array((jnp.arange(num, dtype=jnp.int32),)*num)
+    isplits = jnp.arange(num+1, dtype=jnp.int32)*num
+    return ilist.flatten(), isplits
+
 def brute_force_node_ilist_prep(octree, k=16):
     """Helps preparing the inputs for build_ilist_knn"""
     npart_leaf = octree.leaf_particle_bounds[1:] - octree.leaf_particle_bounds[:-1]
@@ -155,7 +162,8 @@ def brute_force_node_ilist_prep(octree, k=16):
     nleaves = int(octree.nnodes - 1 )
     nnodes = nleaves // 32 + 1
     isplit = jnp.clip(jnp.arange(0, nnodes+1, dtype=jnp.int32)*32, 0, nleaves)
-    node_ilist = jnp.array((jnp.arange(nnodes, dtype=jnp.int32),)*nnodes)
-    node_ilist_splits = jnp.arange(nnodes+1, dtype=jnp.int32)*nnodes
+    # node_ilist = jnp.array((jnp.arange(nnodes, dtype=jnp.int32),)*nnodes)
+    # node_ilist_splits = jnp.arange(nnodes+1, dtype=jnp.int32)*nnodes
+    node_ilist, node_ilist_splits = dense_ilist(nnodes)
 
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits

@@ -53,7 +53,7 @@ def div_ceil(a, b):
 def prepend_num(arr, val=0):
     return jnp.concatenate([jnp.asarray([val], dtype=arr.dtype), arr], axis=0)
 
-def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, max_new_leaves=None):
+def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=None):
     """Summarizes leaf nodes into parent nodes
     """
     if nleaf is None:
@@ -61,9 +61,13 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, max_new_leav
         num = jnp.arange(0, len(xleaf)+1, dtype=jnp.int32)
     else:
         num = prepend_num(jnp.cumsum(nleaf), 0)
+    if num_part is None:
+        num_part = len(xleaf)
+    # We may have some invalid leaves at the end
+    # Let's keep track until where our leaves are valid
+    nleaves_filled = jnp.count_nonzero(nleaf)
     
-    if max_new_leaves is None:
-        max_new_leaves = div_ceil(len(xleaf), np.maximum(max_size//2, 1))
+    max_new_leaves = div_ceil(num_part, np.maximum(max_size//2, 1))
 
     assert xleaf.dtype == jnp.float32
     assert xleaf.shape[-1] == 3
@@ -74,18 +78,24 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, max_new_leav
 
     flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,))(
         xnleaf, block_size=np.uint64(block_size), max_size=np.uint64(max_size))[0]
+    flag_split = flag_split & (jnp.arange(len(flag_split), dtype=jnp.int32) < nleaves_filled)
 
     # Get the splitting points of leaves
     flag_split = prepend_num(flag_split, 1)
-    splits = jnp.where(flag_split > 0, size=max_new_leaves+1, fill_value=len(xnleaf))[0]
+    splits = jnp.where(flag_split > 0, size=max_new_leaves+1, fill_value=nleaves_filled)[0]
+    # splits = jnp.clip(splits, 0, nleaves_filled)
 
     new_nleaf = num[splits[1:]] - num[splits[:-1]]
     new_leaf_lvl = ztree_diff_level(xleaf[splits[:-1]], xleaf[splits[1:]-1])
     new_leaf_cent = get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
 
-    return splits, new_nleaf, new_leaf_lvl, new_leaf_cent
+    numleaves = jnp.sum(flag_split > 0)
 
-summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size",))
+    # assert numleaves <= max_new_leaves, "Please provide nptot if leaves are not particles"
+
+    return splits, new_nleaf, new_leaf_lvl, new_leaf_cent, numleaves
+
+summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size", "num_part"))
 
 # Matches CUDA's float32 behavior
 def float_xor_msb(a, b):

@@ -381,9 +381,9 @@ ffi::Error HostSummarizeLeaves(
     constexpr size_t block = 64;
     constexpr size_t scan_size = 64;
 
-    if (max_size >= scan_size) {
-        return ffi::Error::InvalidArgument("max_size must be < 64 for now. Will improve it later.");
-    }
+    // if (max_size >= scan_size) {
+    //     return ffi::Error::InvalidArgument("max_size must be < 64 for now. Will improve it later.");
+    // }
 
     KernelSummarizeLeaves<block,scan_size><<< div_ceil(n_leaves, block), block, 0, stream>>>(
         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
