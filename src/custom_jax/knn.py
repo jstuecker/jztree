@@ -161,7 +161,8 @@ def brute_force_node_ilist_prep(octree, k=16):
 
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits
 
-def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, refine_fac=8, k=16, stop_coarsen=512, sort=False):
+def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, 
+        refine_fac=8, k=16, stop_coarsen=512, sort=False, boxsize=0.):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
@@ -176,16 +177,18 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, refi
     )
     il2, ispl2 = build_ilist_recursive(xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part)
     radii, il, ispl = build_ilist_knn(
-        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=1000, k=k, sort=sort
+        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=1000, k=k, sort=sort, boxsize=boxsize
     )
 
     return il, ispl
-build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=['max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen'])
+build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
+    'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize'])
 
 def knn(posz, k=16, boxsize=0.):
     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=32)
 
-    il, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*8, refine_fac=8, num_part=len(posz), k=k)
+    il, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*8, refine_fac=8, 
+                                     num_part=len(posz), k=k, boxsize=boxsize)
 
     rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ispl, k=k, boxsize=boxsize)
 
