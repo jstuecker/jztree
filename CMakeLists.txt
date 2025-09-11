@@ -46,12 +46,12 @@ foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
 
 
     nanobind_add_module(${MODULE_NAME} ${MODULE_SOURCE})
-    set_target_properties(${MODULE_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
+    # set_target_properties(${MODULE_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_STANDARD 17)
     target_include_directories(${MODULE_NAME} SYSTEM PRIVATE ${XLA_DIR})
     target_compile_options(${MODULE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
     target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
     target_link_libraries(${MODULE_NAME} PRIVATE CUDA::cudart)
-    target_compile_options(${MODULE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda --expt-relaxed-constexpr>)
+    # target_compile_options(${MODULE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--extended-lambda --expt-relaxed-constexpr>)
 
     install(TARGETS ${MODULE_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
 endforeach()

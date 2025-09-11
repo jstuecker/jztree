@@ -60,10 +60,10 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
         k=np.int32(k), boxsize=np.float32(boxsize), sort=bool(sort)
     )
 
-    if sort:
-        return radii, il, ilr[0:len(il)], ispl
-    else:
-        return radii, il, ispl
+    # if sort:
+    #     return radii, il, ilr[0:len(il)], ispl
+    # else:
+    return radii, il, ispl
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac", "sort", "sort_alloc_fac"])
 
 
