@@ -78,7 +78,7 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
 
     flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,))(
         xnleaf, block_size=np.uint64(block_size), max_size=np.uint64(max_size))[0]
-    flag_split = flag_split & (jnp.arange(len(flag_split), dtype=jnp.int32) < nleaves_filled)
+    flag_split = flag_split & (jnp.arange(len(flag_split), dtype=jnp.int32) < nleaves_filled-1)
 
     # Get the splitting points of leaves
     flag_split = prepend_num(flag_split, 1)
@@ -89,7 +89,7 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
     new_leaf_lvl = ztree_diff_level(xleaf[splits[:-1]], xleaf[splits[1:]-1])
     new_leaf_cent = get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
 
-    numleaves = jnp.sum(flag_split > 0)
+    numleaves = jnp.count_nonzero(new_nleaf)
 
     # assert numleaves <= max_new_leaves, "Please provide nptot if leaves are not particles"
 

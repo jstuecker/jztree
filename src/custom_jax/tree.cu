@@ -8,6 +8,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <math_constants.h>
 
 #if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2
 #error "CUB version 2.0.0 or higher required"
@@ -332,9 +333,9 @@ __global__ void KernelSummarizeLeaves(
     for(int i = threadIdx.x; i < nload; i += BLOCK_SIZE) {
         int ifrom = ioff + i;
         if(ifrom < 0)
-            xn[i] = {xnleaf[0].pos, 0};
+            xn[i] = {make_float3(-CUDART_INF_F, -CUDART_INF_F, -CUDART_INF_F), 0};
         else if(ifrom >= n_leaves)
-            xn[i] = {xnleaf[n_leaves - 1].pos, 0};
+            xn[i] = {make_float3(CUDART_INF_F, CUDART_INF_F, CUDART_INF_F), 0};
         else
             xn[i] = xnleaf[ifrom];
     }
