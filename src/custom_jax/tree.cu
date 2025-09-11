@@ -313,10 +313,13 @@ struct PosN {
 template<int BLOCK_SIZE, int SCAN_SIZE>
 __global__ void KernelSummarizeLeaves(
     const PosN* xnleaf,
+    const int* nleaves_filled,
     int32_t* split_flags, 
     size_t max_size,
     size_t n_leaves
 ) {
+    int nfilled = nleaves_filled[0];
+
     // Finds splitting points where the group of particles between each splitting point
     // can be summarized into a single leaf node that represents <= max_size particles
     int node_idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -326,7 +329,7 @@ __global__ void KernelSummarizeLeaves(
     __shared__ PosN xn[nload];
     __shared__ int level[nload - 1];
 
-    int ioff = blockIdx.x * BLOCK_SIZE - SCAN_SIZE;
+    int ioff = blockIdx.x * BLOCK_SIZE - SCAN_SIZE - 1;
     
     // Note: we may load some points duplicate at the boundary, but that is ok (they will have 
     // level 0). Keeping it this way simplifies the indexing logic later
@@ -356,21 +359,27 @@ __global__ void KernelSummarizeLeaves(
     int rbound = 0, rsize = 0;
     for(int i = idx + SCAN_SIZE; i > idx; i--) {
         rbound = level[i] > mylevel ? i : rbound;
-        rsize = xn[i-1].n + (level[i] >= mylevel ? 0 : rsize);
+        rsize = xn[i].n + (level[i] >= mylevel ? 0 : rsize);
     }
 
     // Each maximum size node that is <= max_size is bounded by nodes that are > max_size
     // Therefore, we can find their splitting points by simply flagging all nodes that are > max_size
     bool is_split = lsize + rsize > max_size;
 
-    if (node_idx < n_leaves-1) {
-        split_flags[node_idx] = is_split ? 1 : 0;
+    // Additionally we set the beginning and end points to be splits
+    is_split |= node_idx == 0; 
+    is_split |= node_idx == nfilled;
+    is_split &= node_idx <= nfilled;
+
+    if (node_idx <= n_leaves) {
+        split_flags[node_idx] = is_split;
     }
 }
 
 ffi::Error HostSummarizeLeaves(
     cudaStream_t stream, 
     ffi::Buffer<ffi::F32> xnleaf,
+    ffi::Buffer<ffi::S32> nleaves_filled,
     ffi::ResultBuffer<ffi::S32> flags_split,
     size_t block_size,
     size_t max_size
@@ -388,6 +397,7 @@ ffi::Error HostSummarizeLeaves(
 
     KernelSummarizeLeaves<block,scan_size><<< div_ceil(n_leaves, block), block, 0, stream>>>(
         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
+        nleaves_filled.typed_data(),
         flags_split->typed_data(),
         max_size,
         n_leaves
@@ -404,6 +414,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::Buffer<ffi::F32>>()        // xleaf
+        .Arg<ffi::Buffer<ffi::S32>>()        // nleaves_filled
         .Ret<ffi::Buffer<ffi::S32>>()        // flags_split
         .Attr<size_t>("block_size")
         .Attr<size_t>("max_size"),

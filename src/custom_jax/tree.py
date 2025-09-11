@@ -74,20 +74,17 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
 
     xnleaf = jnp.concatenate((xleaf, nleaf[:,None].view(jnp.float32)), axis=-1)
 
-    out_splits_type = jax.ShapeDtypeStruct((xnleaf.shape[0],), jnp.int32)
+    out_splits_type = jax.ShapeDtypeStruct((xnleaf.shape[0]+1,), jnp.int32)
 
     flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,))(
-        xnleaf, block_size=np.uint64(block_size), max_size=np.uint64(max_size))[0]
-    flag_split = flag_split & (jnp.arange(len(flag_split), dtype=jnp.int32) < nleaves_filled-1)
+        xnleaf, nleaves_filled, block_size=np.uint64(block_size), max_size=np.uint64(max_size))[0]
 
     # Get the splitting points of leaves
-    flag_split = prepend_num(flag_split, 1)
     splits = jnp.where(flag_split > 0, size=max_new_leaves+1, fill_value=nleaves_filled)[0]
-    # splits = jnp.clip(splits, 0, nleaves_filled)
 
     new_nleaf = num[splits[1:]] - num[splits[:-1]]
     new_leaf_lvl = ztree_diff_level(xleaf[splits[:-1]], xleaf[splits[1:]-1])
-    new_leaf_cent = get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
+    new_leaf_cent = xleaf[splits[:-1]]#get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
 
     numleaves = jnp.count_nonzero(new_nleaf)
 
