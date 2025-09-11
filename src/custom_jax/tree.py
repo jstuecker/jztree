@@ -3,12 +3,20 @@ import jax
 import jax.numpy as jnp
 
 import custom_jax.nb_tree as nb_tree
-from .knn import get_node_box
 
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
 jax.ffi.register_ffi_target("SummarizeLeaves", nb_tree.SummarizeLeaves(), platform="CUDA")
 
+def lvl_to_ext(level_binary):
+    olvl, omod = level_binary//3, level_binary % 3
+    levels_3d = jnp.stack((olvl, olvl + (omod >= 2).astype(jnp.int32), olvl + (omod >= 1).astype(jnp.int32)),axis=-1)
+    return 2.**levels_3d
+
+def get_node_box(x, level_binary):
+    node_size = lvl_to_ext(level_binary)
+    node_cent = (jnp.floor(x / node_size) + 0.5) * node_size
+    return node_cent, node_size
 
 def pos_zorder_sort(x, block_size=64):
     assert x.dtype == jnp.float32

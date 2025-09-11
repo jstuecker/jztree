@@ -2,19 +2,11 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import custom_jax.nb_knn as nb_knn
+from .tree import summarize_leaves, lvl_to_ext, get_node_box
 
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", nb_knn.ConstructIlist(), platform="CUDA")
 
-def lvl_to_ext(level_binary):
-    olvl, omod = level_binary//3, level_binary % 3
-    levels_3d = jnp.stack((olvl, olvl + (omod >= 2).astype(jnp.int32), olvl + (omod >= 1).astype(jnp.int32)),axis=-1)
-    return 2.**levels_3d
-
-def get_node_box(x, level_binary):
-    node_size = lvl_to_ext(level_binary)
-    node_cent = (jnp.floor(x / node_size) + 0.5) * node_size
-    return node_cent, node_size
 
 def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
@@ -167,3 +159,24 @@ def brute_force_node_ilist_prep(octree, k=16):
     node_ilist, node_ilist_splits = dense_ilist(nnodes)
 
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits
+
+def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, refine_fac=16, k=16, stop_coarsen=512):
+    """Recursively builds an interaction list for kNN search. This is done by recursively:
+    (1) Coarsen the leaves
+    (2) Get the interaction list for the coarsened leaves (recursively)
+    (3) Use the interaction list of the coarsened leaves to build the finer interaction list
+    """
+    if len(xleaf) <= stop_coarsen:
+        il, ispl = dense_ilist(len(xleaf))
+        return il, ispl
+    
+    spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
+        xleaf, max_size=max_size, nleaf=nleaf, num_part=num_part
+    )
+    il2, ispl2 = build_ilist_recursive(xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part)
+    radii, il, ilr, ispl = build_ilist_knn(
+        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=1000, k=k, sort=True
+    )
+
+    return il, ispl
+build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=['max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen'])
