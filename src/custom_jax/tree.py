@@ -63,6 +63,8 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
         num = prepend_num(jnp.cumsum(nleaf), 0)
     if num_part is None:
         num_part = len(xleaf)
+    assert num_part / max_size >= len(xleaf) / 64
+
     # We may have some invalid leaves at the end
     # Let's keep track until where our leaves are valid
     nleaves_filled = jnp.count_nonzero(nleaf)
@@ -80,11 +82,13 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
         xnleaf, nleaves_filled, block_size=np.uint64(block_size), max_size=np.uint64(max_size))[0]
 
     # Get the splitting points of leaves
-    splits = jnp.where(flag_split > 0, size=max_new_leaves+1, fill_value=nleaves_filled)[0]
-
+    splits = jnp.where(flag_split > -1000, size=max_new_leaves+1, fill_value=nleaves_filled)[0]
     new_nleaf = num[splits[1:]] - num[splits[:-1]]
-    new_leaf_lvl = ztree_diff_level(xleaf[splits[:-1]], xleaf[splits[1:]-1])
-    new_leaf_cent = xleaf[splits[:-1]]#get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
+
+    new_leaf_lvl = jnp.minimum(flag_split[splits[:-1]], flag_split[splits[1:]]) - 1
+
+
+    new_leaf_cent = get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
 
     numleaves = jnp.count_nonzero(new_nleaf)
 

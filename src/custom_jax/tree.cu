@@ -372,7 +372,7 @@ __global__ void KernelSummarizeLeaves(
     is_split &= node_idx <= nfilled;
 
     if (node_idx <= n_leaves) {
-        split_flags[node_idx] = is_split;
+        split_flags[node_idx] = is_split ? mylevel : -1000;
     }
 }
 
@@ -395,7 +395,7 @@ ffi::Error HostSummarizeLeaves(
     //     return ffi::Error::InvalidArgument("max_size must be < 64 for now. Will improve it later.");
     // }
 
-    KernelSummarizeLeaves<block,scan_size><<< div_ceil(n_leaves, block), block, 0, stream>>>(
+    KernelSummarizeLeaves<block,scan_size><<< div_ceil(n_leaves+1, block), block, 0, stream>>>(
         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
         nleaves_filled.typed_data(),
         flags_split->typed_data(),
