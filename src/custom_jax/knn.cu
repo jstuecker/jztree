@@ -4,7 +4,6 @@
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 #include "shared_utils.cuh"
-#include <thrust/scan.h>
 #include <cub/cub.cuh>
 
 #define INFTY  INFINITY //__int_as_float(0x7f800000)
@@ -537,26 +536,44 @@ ffi::Error HostConstructIlist(
         boxsize
     );
     
-    thrust::inclusive_scan(thrust::cuda::par.on(stream), lsplits_ptr + 1, lsplits_ptr + nleaves + 1, lsplits_ptr + 1);
+    // thrust::inclusive_scan(thrust::cuda::par.on(stream), lsplits_ptr + 1, lsplits_ptr + nleaves + 1, lsplits_ptr + 1);
+
+    // Get the prefix sum with CUB
+    // We can use the radius array as a temporary stoarge -- usually this should fit, but we 
+    // make sure it does below
+    
+    size_t tmp_bytes;
+    cub::DeviceScan::InclusiveSum(nullptr, tmp_bytes, lsplits_ptr + 1, lsplits_ptr + 1, 
+        nleaves, stream); // determine the needed allocation size for CUB:
+
+    if (tmp_bytes > leaf_ilist_rad->size_bytes()) {
+        return ffi::Error(ffi::ErrorCode::kOutOfRange,
+            "Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
+            "Have:" + std::to_string(leaf_ilist_rad->size_bytes()) + " bytes. ");
+    }
+    
+    cub::DeviceScan::InclusiveSum(leaf_ilist_rad->untyped_data(), tmp_bytes, 
+        lsplits_ptr + 1, lsplits_ptr + 1, nleaves, stream);
 
     // Check whether the allocated array is large enough
-    int32_t ntot = 0;
-    cudaMemcpyAsync(&ntot, lsplits_ptr + nleaves, sizeof(int32_t), cudaMemcpyDeviceToHost, stream);
-    auto st = cudaStreamSynchronize(stream);
-    if (st != cudaSuccess) {
-        return ffi::Error(ffi::ErrorCode::kInternal, cudaGetErrorString(st));
-    }
-    if (ntot >= leaf_ilist->element_count()) {
-        return ffi::Error(
-            ffi::ErrorCode::kOutOfRange,
-            "Allocation factor is too small! Interactions needed: " + std::to_string(ntot) +
-            ", Interactions allocated: " + std::to_string(leaf_ilist->element_count()) +
-            " Please increase alloc_fac at least by a factor of " + 
-            std::to_string(float(ntot)/float(leaf_ilist->element_count()))
-        );
-    }
+    // I commented this check out, because it causes an internal error in JAX when jitting
+    // int32_t ntot = 0;
+    // cudaMemcpyAsync(&ntot, lsplits_ptr + nleaves, sizeof(int32_t), cudaMemcpyDeviceToHost, stream);
+    // auto st = cudaStreamSynchronize(stream);
+    // if (st != cudaSuccess) {
+    //     return ffi::Error(ffi::ErrorCode::kInternal, cudaGetErrorString(st));
+    // }
+    // if (ntot >= leaf_ilist->element_count()) {
+    //     return ffi::Error(
+    //         ffi::ErrorCode::kOutOfRange,
+    //         "Allocation factor is too small! Interactions needed: " + std::to_string(ntot) +
+    //         ", Interactions allocated: " + std::to_string(leaf_ilist->element_count()) +
+    //         " Please increase alloc_fac at least by a factor of " + 
+    //         std::to_string(float(ntot)/float(leaf_ilist->element_count()))
+    //     );
+    // }
 
-    // Runt the insertion kernel
+    // // Runt the insertion kernel
     KernelInsertInteractions<<< nnodes, 32, 0, stream>>>(
         leaves_ptr,
         isplit.typed_data(),
