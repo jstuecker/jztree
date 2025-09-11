@@ -52,7 +52,8 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
         nalloc = int((1+sort_alloc_fac)*alloc_fac * len(xleaf))
         leaf_ilist_rad = jax.ShapeDtypeStruct((nalloc,), jnp.float32)
     else:
-        leaf_ilist_rad = jax.ShapeDtypeStruct((0,), jnp.float32)
+        nalloc = int(0.5 * len(xleaf))
+        leaf_ilist_rad = jax.ShapeDtypeStruct((nalloc,), jnp.float32)
 
     radii, il, ilr, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ilist_splits,
@@ -160,7 +161,7 @@ def brute_force_node_ilist_prep(octree, k=16):
 
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits
 
-def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, refine_fac=16, k=16, stop_coarsen=512):
+def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, refine_fac=8, k=16, stop_coarsen=512, sort=False):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
@@ -174,9 +175,19 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, refi
         xleaf, max_size=max_size, nleaf=nleaf, num_part=num_part
     )
     il2, ispl2 = build_ilist_recursive(xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part)
-    radii, il, ilr, ispl = build_ilist_knn(
-        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=1000, k=k, sort=True
+    radii, il, ispl = build_ilist_knn(
+        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=1000, k=k, sort=sort
     )
 
     return il, ispl
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=['max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen'])
+
+def knn(posz, k=16, boxsize=0.):
+    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=32)
+
+    il, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*8, refine_fac=8, num_part=len(posz), k=k)
+
+    rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ispl, k=k, boxsize=boxsize)
+
+    return rknn, iknn
+knn.jit = jax.jit(knn, static_argnames=["k", "boxsize"])
