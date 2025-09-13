@@ -455,6 +455,7 @@ __global__ void KernelInsertInteractions(
     const float* rmax,
     int* ilist_out,
     float* ilist_radii,
+    int nmax,
     float boxsize,
     bool get_radii=false
 ) {
@@ -483,6 +484,9 @@ __global__ void KernelInsertInteractions(
 
             if(r2 <= rmaxQ2){
                 int offset = out_splits[ileafQ] + ninserted;
+
+                if(offset >= nmax)
+                    return; // We have run out of space, just return
 
                 if(get_radii){
                     if(r2 == 0.f) {
@@ -536,42 +540,28 @@ ffi::Error HostConstructIlist(
         boxsize
     );
     
-    // thrust::inclusive_scan(thrust::cuda::par.on(stream), lsplits_ptr + 1, lsplits_ptr + nleaves + 1, lsplits_ptr + 1);
-
     // Get the prefix sum with CUB
     // We can use the radius array as a temporary stoarge -- usually this should fit, but we 
     // make sure it does below
-    
     size_t tmp_bytes;
     cub::DeviceScan::InclusiveSum(nullptr, tmp_bytes, lsplits_ptr + 1, lsplits_ptr + 1, 
         nleaves, stream); // determine the needed allocation size for CUB:
 
     if (tmp_bytes > leaf_ilist_rad->size_bytes()) {
         return ffi::Error(ffi::ErrorCode::kOutOfRange,
-            "Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
+            "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
             "Have:" + std::to_string(leaf_ilist_rad->size_bytes()) + " bytes. ");
     }
     
     cub::DeviceScan::InclusiveSum(leaf_ilist_rad->untyped_data(), tmp_bytes, 
         lsplits_ptr + 1, lsplits_ptr + 1, nleaves, stream);
 
-    // Check whether the allocated array is large enough
-    // I commented this check out, because it causes an internal error in JAX when jitting
-    // int32_t ntot = 0;
-    // cudaMemcpyAsync(&ntot, lsplits_ptr + nleaves, sizeof(int32_t), cudaMemcpyDeviceToHost, stream);
-    // auto st = cudaStreamSynchronize(stream);
-    // if (st != cudaSuccess) {
-    //     return ffi::Error(ffi::ErrorCode::kInternal, cudaGetErrorString(st));
-    // }
-    // if (ntot >= leaf_ilist->element_count()) {
-    //     return ffi::Error(
-    //         ffi::ErrorCode::kOutOfRange,
-    //         "Allocation factor is too small! Interactions needed: " + std::to_string(ntot) +
-    //         ", Interactions allocated: " + std::to_string(leaf_ilist->element_count()) +
-    //         " Please increase alloc_fac at least by a factor of " + 
-    //         std::to_string(float(ntot)/float(leaf_ilist->element_count()))
-    //     );
-    // }
+    // In principle we should check where whether the allocated array
+    // leaf_ilist->element_count() is large enough to hold all interactions we want 
+    // to insert (lsplits_ptr[nleaves]) and throw an error if not.
+    // However, this requires a synchronization and XLA doesn't allow us to do that. So all we
+    // can do is to discard results that go beyond the buffer size and possibly throw an error
+    // from python
 
     // // Runt the insertion kernel
     KernelInsertInteractions<<< nnodes, 32, 0, stream>>>(
@@ -583,10 +573,10 @@ ffi::Error HostConstructIlist(
         rmax_ptr,
         leaf_ilist->typed_data(),
         leaf_ilist_rad->typed_data(),
+        leaf_ilist->element_count(),
         boxsize,
         sort
     );
-
     
     if(sort) {
         size_t   temp_storage_bytes = 0;

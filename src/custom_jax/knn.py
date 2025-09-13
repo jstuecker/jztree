@@ -3,10 +3,10 @@ import jax
 import jax.numpy as jnp
 import custom_jax.nb_knn as nb_knn
 from .tree import summarize_leaves, lvl_to_ext, get_node_box
+from .common import conditional_callback
 
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", nb_knn.ConstructIlist(), platform="CUDA")
-
 
 def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
@@ -43,7 +43,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
 
     rbuf = jax.ShapeDtypeStruct((len(xleaf),), jnp.float32)
-    leaf_ilist = jax.ShapeDtypeStruct((alloc_fac * len(xleaf),), jnp.int32)
+    leaf_ilist = jax.ShapeDtypeStruct((int(alloc_fac * len(xleaf)),), jnp.int32)
     leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
     if sort:
         # If sort is active, we sort interactions by distance, thereforew we need
@@ -60,9 +60,11 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
         k=np.int32(k), boxsize=np.float32(boxsize), sort=bool(sort)
     )
 
-    # if sort:
-    #     return radii, il, ilr[0:len(il)], ispl
-    # else:
+    def myerror(n1, n2):
+        raise MemoryError(f"The interaction list allocation is too small. (need: {n1} have: {n2})" +
+                          f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
+    ispl = ispl + conditional_callback(ispl[-1] > il.size, myerror, ispl[-1], il.size)
+
     return radii, il, ispl
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac", "sort", "sort_alloc_fac"])
 
@@ -162,7 +164,7 @@ def brute_force_node_ilist_prep(octree, k=16):
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits
 
 def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, 
-        refine_fac=8, k=16, stop_coarsen=512, sort=False, boxsize=0.):
+        refine_fac=8, k=16, stop_coarsen=512, sort=False, boxsize=0., alloc_fac=128.):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
@@ -173,24 +175,28 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
         return il, ispl
     
     spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
-        xleaf, max_size=max_size, nleaf=nleaf, num_part=num_part
-    )
-    il2, ispl2 = build_ilist_recursive(xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part)
+        xleaf, max_size=max_size, nleaf=nleaf, num_part=num_part)
+    # Now build the list on the coarser levels
+    # We increase the allocation factor a bit, because the total allocation will anyways be much
+    # smaller on the coarser levels and we don't want it to fail on coarser levels
+    il2, ispl2 = build_ilist_recursive(
+        xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
+        alloc_fac=alloc_fac*np.sqrt(refine_fac))
     radii, il, ispl = build_ilist_knn(
-        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=1000, k=k, sort=sort, boxsize=boxsize
-    )
-
+        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=alloc_fac, 
+        k=k, sort=sort, boxsize=boxsize)
+    
     return il, ispl
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize'])
 
-def knn(posz, k=16, boxsize=0.):
+def knn(posz, k=16, boxsize=0., alloc_fac=128.):
     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=32)
 
     il, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*8, refine_fac=8, 
-                                     num_part=len(posz), k=k, boxsize=boxsize)
+                                     num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
 
     rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ispl, k=k, boxsize=boxsize)
 
     return rknn, iknn
-knn.jit = jax.jit(knn, static_argnames=["k", "boxsize"])
+knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac"])
