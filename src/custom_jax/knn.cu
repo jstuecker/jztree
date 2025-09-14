@@ -109,6 +109,7 @@ __device__ __forceinline__ float NodeNodeMaxDist2(const Node& nodeA, const Node&
     return maxdist2(nodeA.center, nodeB.center, half_ext, boxsize);
 }
 
+
 template<int K>
 struct SortedNearestK {
     // Keeps track of the nearest K neighbors that we have seen so far in ascending order of r2.
@@ -354,7 +355,6 @@ struct LogBinMap {
     }
 };
 
-// template <int RBINS>
 __global__ void KernelCountInteractions(
     const Node* leaves,
     const int* leaves_npart,
@@ -375,13 +375,15 @@ __global__ void KernelCountInteractions(
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
     int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
     Node leafQ = leaves[ileafQ];
+    float3 xQ = leafQ.center;
+
+    float3 extQ = LvlToHalfExt(leafQ.level);
 
     // We will define bins in units of the diagonal size of leafQ
     // This is the radius at which every point in Q would include every other point in Q
     float rbase2 = NodeNodeMaxDist2(leafQ, leafQ, boxsize);
     
     LogBinMap<20> binmap(rbase2, 4.0f);
-
     CumHist<20> rhist;
 
     PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
@@ -391,17 +393,21 @@ __global__ void KernelCountInteractions(
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
         int nleavesT = ileafT_end - ileafT_start;
 
-        __shared__ Node LeafT[32];
+        __shared__ float3 xT[32];
+        __shared__ float3 extT[32];
         __shared__ int npartT[32];
         if(threadIdx.x < nleavesT) {
-            LeafT[threadIdx.x] = leaves[ileafT_start + threadIdx.x];
+            Node leafT = leaves[ileafT_start + threadIdx.x];
+            xT[threadIdx.x] = leafT.center;
+            extT[threadIdx.x] = LvlToHalfExt(leafT.level);
             npartT[threadIdx.x] = leaves_npart[ileafT_start + threadIdx.x];
         }
         __syncthreads();
         
         for(int j = 0; j < nleavesT; j++) {
-            Node leafT = LeafT[j];
-            float r2 = NodeNodeMaxDist2(leafQ, leafT, boxsize);
+            float3 h2 = extT[j];
+            float3 h = make_float3(extQ.x + h2.x, extQ.y + h2.y, extQ.z + h2.z);
+            float r2 = maxdist2(xT[j], xQ, h, boxsize);
 
             int bin = binmap.r2_to_bin(r2);
             rhist.insert(bin, npartT[j]);
@@ -413,9 +419,9 @@ __global__ void KernelCountInteractions(
     float rmax = binmap.bin_end(ibin);
     float rmax2 = rmax*rmax;
 
-    // Now we have to go again through all leaves and count how many we need to interact with
-    // Note that here we need to use the minimal distance, not the maximal one
-    // since we need to include any leaf that may contain particles within rmax
+    // // Now we have to go again through all leaves and count how many we need to interact with
+    // // Note that here we need to use the minimal distance, not the maximal one
+    // // since we need to include any leaf that may contain particles within rmax
     int ncount = 0;
 
     PrefetchList<int> pf_ilist2(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
@@ -424,15 +430,19 @@ __global__ void KernelCountInteractions(
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
         int nleavesT = ileafT_end - ileafT_start;
 
-        __shared__ Node LeafT[32];
+        __shared__ float3 xT[32];
+        __shared__ float3 extT[32];
         if(threadIdx.x < nleavesT) {
-            LeafT[threadIdx.x] = leaves[ileafT_start + threadIdx.x];
+            Node leafT = leaves[ileafT_start + threadIdx.x];
+            xT[threadIdx.x] = leafT.center;
+            extT[threadIdx.x] = LvlToHalfExt(leafT.level);
         }
         __syncthreads();
         
         for(int j = 0; j < nleavesT; j++) {
-            Node leafT = LeafT[j];
-            float r2 = NodeNodeMinDist2(leafQ, leafT, boxsize);
+            float3 h2 = extT[j];
+            float3 h = make_float3(extQ.x + h2.x, extQ.y + h2.y, extQ.z + h2.z);
+            float r2 = mindist2(xT[j], xQ, h, boxsize);
 
             ncount += (r2 <= rmax2);
         }
@@ -463,6 +473,8 @@ __global__ void KernelInsertInteractions(
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
     int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
     Node leafQ = leaves[ileafQ];
+    float3 xQ = leafQ.center;
+    float3 extQ = LvlToHalfExt(leafQ.level);
     float rmaxQ2 = rmax[ileafQ]*rmax[ileafQ];
 
     int ninserted = 0;
@@ -473,14 +485,20 @@ __global__ void KernelInsertInteractions(
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
         int nleavesT = ileafT_end - ileafT_start;
 
-        __shared__ Node LeafT[32];
+        // __shared__ Node LeafT[32];
+        __shared__ float3 xT[32];
+        __shared__ float3 extT[32];
+
         if(threadIdx.x < nleavesT) {
-            LeafT[threadIdx.x] = leaves[ileafT_start + threadIdx.x];
+            Node leafT = leaves[ileafT_start + threadIdx.x];
+            xT[threadIdx.x] = leafT.center;
+            extT[threadIdx.x] = LvlToHalfExt(leafT.level);
         }
         __syncthreads();
         for(int j = 0; j < nleavesT; j++) {
-            Node leafT = LeafT[j];
-            float r2 = NodeNodeMinDist2(leafQ, leafT, boxsize);
+            float3 h2 = extT[j];
+            float3 h = make_float3(extQ.x + h2.x, extQ.y + h2.y, extQ.z + h2.z);
+            float r2 = mindist2(xT[j], xQ, h, boxsize);
 
             if(r2 <= rmaxQ2){
                 int offset = out_splits[ileafQ] + ninserted;
@@ -492,7 +510,7 @@ __global__ void KernelInsertInteractions(
                     if(r2 == 0.f) {
                         // For the direct neighbourhood we add a tiny contribution of the maximum
                         // distance so that sorting guarantees that we start with the leaf itself
-                        r2 = 1e-10f*NodeNodeMaxDist2(leafQ, leafT, boxsize);
+                        r2 = 1e-10f*maxdist2(xT[j], xQ, h, boxsize);
                     }
                     ilist_radii[offset] = r2;
                 }
