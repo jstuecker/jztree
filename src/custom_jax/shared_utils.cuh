@@ -281,7 +281,7 @@ __global__ void segmented_bitonic_sort_kv(
     int32_t* __restrict__ values,         // in/out int32 values (permute with keys)
     const int32_t* __restrict__ offsets,  // len = num_segments + 1
     int32_t num_segments,
-    int32_t max_sort 
+    int32_t tile_size 
 )
 {
     int seg = blockIdx.x;
@@ -295,31 +295,28 @@ __global__ void segmented_bitonic_sort_kv(
     extern __shared__ unsigned char smem[];
     KV* sdata = reinterpret_cast<KV*>(smem);
 
-    int tid = threadIdx.x;
-    // int nPow2 = next_pow2_cap(len);
-    int nPow2 = min(next_pow2_u32(len), max_sort);
+    for (int base = 0; base < len; base += tile_size) {
+        int n = min(tile_size, len - base);
+        int nPow2 = min(next_pow2_u32(n), tile_size);
 
-    // Padding: +inf key so padded items sink to the end (ascending).
-    // Value can be anything (kept with the pad).
-    const KV PAD = {1e8, 0};
-
-    // Load keys/values into shared memory (with padding)
-    for (int i = tid; i < nPow2; i += blockDim.x) {
-        KV kv = PAD;
-        if (i < len) {
-            kv.k = keys[start + i];
-            kv.v = values[start + i];
+        // Load keys/values into shared memory (with padding)
+        for (int i = threadIdx.x; i < nPow2; i += blockDim.x) {
+            KV kv = {INFTY, 0};
+            if (i < len) {
+                kv.k = keys[start + i];
+                kv.v = values[start + i];
+            }
+            sdata[i] = kv;
         }
-        sdata[i] = kv;
-    }
-    __syncthreads();
+        __syncthreads();
 
-    // Sort
-    bitonic_sort_shared(sdata, nPow2);
+        // Sort
+        bitonic_sort_shared(sdata, nPow2);
 
-    // Store back only the real elements
-    for (int i = tid; i < min(len, nPow2); i += blockDim.x) {
-        keys[start + i]   = sdata[i].k;
-        values[start + i] = sdata[i].v;
+        // Store back only the real elements
+        for (int i = threadIdx.x; i < n; i += blockDim.x) {
+            keys[start + base + i]   = sdata[i].k;
+            values[start + base + i] = sdata[i].v;
+        }
     }
 }

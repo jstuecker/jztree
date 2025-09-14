@@ -596,12 +596,12 @@ ffi::Error HostConstructIlist(
     
     if(sort) {
         int block_size = 64;
-        int max_sort = 1024;
-        size_t smem_bytes = max_sort * sizeof(KV);
+        int tile_size = 512;
+        size_t smem_bytes = tile_size * sizeof(KV);
         int nsegs = leaf_ilist_splits->element_count() - 1;
         segmented_bitonic_sort_kv<<< nsegs, block_size, smem_bytes, stream>>>(
             leaf_ilist_rad->typed_data(), leaf_ilist->typed_data(), 
-            leaf_ilist_splits->typed_data(), nsegs, max_sort);
+            leaf_ilist_splits->typed_data(), nsegs, tile_size);
     }
     
     cudaError_t last_error = cudaGetLastError();
@@ -636,19 +636,19 @@ ffi::Error HostSegmentSort(
     ffi::Buffer<ffi::S32> isplit,
     ffi::ResultBuffer<ffi::F32> key_out,
     ffi::ResultBuffer<ffi::S32> val_out,
-    int max_sort
+    int tile_size
 )
 {
     int nsegs = isplit.element_count() - 1;
     int blocksize = 64;
-    size_t smem_bytes = max_sort * sizeof(KV);
+    size_t smem_bytes = tile_size * sizeof(KV);
 
     // copy data to output buffers
     cudaMemcpyAsync(key_out->typed_data(), key.typed_data(), key.size_bytes(), cudaMemcpyDeviceToDevice, stream);
     cudaMemcpyAsync(val_out->typed_data(), val.typed_data(), val.size_bytes(), cudaMemcpyDeviceToDevice, stream);
 
     segmented_bitonic_sort_kv<<< nsegs, blocksize, smem_bytes, stream>>>(
-        key_out->typed_data(), val_out->typed_data(), isplit.typed_data(), nsegs, max_sort);
+        key_out->typed_data(), val_out->typed_data(), isplit.typed_data(), nsegs, tile_size);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -666,7 +666,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>() // isplit
         .Ret<ffi::Buffer<ffi::F32>>() // key_out
         .Ret<ffi::Buffer<ffi::S32>>() // val_out
-        .Attr<int>("max_sort"),
+        .Attr<int>("tile_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 
