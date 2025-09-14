@@ -7,6 +7,7 @@ from .common import conditional_callback
 
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", nb_knn.ConstructIlist(), platform="CUDA")
+jax.ffi.register_ffi_target("SegmentSort", nb_knn.SegmentSort(), platform="CUDA")
 
 def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
@@ -46,14 +47,9 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
     leaf_ilist = jax.ShapeDtypeStruct((int(alloc_fac * len(xleaf)),), jnp.int32)
     leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
     if sort:
-        # If sort is active, we sort interactions by distance, thereforew we need
-        # to store the distances in the ilist as well
-        # furthe we need some temporary storage for sorting
-        nalloc = int((1+sort_alloc_fac)*alloc_fac * len(xleaf))
-        leaf_ilist_rad = jax.ShapeDtypeStruct((nalloc,), jnp.float32)
+        leaf_ilist_rad = jax.ShapeDtypeStruct(leaf_ilist.shape, jnp.float32)
     else:
-        nalloc = int(0.5 * len(xleaf))
-        leaf_ilist_rad = jax.ShapeDtypeStruct((nalloc,), jnp.float32)
+        leaf_ilist_rad = jax.ShapeDtypeStruct((0,), jnp.float32)
 
     radii, il, ilr, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ilist_splits,
@@ -181,7 +177,7 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
     # smaller on the coarser levels and we don't want it to fail on coarser levels
     il2, ispl2 = build_ilist_recursive(
         xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
-        alloc_fac=alloc_fac*np.sqrt(refine_fac))
+        alloc_fac=alloc_fac*np.sqrt(refine_fac), sort=sort)
     radii, il, ispl = build_ilist_knn(
         xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=alloc_fac, 
         k=k, sort=sort, boxsize=boxsize)
@@ -200,3 +196,18 @@ def knn(posz, k=16, boxsize=0., alloc_fac=128.):
 
     return rknn, iknn
 knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac"])
+
+def segment_sort(key, val, isplit, max_sort=1024):
+    """Sorts key/val pairs within segments defined by isplit"""
+    assert key.dtype == jnp.float32
+    assert val.dtype == jnp.int32
+    assert isplit.dtype == jnp.int32
+    assert key.shape == val.shape
+    assert isplit.ndim == 1
+    assert max_sort in (32, 64, 128, 256, 512, 1024, 2048)
+
+    out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
+    key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
+        key, val, isplit, max_sort=np.int32(max_sort)
+    )
+    return key_sorted, val_sorted

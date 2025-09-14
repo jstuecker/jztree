@@ -6,8 +6,6 @@
 #include "shared_utils.cuh"
 #include <cub/cub.cuh>
 
-#define INFTY  INFINITY //__int_as_float(0x7f800000)
-
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
@@ -386,6 +384,7 @@ __global__ void KernelCountInteractions(
     //     (Note that here we need to use the lower bound of the distance between leaves)
 
     int nodeQ = blockIdx.x;
+
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
     int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
     Node leafQ = leaves[ileafQ];
@@ -571,7 +570,7 @@ ffi::Error HostConstructIlist(
     cub::DeviceScan::InclusiveSum(nullptr, tmp_bytes, lsplits_ptr + 1, lsplits_ptr + 1, 
         nleaves, stream); // determine the needed allocation size for CUB:
 
-    if (tmp_bytes > leaf_ilist_rad->size_bytes()) {
+    if (tmp_bytes > leaf_ilist->size_bytes()) {
         return ffi::Error(ffi::ErrorCode::kOutOfRange,
             "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
             "Have:" + std::to_string(leaf_ilist->size_bytes()) + " bytes. ");
@@ -596,32 +595,13 @@ ffi::Error HostConstructIlist(
     );
     
     if(sort) {
-        size_t   temp_storage_bytes = 0;
-        cub::DeviceSegmentedSort::SortPairs(
-            nullptr, temp_storage_bytes,
-            leaf_ilist_rad->typed_data(), leaf_ilist_rad->typed_data(), // keys i/o
-            leaf_ilist->typed_data(), leaf_ilist->typed_data(), // values i/o
-            leaf_ilist->element_count(), nleaves + 1, lsplits_ptr, lsplits_ptr + 1);
-
-        size_t bytes_have = 4*(leaf_ilist_rad->element_count()-leaf_ilist->element_count());
-
-        if(bytes_have < temp_storage_bytes) {
-            return ffi::Error(
-                ffi::ErrorCode::kOutOfRange,
-                "Allocation factor is too small! Temp. space needed: " + 
-                std::to_string(temp_storage_bytes) + " bytes. " +
-                "Temp space available: " +
-                std::to_string(bytes_have) + " bytes. "  +
-                " Please increase sort_alloc_fac at least by a factor of " +
-                std::to_string((float)temp_storage_bytes / (float)bytes_have)
-            );
-        }
-
-        cub::DeviceSegmentedSort::SortPairs(
-            leaf_ilist_rad->typed_data() + leaf_ilist->element_count(), bytes_have,
-            leaf_ilist_rad->typed_data(), leaf_ilist_rad->typed_data(), // keys i/o
-            leaf_ilist->typed_data(), leaf_ilist->typed_data(), // values i/o
-            leaf_ilist->element_count(), nleaves + 1, lsplits_ptr, lsplits_ptr + 1, stream);
+        int block_size = 64;
+        int max_sort = 1024;
+        size_t smem_bytes = max_sort * sizeof(KV);
+        int nsegs = leaf_ilist_splits->element_count() - 1;
+        segmented_bitonic_sort_kv<<< nsegs, block_size, smem_bytes, stream>>>(
+            leaf_ilist_rad->typed_data(), leaf_ilist->typed_data(), 
+            leaf_ilist_splits->typed_data(), nsegs, max_sort);
     }
     
     cudaError_t last_error = cudaGetLastError();
@@ -630,7 +610,6 @@ ffi::Error HostConstructIlist(
     }
     return ffi::Error::Success();
 }
-
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ConstructIlist, HostConstructIlist,
@@ -650,8 +629,49 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<bool>("sort"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+ffi::Error HostSegmentSort(
+    cudaStream_t stream,
+    ffi::Buffer<ffi::F32> key,
+    ffi::Buffer<ffi::S32> val,
+    ffi::Buffer<ffi::S32> isplit,
+    ffi::ResultBuffer<ffi::F32> key_out,
+    ffi::ResultBuffer<ffi::S32> val_out,
+    int max_sort
+)
+{
+    int nsegs = isplit.element_count() - 1;
+    int blocksize = 64;
+    size_t smem_bytes = max_sort * sizeof(KV);
+
+    // copy data to output buffers
+    cudaMemcpyAsync(key_out->typed_data(), key.typed_data(), key.size_bytes(), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(val_out->typed_data(), val.typed_data(), val.size_bytes(), cudaMemcpyDeviceToDevice, stream);
+
+    segmented_bitonic_sort_kv<<< nsegs, blocksize, smem_bytes, stream>>>(
+        key_out->typed_data(), val_out->typed_data(), isplit.typed_data(), nsegs, max_sort);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SegmentSort, HostSegmentSort,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>() 
+        .Arg<ffi::Buffer<ffi::F32>>() // key
+        .Arg<ffi::Buffer<ffi::S32>>() // val
+        .Arg<ffi::Buffer<ffi::S32>>() // isplit
+        .Ret<ffi::Buffer<ffi::F32>>() // key_out
+        .Ret<ffi::Buffer<ffi::S32>>() // val_out
+        .Attr<int>("max_sort"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
 
 NB_MODULE(nb_knn, m) {
     m.def("IlistKNNSearch", []() { return EncapsulateFfiCall(IlistKNNSearch); });
     m.def("ConstructIlist", []() { return EncapsulateFfiCall(ConstructIlist); });
+    m.def("SegmentSort", []() { return EncapsulateFfiCall(SegmentSort); });
 }

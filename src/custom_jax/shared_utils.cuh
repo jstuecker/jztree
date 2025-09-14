@@ -1,6 +1,8 @@
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 
+#define INFTY  INFINITY //__int_as_float(0x7f800000)
+
 // A wrapper to encapsulate an FFI call
 template <typename T>
 nanobind::capsule EncapsulateFfiCall(T *fn) {
@@ -218,3 +220,106 @@ __device__ struct PointedPrefetchList {
         return icur + loff >= iend;
     }
 };
+
+
+// Utility: next power-of-two >= n (cap at MAX_THREADS)
+// Smallest power of two >= x (32-bit)
+__device__ __forceinline__ unsigned int next_pow2_u32(unsigned int x) {
+    if (x == 0) return 1u;                 // define as 1 for x=0
+    if (x > 0x80000000u) return 0u;        // overflow (no 33rd bit in u32)
+    return 1u << (32 - __clz(x - 1));      // __clz: count leading zeros
+}
+
+struct KV {
+    float k;   // key (float32)
+    int32_t v; // value (int32)
+};
+
+// Compare-and-swap: ascending on key; swap value with it
+__device__ __forceinline__
+void cas(KV &a, KV &b, bool dir /*true=>ascending*/) {
+    // If dir==true we want smaller key first
+    // Handle NaNs: treat NaN as +inf so they float to the end in ascending
+    float ak = a.k, bk = b.k;
+    bool a_nan = isnan(ak);
+    bool b_nan = isnan(bk);
+    float ak_eff = a_nan ? INFTY : ak;
+    float bk_eff = b_nan ? INFTY : bk;
+
+    bool greater = (ak_eff > bk_eff);
+    // If equal keys and you prefer stability, you could compare original index carried in v or a separate index.
+    if (greater == dir) {
+        KV tmp = a; a = b; b = tmp;
+    }
+}
+
+// Bitonic sort network over shared memory buffer of length nPow2
+__device__ void bitonic_sort_shared(KV* sdata, int nPow2) {
+    // nPow2 should be a power of two (pad beforehand).
+    for (int k = 2; k <= nPow2; k <<= 1) {
+        // ascending overall
+        for (int j = k >> 1; j > 0; j >>= 1) {
+            __syncthreads();  // ensure previous stage is complete
+
+            // Stride over all indices in this block's shared segment
+            for (int i = threadIdx.x; i < nPow2; i += blockDim.x) {
+                int ixj = i ^ j;
+                // Only one side does the compare-and-swap to avoid double work
+                if (ixj > i) {
+                    bool up = ((i & k) == 0); // true => ascending for this pair
+                    cas(sdata[i], sdata[ixj], up);
+                }
+            }
+        }
+    }
+    __syncthreads();
+}
+
+// -------- Kernel: segmented sort (keys + values) --------
+__global__ void segmented_bitonic_sort_kv(
+    float* __restrict__ keys,             // in/out float32 keys
+    int32_t* __restrict__ values,         // in/out int32 values (permute with keys)
+    const int32_t* __restrict__ offsets,  // len = num_segments + 1
+    int32_t num_segments,
+    int32_t max_sort 
+)
+{
+    int seg = blockIdx.x;
+    if (seg >= num_segments) return;
+
+    int32_t start = offsets[seg];
+    int32_t end   = offsets[seg + 1];
+    int32_t len   = max(end - start, 0);
+    if (len <= 1) return;
+
+    extern __shared__ unsigned char smem[];
+    KV* sdata = reinterpret_cast<KV*>(smem);
+
+    int tid = threadIdx.x;
+    // int nPow2 = next_pow2_cap(len);
+    int nPow2 = min(next_pow2_u32(len), max_sort);
+
+    // Padding: +inf key so padded items sink to the end (ascending).
+    // Value can be anything (kept with the pad).
+    const KV PAD = {1e8, 0};
+
+    // Load keys/values into shared memory (with padding)
+    for (int i = tid; i < nPow2; i += blockDim.x) {
+        KV kv = PAD;
+        if (i < len) {
+            kv.k = keys[start + i];
+            kv.v = values[start + i];
+        }
+        sdata[i] = kv;
+    }
+    __syncthreads();
+
+    // Sort
+    bitonic_sort_shared(sdata, nPow2);
+
+    // Store back only the real elements
+    for (int i = tid; i < min(len, nPow2); i += blockDim.x) {
+        keys[start + i]   = sdata[i].k;
+        values[start + i] = sdata[i].v;
+    }
+}
