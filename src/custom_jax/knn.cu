@@ -109,6 +109,13 @@ __device__ __forceinline__ float NodeNodeMaxDist2(const Node& nodeA, const Node&
     return maxdist2(nodeA.center, nodeB.center, half_ext, boxsize);
 }
 
+__device__ __forceinline__ float3 sumf3(const float3 &a, const float3 &b) {
+    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+__device__ __forceinline__ float dotf3(const float3 &a, const float3 b) {
+    return a.x*b.x + a.y*b.y + a.z*b.z;
+}
+
 
 template<int K>
 struct SortedNearestK {
@@ -366,22 +373,28 @@ __global__ void KernelCountInteractions(
     int k,
     float boxsize
 ) {
+
     // Finds the minimal radius at which we are guaranteed to have at least k neighbors for any
-    // point of a leaf
-    // also calculates the number of other leaves that need to be evaluated at that distance
-    // this is done with the help of a histogram of distances to other leaves
+    // point of a leaf and counts the number of other leaves that are needed to interact at that 
+    //  distance
+
+    // This is done in 3 steps:
+    // (1) We make a histogram of the number of particles that are guaranteed to be included at
+    //     a distance r. (Note that this depends on the upper bound of the distance between leaves)
+    // (2) We find the radius at which we have at least k particles
+    // (3) We go through the leaves again and count how many we need to check at that distance
+    //     (Note that here we need to use the lower bound of the distance between leaves)
 
     int nodeQ = blockIdx.x;
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
     int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
     Node leafQ = leaves[ileafQ];
     float3 xQ = leafQ.center;
-
     float3 extQ = LvlToHalfExt(leafQ.level);
 
     // We will define bins in units of the diagonal size of leafQ
     // This is the radius at which every point in Q would include every other point in Q
-    float rbase2 = NodeNodeMaxDist2(leafQ, leafQ, boxsize);
+    float rbase2 = 4.0f*dotf3(extQ, extQ); // factor 4, since ext is half the node size
     
     LogBinMap<20> binmap(rbase2, 4.0f);
     CumHist<20> rhist;
@@ -405,9 +418,7 @@ __global__ void KernelCountInteractions(
         __syncthreads();
         
         for(int j = 0; j < nleavesT; j++) {
-            float3 h2 = extT[j];
-            float3 h = make_float3(extQ.x + h2.x, extQ.y + h2.y, extQ.z + h2.z);
-            float r2 = maxdist2(xT[j], xQ, h, boxsize);
+            float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
             int bin = binmap.r2_to_bin(r2);
             rhist.insert(bin, npartT[j]);
@@ -440,9 +451,7 @@ __global__ void KernelCountInteractions(
         __syncthreads();
         
         for(int j = 0; j < nleavesT; j++) {
-            float3 h2 = extT[j];
-            float3 h = make_float3(extQ.x + h2.x, extQ.y + h2.y, extQ.z + h2.z);
-            float r2 = mindist2(xT[j], xQ, h, boxsize);
+            float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
             ncount += (r2 <= rmax2);
         }
@@ -485,7 +494,6 @@ __global__ void KernelInsertInteractions(
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
         int nleavesT = ileafT_end - ileafT_start;
 
-        // __shared__ Node LeafT[32];
         __shared__ float3 xT[32];
         __shared__ float3 extT[32];
 
@@ -496,9 +504,7 @@ __global__ void KernelInsertInteractions(
         }
         __syncthreads();
         for(int j = 0; j < nleavesT; j++) {
-            float3 h2 = extT[j];
-            float3 h = make_float3(extQ.x + h2.x, extQ.y + h2.y, extQ.z + h2.z);
-            float r2 = mindist2(xT[j], xQ, h, boxsize);
+            float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
             if(r2 <= rmaxQ2){
                 int offset = out_splits[ileafQ] + ninserted;
@@ -510,7 +516,7 @@ __global__ void KernelInsertInteractions(
                     if(r2 == 0.f) {
                         // For the direct neighbourhood we add a tiny contribution of the maximum
                         // distance so that sorting guarantees that we start with the leaf itself
-                        r2 = 1e-10f*maxdist2(xT[j], xQ, h, boxsize);
+                        r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
                     }
                     ilist_radii[offset] = r2;
                 }
@@ -559,8 +565,8 @@ ffi::Error HostConstructIlist(
     );
     
     // Get the prefix sum with CUB
-    // We can use the radius array as a temporary stoarge -- usually this should fit, but we 
-    // make sure it does below
+    // We can use the interaction list array as a temporary stoarge
+    // This should easily fit in general, but better check that it actually does:
     size_t tmp_bytes;
     cub::DeviceScan::InclusiveSum(nullptr, tmp_bytes, lsplits_ptr + 1, lsplits_ptr + 1, 
         nleaves, stream); // determine the needed allocation size for CUB:
@@ -568,20 +574,13 @@ ffi::Error HostConstructIlist(
     if (tmp_bytes > leaf_ilist_rad->size_bytes()) {
         return ffi::Error(ffi::ErrorCode::kOutOfRange,
             "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
-            "Have:" + std::to_string(leaf_ilist_rad->size_bytes()) + " bytes. ");
+            "Have:" + std::to_string(leaf_ilist->size_bytes()) + " bytes. ");
     }
     
-    cub::DeviceScan::InclusiveSum(leaf_ilist_rad->untyped_data(), tmp_bytes, 
+    cub::DeviceScan::InclusiveSum(leaf_ilist->untyped_data(), tmp_bytes, 
         lsplits_ptr + 1, lsplits_ptr + 1, nleaves, stream);
 
-    // In principle we should check where whether the allocated array
-    // leaf_ilist->element_count() is large enough to hold all interactions we want 
-    // to insert (lsplits_ptr[nleaves]) and throw an error if not.
-    // However, this requires a synchronization and XLA doesn't allow us to do that. So all we
-    // can do is to discard results that go beyond the buffer size and possibly throw an error
-    // from python
-
-    // // Runt the insertion kernel
+    // Now insert the interactions
     KernelInsertInteractions<<< nnodes, 32, 0, stream>>>(
         leaves_ptr,
         isplit.typed_data(),
