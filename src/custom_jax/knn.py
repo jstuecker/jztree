@@ -160,12 +160,14 @@ def brute_force_node_ilist_prep(octree, k=16):
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits
 
 def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, 
-        refine_fac=8, k=16, stop_coarsen=512, sort=False, boxsize=0., alloc_fac=128.):
+        refine_fac=8, k=16, stop_coarsen=128, sort=False, boxsize=0., alloc_fac=128.):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
     (3) Use the interaction list of the coarsened leaves to build the finer interaction list
     """
+    assert refine_fac < 16, "refine_fac should be < 16 to respect some blocksize assumptions in CUDA"
+
     if len(xleaf) <= stop_coarsen:
         il, ispl = dense_ilist(len(xleaf))
         return il, ispl
@@ -186,10 +188,10 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize'])
 
-def knn(posz, k=16, boxsize=0., alloc_fac=128.):
+def knn(posz, k=16, boxsize=0., alloc_fac=256.):
     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=32)
 
-    il, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*8, refine_fac=8, 
+    il, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*15, refine_fac=15, 
                                      num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
 
     rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ispl, k=k, boxsize=boxsize)
