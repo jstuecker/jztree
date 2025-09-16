@@ -237,38 +237,80 @@ struct KV {
 
 // Compare-and-swap: ascending on key; swap value with it
 __device__ __forceinline__
-void cas(KV &a, KV &b, bool dir /*true=>ascending*/) {
-    // If dir==true we want smaller key first
-    // Handle NaNs: treat NaN as +inf so they float to the end in ascending
-    float ak = a.k, bk = b.k;
-    bool a_nan = isnan(ak);
-    bool b_nan = isnan(bk);
-    float ak_eff = a_nan ? INFTY : ak;
-    float bk_eff = b_nan ? INFTY : bk;
+void cas(float &ak, int32_t &av, float &bk, int32_t &bv, bool dir /*true=>ascending*/) {
+    // Treat NaN as +inf so they go to the end in ascending
+    float ak_eff = isnan(ak) ? INFTY : ak;
+    float bk_eff = isnan(bk) ? INFTY : bk;
 
     bool greater = (ak_eff > bk_eff);
-    // If equal keys and you prefer stability, you could compare original index carried in v or a separate index.
     if (greater == dir) {
-        KV tmp = a; a = b; b = tmp;
+        float tk = ak; ak = bk; bk = tk;
+        int32_t tv = av; av = bv; bv = tv;
     }
 }
 
-// Bitonic sort network over shared memory buffer of length nPow2
-__device__ void bitonic_sort_shared(KV* sdata, int nPow2) {
-    // nPow2 should be a power of two (pad beforehand).
-    for (int k = 2; k <= nPow2; k <<= 1) {
-        // ascending overall
-        for (int j = k >> 1; j > 0; j >>= 1) {
-            __syncthreads();  // ensure previous stage is complete
+template <typename T>
+void comparator(std::vector<T> &a, std::size_t i, std::size_t j) {
+  if (i < j && j < a.size() && a[j] < a[i])
+    std::swap(a[i], a[j]);
+}
 
-            // Stride over all indices in this block's shared segment
-            for (int i = threadIdx.x; i < nPow2; i += blockDim.x) {
-                int ixj = i ^ j;
-                // Only one side does the compare-and-swap to avoid double work
-                if (ixj > i) {
-                    bool up = ((i & k) == 0); // true => ascending for this pair
-                    cas(sdata[i], sdata[ixj], up);
-                }
+template <typename T> void impBitonicSort(std::vector<T> &a) {
+  // Iterate k as if the array size were rounded up to the nearest power of two.
+  for (std::size_t k = 2; (k >> 1) < a.size(); k <<= 1) {
+    for (std::size_t i = 0; i < a.size(); i++)
+      comparator(a, i, i ^ (k - 1));
+    for (std::size_t j = k >> 1; 0 < j; j >>= 1)
+      for (std::size_t i = 0; i < a.size(); i++)
+        comparator(a, i, i ^ j);
+  }
+}
+
+int main() {
+  for (int n = 2; n <= 8; n++) {
+    std::vector<int> unsorted(n);
+    std::iota(unsorted.begin(), unsorted.end(), 0);
+    do {
+      auto sorted = unsorted;
+      impBitonicSort(sorted);
+      if (!std::is_sorted(sorted.begin(), sorted.end())) {
+        for (int i : unsorted)
+          std::printf(" %d", i);
+        std::printf("\n");
+        return 1;
+      }
+    } while (std::next_permutation(unsorted.begin(), unsorted.end()));
+  }
+}
+
+
+__device__ __forceinline__ 
+void compare_and_swap(float *val, int32_t *idx, int i, int j, int len) {
+    if(i < j && j < len && val[i] > val[j]) {
+        float t = val[i];
+        val[i] = val[j];
+        val[j] = t;
+
+        int32_t ti = idx[i];
+        idx[i] = idx[j];
+        idx[j] = ti;
+    }
+}
+
+// Bitonic sort network -- works in-place and can use non-power-of-two lengths
+__device__ void bitonic_sort(float* skeys, int32_t* svals, int len) {
+    // see https://stackoverflow.com/questions/73147204
+    int nPow2 = next_pow2_u32(len);
+
+    for (int k = 2; k <= nPow2; k <<= 1) {
+        __syncthreads();
+        for (int i = threadIdx.x; i < len; i += blockDim.x) {
+            compare_and_swap(skeys, svals, i, i ^ (k - 1), len);
+        }
+        for (int j = k >> 1; j > 0; j >>= 1) {
+            __syncthreads();
+            for (int i = threadIdx.x; i < len; i += blockDim.x) {
+                compare_and_swap(skeys, svals, i, i ^ j, len);
             }
         }
     }
@@ -292,31 +334,37 @@ __global__ void segmented_bitonic_sort_kv(
     int32_t len   = max(end - start, 0);
     if (len <= 1) return;
 
-    extern __shared__ unsigned char smem[];
-    KV* sdata = reinterpret_cast<KV*>(smem);
+    if(len <= tile_size) { // We can do the sort in shared memory
+        extern __shared__ unsigned char smem[];
+        float*   skeys = reinterpret_cast<float*>(smem);
+        int32_t* svals = reinterpret_cast<int32_t*>(skeys + tile_size);
 
-    for (int base = 0; base < len; base += tile_size) {
-        int n = min(tile_size, len - base);
-        int nPow2 = min(next_pow2_u32(n), tile_size);
+        int n = min(tile_size, len);
+        int nPow2 = min((int)next_pow2_u32((unsigned)n), tile_size);
 
         // Load keys/values into shared memory (with padding)
         for (int i = threadIdx.x; i < nPow2; i += blockDim.x) {
-            KV kv = {INFTY, 0};
-            if (i < len) {
-                kv.k = keys[start + i];
-                kv.v = values[start + i];
+            float   k = INFTY;
+            int32_t v = 0;
+            if (i < n) {
+                k = keys[start + i];
+                v = values[start + i];
             }
-            sdata[i] = kv;
+            skeys[i] = k;
+            svals[i] = v;
         }
         __syncthreads();
 
         // Sort
-        bitonic_sort_shared(sdata, nPow2);
+        bitonic_sort(skeys, svals, nPow2);
 
         // Store back only the real elements
         for (int i = threadIdx.x; i < n; i += blockDim.x) {
-            keys[start + base + i]   = sdata[i].k;
-            values[start + base + i] = sdata[i].v;
+            keys[start + i]   = skeys[i];
+            values[start + i] = svals[i];
         }
+    }
+    else { // Fall back to global memory sort (inefficient, but rare)
+        bitonic_sort(&keys[start], &values[start], len);
     }
 }
