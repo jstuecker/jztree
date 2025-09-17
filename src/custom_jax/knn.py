@@ -40,7 +40,7 @@ ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"
 
 
 def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits, k=32, boxsize=0., 
-                    alloc_fac=128, sort_alloc_fac=2.2, sort=True):
+                    alloc_fac=128):
     assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
 
     assert node_ilist.shape == node_ir2list.shape, "node_ilist and node_ir2list must have the same shape"
@@ -50,14 +50,11 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
     rbuf = jax.ShapeDtypeStruct((len(xleaf),), jnp.float32)
     leaf_ilist = jax.ShapeDtypeStruct((int(alloc_fac * len(xleaf)),), jnp.int32)
     leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
-    if sort:
-        leaf_ilist_rad = jax.ShapeDtypeStruct(leaf_ilist.shape, jnp.float32)
-    else:
-        leaf_ilist_rad = jax.ShapeDtypeStruct((), jnp.float32)
+    leaf_ilist_rad = jax.ShapeDtypeStruct(leaf_ilist.shape, jnp.float32)
 
     radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits,
-        k=np.int32(k), boxsize=np.float32(boxsize), sort=bool(sort)
+        k=np.int32(k), boxsize=np.float32(boxsize)
     )
 
     def myerror(n1, n2):
@@ -66,7 +63,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
     ispl = ispl + conditional_callback(ispl[-1] > il.size, myerror, ispl[-1], il.size)
 
     return il, ir2l, ispl
-build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac", "sort", "sort_alloc_fac"])
+build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac"])
 
 
 def box_dist2(c1, c2, s1, s2, mode="shortest"):
@@ -164,7 +161,7 @@ def brute_force_node_ilist_prep(octree, k=16):
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits
 
 def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, 
-        refine_fac=8, k=16, stop_coarsen=128, sort=True, boxsize=0., alloc_fac=128.):
+        refine_fac=8, k=16, stop_coarsen=128, boxsize=0., alloc_fac=128.):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
@@ -184,19 +181,19 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
     # smaller on the coarser levels and we don't want it to fail on coarser levels
     il2, ir2l, ispl2 = build_ilist_recursive(
         xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
-        alloc_fac=alloc_fac*np.sqrt(refine_fac), sort=sort)
+        alloc_fac=alloc_fac*np.sqrt(refine_fac))
     il, ir2l, ispl = build_ilist_knn(
         xleaf, lvleaf, nleaf, spl2, il2, ir2l, ispl2, alloc_fac=alloc_fac, 
-        k=k, sort=sort, boxsize=boxsize)
+        k=k, boxsize=boxsize)
     
     return il, ir2l, ispl
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize'])
 
-def knn(posz, k=16, boxsize=0., sort_ilist=True, alloc_fac=256.):
+def knn(posz, k=16, boxsize=0., alloc_fac=256.):
     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=32)
 
-    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*15, refine_fac=15, sort=sort_ilist,
+    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*15, refine_fac=15,
                                           num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
 
     rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)

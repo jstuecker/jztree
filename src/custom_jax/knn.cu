@@ -281,6 +281,7 @@ ffi::Error HostIlistKNNSearch(
     return ffi::Error::Success();
 }
 
+
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     IlistKNNSearch, HostIlistKNNSearch,
     ffi::Ffi::Bind()
@@ -565,8 +566,7 @@ ffi::Error HostConstructIlist(
         ffi::ResultBuffer<ffi::F32> leaf_ilist_rad,
         ffi::ResultBuffer<ffi::S32> leaf_ilist_splits,
         int k,
-        float boxsize,
-        bool sort
+        float boxsize
     )
 {
     Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
@@ -622,15 +622,19 @@ ffi::Error HostConstructIlist(
         boxsize
     );
     
-    if(sort) {
-        int block_size = 64;
-        int smem_size = 512;
-        size_t smem_bytes = smem_size * sizeof(KV);
-        int nsegs = leaf_ilist_splits->element_count() - 1;
-        segmented_bitonic_sort_kv<<< nsegs, block_size, smem_bytes, stream>>>(
-            leaf_ilist_rad->typed_data(), leaf_ilist->typed_data(), 
-            leaf_ilist_splits->typed_data(), nsegs, smem_size);
-    }
+    
+    // Now sort the interaction list segments. (This will allow early exit in the knn search)
+    // Note: We cannot use CUB here, since its segmented search is not jax-compatible. 
+    // (Probably because it uses dynamic dispatches internally)
+    // Since most segments are small enough to be sorted in shared memory, this adds a very
+    // small overhead (~ O(2ms) for 1M particles). So it is well worth it.
+    int block_size = 64;
+    int smem_size = 512;
+    size_t smem_bytes = smem_size * sizeof(KV);
+    int nsegs = leaf_ilist_splits->element_count() - 1;
+    segmented_bitonic_sort_kv<<< nsegs, block_size, smem_bytes, stream>>>(
+        leaf_ilist_rad->typed_data(), leaf_ilist->typed_data(), 
+        leaf_ilist_splits->typed_data(), nsegs, smem_size);
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -654,8 +658,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::F32>>()
         .Ret<ffi::Buffer<ffi::S32>>()
         .Attr<int>("k")
-        .Attr<float>("boxsize")
-        .Attr<bool>("sort"),
+        .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 ffi::Error HostSegmentSort(
