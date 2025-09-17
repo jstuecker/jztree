@@ -167,7 +167,6 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
     (2) Get the interaction list for the coarsened leaves (recursively)
     (3) Use the interaction list of the coarsened leaves to build the finer interaction list
     """
-    assert refine_fac < 16, "refine_fac should be < 16 to respect some blocksize assumptions in CUDA"
 
     if len(xleaf) <= stop_coarsen:
         il, ispl = dense_ilist(len(xleaf))
@@ -175,13 +174,14 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
         return il, ir2l, ispl
     
     spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
-        xleaf, max_size=max_size, nleaf=nleaf, num_part=num_part)
+        xleaf, max_size=max_size, nleaf=nleaf, num_part=num_part, ref_fac=refine_fac)
     # Now build the list on the coarser levels
     # We increase the allocation factor a bit, because the total allocation will anyways be much
     # smaller on the coarser levels and we don't want it to fail on coarser levels
     il2, ir2l, ispl2 = build_ilist_recursive(
         xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
-        alloc_fac=alloc_fac*np.sqrt(refine_fac))
+        alloc_fac=alloc_fac*np.sqrt(refine_fac), refine_fac=refine_fac, k=k, 
+        stop_coarsen=stop_coarsen, boxsize=boxsize)
     il, ir2l, ispl = build_ilist_knn(
         xleaf, lvleaf, nleaf, spl2, il2, ir2l, ispl2, alloc_fac=alloc_fac, 
         k=k, boxsize=boxsize)
