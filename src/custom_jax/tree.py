@@ -75,7 +75,7 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     if ref_fac is None:
         scan_size = max_size + 1
     else:
-        scan_size = int(ref_fac + 2)
+        scan_size = int(ref_fac + 3)
     block_size = np.clip((scan_size//64) * 64, 64, 512)
 
     # We may have some invalid leaves at the end
@@ -104,8 +104,8 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
 
     numleaves = jnp.count_nonzero(new_nleaf)
 
-    new_leaf_cent = get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
-    new_leaf_cent = jnp.where(jnp.arange(len(new_leaf_cent))[:,None] < numleaves, new_leaf_cent, 0.)
+    new_leaf_cent = get_node_box(xleaf[splits[:-1]], jnp.full_like(new_leaf_lvl, new_leaf_lvl))[0]
+    # new_leaf_cent = jnp.where(jnp.arange(len(new_leaf_cent))[:,None] < numleaves, new_leaf_cent, 0.)
 
     # assert numleaves <= max_new_leaves, "Please provide nptot if leaves are not particles"
 
