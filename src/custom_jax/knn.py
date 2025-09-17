@@ -188,7 +188,7 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
     
     return il, ir2l, ispl
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
-    'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize'])
+    'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize', 'alloc_fac'])
 
 def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=32):
     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=max_leaf_size)

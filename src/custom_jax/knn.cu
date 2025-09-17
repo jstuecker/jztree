@@ -403,95 +403,103 @@ __global__ void KernelCountInteractions(
     int nodeQ = blockIdx.x;
 
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
-    int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
-    Node leafQ = leaves[ileafQ];
-    float3 xQ = leafQ.center;
-    float3 extQ = LvlToHalfExt(leafQ.level);
+    for(int iqoff = ileafQ_start; iqoff < ileafQ_end; iqoff += blockDim.x) {
+        int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1);
+        Node leafQ = leaves[ileafQ];
+        float3 xQ = leafQ.center;
+        float3 extQ = LvlToHalfExt(leafQ.level);
 
-    // We will define bins in units of the diagonal size of leafQ
-    // This is the radius at which every point in Q would include every other point in Q
-    float rbase2 = 4.0f*dotf3(extQ, extQ); // factor 4, since ext is half the node size
-    
-    LogBinMap<20> binmap(rbase2, 4.0f);
-    CumHist<20> rhist;
-
-    PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
-
-    float rmax2 = INFTY;
-
-    while(!pf_ilist.finished()) {
-        Pair<int,float> interaction = pf_ilist.next();
-        int nodeT = interaction.first;
-        float r2T = interaction.second;
-
-        bool any_accept = syncthreads_or(r2T <= rmax2);
-        if(!any_accept) break;
-
-        int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
-        int nleavesT = ileafT_end - ileafT_start;
-
-        __shared__ float3 xT[32];
-        __shared__ float3 extT[32];
-        __shared__ int npartT[32];
-        if(threadIdx.x < nleavesT) {
-            Node leafT = leaves[ileafT_start + threadIdx.x];
-            xT[threadIdx.x] = leafT.center;
-            extT[threadIdx.x] = LvlToHalfExt(leafT.level);
-            npartT[threadIdx.x] = leaves_npart[ileafT_start + threadIdx.x];
-        }
-        __syncthreads();
+        // We will define bins in units of the diagonal size of leafQ
+        // This is the radius at which every point in Q would include every other point in Q
+        float rbase2 = 4.0f*dotf3(extQ, extQ); // factor 4, since ext is half the node size
         
-        for(int j = 0; j < nleavesT; j++) {
-            float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+        LogBinMap<20> binmap(rbase2, 4.0f);
+        CumHist<20> rhist;
 
-            int bin = binmap.r2_to_bin(r2);
-            rhist.insert(bin, npartT[j]);
+        PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+
+        float rmax2 = INFTY;
+
+        while(!pf_ilist.finished()) {
+            Pair<int,float> interaction = pf_ilist.next();
+            int nodeT = interaction.first;
+            float r2T = interaction.second;
+
+            bool any_accept = syncthreads_or(r2T <= rmax2);
+            if(!any_accept) break;
+
+            int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+
+            __shared__ float3 xT[32];
+            __shared__ float3 extT[32];
+            __shared__ int npartT[32];
+
+            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += 32) {
+                int ilT = itoff + threadIdx.x;
+                if(ilT < ileafT_end) {
+                    Node leafT = leaves[ilT];
+                    xT[threadIdx.x] = leafT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(leafT.level);
+                    npartT[threadIdx.x] = leaves_npart[ilT];
+                }
+                __syncthreads();
+                
+                for(int j = 0; j < ileafT_end - ileafT_start; j++) {
+                    float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+
+                    int bin = binmap.r2_to_bin(r2);
+                    rhist.insert(bin, npartT[j]);
+                }
+                __syncthreads();
+
+                int ibin = rhist.find(k);
+                rmax2 = binmap.bin_end(ibin);
+            }
         }
-        __syncthreads();
 
-        int ibin = rhist.find(k);
-        rmax2 = binmap.bin_end(ibin);
-    }
+        // // Now we have to go again through all leaves and count how many we need to interact with
+        // // Note that here we need to use the minimal distance, not the maximal one
+        // // since we need to include any leaf that may contain particles within rmax
+        int ncount = 0;
 
-    // // Now we have to go again through all leaves and count how many we need to interact with
-    // // Note that here we need to use the minimal distance, not the maximal one
-    // // since we need to include any leaf that may contain particles within rmax
-    int ncount = 0;
+        pf_ilist.restart(node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
 
-    pf_ilist.restart(node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        while(!pf_ilist.finished()) {
+            Pair<int,float> interaction = pf_ilist.next();
+            int nodeT = interaction.first;
+            float r2T = interaction.second;
 
-    while(!pf_ilist.finished()) {
-        Pair<int,float> interaction = pf_ilist.next();
-        int nodeT = interaction.first;
-        float r2T = interaction.second;
+            bool any_accept = syncthreads_or(r2T <= rmax2);
+            if(!any_accept) break;
 
-        bool any_accept = syncthreads_or(r2T <= rmax2);
-        if(!any_accept) break;
+            int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
-        int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
-        int nleavesT = ileafT_end - ileafT_start;
+            __shared__ float3 xT[32];
+            __shared__ float3 extT[32];
 
-        __shared__ float3 xT[32];
-        __shared__ float3 extT[32];
-        if(threadIdx.x < nleavesT) {
-            Node leafT = leaves[ileafT_start + threadIdx.x];
-            xT[threadIdx.x] = leafT.center;
-            extT[threadIdx.x] = LvlToHalfExt(leafT.level);
+            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += 32) {
+                int ilT = itoff + threadIdx.x;
+                if(ilT < ileafT_end) {
+                    Node leafT = leaves[ilT];
+                    xT[threadIdx.x] = leafT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(leafT.level);
+                }
+                __syncthreads();
+                
+                for(int j = 0; j < ileafT_end - ileafT_start; j++) {
+                    float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+
+                    ncount += (r2 <= rmax2);
+                }
+                __syncthreads();
+            }
         }
-        __syncthreads();
-        
-        for(int j = 0; j < nleavesT; j++) {
-            float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
-            ncount += (r2 <= rmax2);
+        // Output our results:
+        if(iqoff + threadIdx.x < ileafQ_end) {
+            rmax_out[ileafQ] = rmax2;
+            interaction_count[ileafQ] = ncount;
         }
-        __syncthreads();
-    }
-
-    // Output our results:
-    if(threadIdx.x <= ileafQ_end - ileafQ_start) {
-        rmax_out[ileafQ] = rmax2;
-        interaction_count[ileafQ] = ncount;
     }
 }
 
@@ -509,55 +517,61 @@ __global__ void KernelInsertInteractions(
     float boxsize
 ) {
     int nodeQ = blockIdx.x;
+
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
-    int ileafQ = min(ileafQ_start + threadIdx.x, ileafQ_end - 1);
-    Node leafQ = leaves[ileafQ];
-    float3 xQ = leafQ.center;
-    float3 extQ = LvlToHalfExt(leafQ.level);
-    float rmaxQ2 = rmax2[ileafQ];
+    for(int iqoff = ileafQ_start; iqoff < ileafQ_end; iqoff += blockDim.x) {
+        int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1);
+        Node leafQ = leaves[ileafQ];
+        float3 xQ = leafQ.center;
+        float3 extQ = LvlToHalfExt(leafQ.level);
+        float rmaxQ2 = rmax2[ileafQ];
 
-    int ninserted = 0;
+        int ninserted = 0;
 
-    PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
-    
-    while(!pf_ilist.finished()) {
-        Pair<int,float> interaction = pf_ilist.next();
-        int nodeT = interaction.first;
-        float r2T = interaction.second;
+        PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        
+        while(!pf_ilist.finished()) {
+            Pair<int,float> interaction = pf_ilist.next();
+            int nodeT = interaction.first;
+            float r2T = interaction.second;
 
-        bool any_accept = syncthreads_or(r2T <= rmaxQ2);
-        if(!any_accept) break;
+            bool any_accept = syncthreads_or(r2T <= rmaxQ2);
+            if(!any_accept) break;
 
-        int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
-        int nleavesT = ileafT_end - ileafT_start;
+            int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
-        __shared__ float3 xT[32];
-        __shared__ float3 extT[32];
+            __shared__ float3 xT[32];
+            __shared__ float3 extT[32];
 
-        if(threadIdx.x < nleavesT) {
-            Node leafT = leaves[ileafT_start + threadIdx.x];
-            xT[threadIdx.x] = leafT.center;
-            extT[threadIdx.x] = LvlToHalfExt(leafT.level);
-        }
-        __syncthreads();
-        for(int j = 0; j < nleavesT; j++) {
-            float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
-
-            if(r2 <= rmaxQ2){
-                int offset = out_splits[ileafQ] + ninserted;
-
-                if(offset >= nmax)
-                    return; // We have run out of space, just return
-
-                if(r2 == 0.f) {
-                    // For the direct neighbourhood we add a tiny contribution of the maximum
-                    // distance so that sorting guarantees that we start with the leaf itself
-                    r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += 32) {
+                int ilT = itoff + threadIdx.x;
+                if(ilT < ileafT_end) {
+                    Node leafT = leaves[ilT];
+                    xT[threadIdx.x] = leafT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(leafT.level);
                 }
-                ilist_radii[offset] = r2;
-                
-                ilist_out[offset] = ileafT_start + j;
-                ninserted += 1;
+                __syncthreads();
+                for(int j = 0; j < ileafT_end - ileafT_start; j++) {
+                    float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+
+                    if(r2 <= rmaxQ2){ // ******* later avoid double insertion here
+                        int offset = out_splits[ileafQ] + ninserted;
+
+                        if(offset >= nmax)
+                            return; // We have run out of space, just return
+
+                        if(r2 == 0.f) {
+                            // For the direct neighbourhood we add a tiny contribution of the maximum
+                            // distance so that sorting guarantees that we start with the leaf itself
+                            r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                        }
+
+                        ilist_radii[offset] = r2;
+                        ilist_out[offset] = itoff + j;
+                        ninserted += 1;
+                    }
+                }
+                __syncthreads();
             }
         }
     }

@@ -61,7 +61,8 @@ def test_double_summarize(final_size):
     assert jnp.all(xleaf == xleaf_ref)
     assert numleaves == numleaves_ref
 
-def test_ilist_rfac():
+@pytest.mark.parametrize("rfac", [2, 4, 8, 16, 17, 23, 32])
+def test_ilist_rfac(rfac):
     N = 1024*177
     posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N))
 
@@ -72,12 +73,11 @@ def test_ilist_rfac():
     il, ir2l, ispl = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfacA, 
         refine_fac=rfacA, num_part=len(posz), k=16)
     
-    for rfacB in 2,4,8,16,31,:
-        il2, ir2l2, ispl2 = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfacB, refine_fac=rfacB,
-                                                    num_part=len(posz), k=16)
+    il2, ir2l2, ispl2 = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfac, refine_fac=rfac,
+                                                num_part=len(posz), k=16)
 
-        assert jnp.all(ispl2 == ispl), f"Splits different for rfac {rfacA} and {rfacB}"
-        assert jnp.all(ir2l2[:ispl2[-1]] == ir2l[:ispl[-1]]), f"Radii different for rfac {rfacA} and {rfacB}"
+    assert jnp.all(ispl2 == ispl), f"Splits different for rfac {rfacA} and {rfac}"
+    assert jnp.all(ir2l2[:ispl2[-1]] == ir2l[:ispl[-1]]), f"Radii different for rfac {rfacA} and {rfac}"
 
     # Note the ids can differ for identical radii:
     print(f"Fraction ids equal {jnp.mean(il2[:ispl2[-1]] == il[:ispl[-1]])}") 
