@@ -172,7 +172,7 @@ __global__ void KernelIlistKNN(
     const int* isplitQ,         // leaf-ranges in B
     const Node* leaves,         // binary levels of A
     const int* ilist,           // interaction list
-    const float* r2list,        // (lower) interaction radii
+    const float* ir2list,       // (lower) interaction radii
     const int* ilist_splitsQ,   // B leaf-ranges in ilist
     Neighbor* knn,              // output knn list
     float boxsize               // ignored for now
@@ -188,28 +188,21 @@ __global__ void KernelIlistKNN(
 
     __shared__ Particle particles[32];
 
-    PrefetchList2<int,float> pf_ilist(ilist, r2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
+    PrefetchList2<int,float> pf_ilist(ilist, ir2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
     while(!pf_ilist.finished()) {
         Pair<int,float> interaction = pf_ilist.next();
         int ileafT = interaction.first;
         float r2T = interaction.second;
-        // int ileafT = pf_ilist.next();
 
-        if(r2list != nullptr) {
-            // If the radii of the interactions are provided, it is assumed that interactions
-            // and radii are sorted by their radii. (The radii are the lower leaf-leaf distance)
-            // Then we can skip all subsequent leaves once we encounter one that is farther away
-            // than any of the current nearest neighbors
-            // In practice, this saves a lot of time!
-
-            // float r2next = r2list[pf_ilist.icur + pf_ilist.loff - 1];
-
-            bool accept = (r2T <= nearestK.max_r2());
-            bool any_accept = syncthreads_or(accept);
-            if(!any_accept)
-                break;
-        }
+        // r2T are the lower leaf-leaf distances and the interactions are sorted by these radii
+        // Once we encounter an interaction that is farther away than any of the current nearest 
+        // neighbors, we can skip all subsequent interactions. Since the interaction lists are 
+        // build on worst case assumptions, this saves a lot of time in practice!
+        bool accept = (r2T <= nearestK.max_r2());
+        bool any_accept = syncthreads_or(accept);
+        if(!any_accept)
+            break;
 
         /* Now load the leaf */
         int ipartT = isplitT[ileafT] + threadIdx.x;
@@ -239,16 +232,16 @@ void launch_KernelIlistKNN(
     int k, cudaStream_t stream, int nleavesQ, 
     const PosR* xT, const PosR* xQ,
     const int* isplitT, const int* isplitQ, const Node* leaves,
-    const int* ilist, const float* rilist, const int* ilist_splitsQ,
+    const int* ilist, const float* ir2list, const int* ilist_splitsQ,
     Neighbor* knn, float boxsize) {
 
     switch(k) {
-        case 4: KernelIlistKNN<4><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, rilist, ilist_splitsQ, knn, boxsize); break;
-        case 8: KernelIlistKNN<8><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, rilist, ilist_splitsQ, knn, boxsize); break;
-        case 12: KernelIlistKNN<12><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, rilist, ilist_splitsQ, knn, boxsize); break;
-        case 16: KernelIlistKNN<16><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, rilist, ilist_splitsQ, knn, boxsize); break;
-        case 32: KernelIlistKNN<32><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, rilist, ilist_splitsQ, knn, boxsize); break;
-        case 64: KernelIlistKNN<64><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, rilist, ilist_splitsQ, knn, boxsize); break;
+        case 4: KernelIlistKNN<4><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
+        case 8: KernelIlistKNN<8><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
+        case 12: KernelIlistKNN<12><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
+        case 16: KernelIlistKNN<16><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
+        case 32: KernelIlistKNN<32><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
+        case 64: KernelIlistKNN<64><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
         default:
             throw std::runtime_error("Unsupported k value in launch_KernelIlistKNN");
     }
@@ -262,7 +255,7 @@ ffi::Error HostIlistKNNSearch(
         ffi::Buffer<ffi::S32> isplitQ,
         ffi::Buffer<ffi::F32> leaves,
         ffi::Buffer<ffi::S32> ilist,
-        ffi::Buffer<ffi::F32> rilist,
+        ffi::Buffer<ffi::F32> ir2list,
         ffi::Buffer<ffi::S32> ilist_splitsQ,
         ffi::ResultBuffer<ffi::S32> knn,
         float boxsize
@@ -277,15 +270,10 @@ ffi::Error HostIlistKNNSearch(
 
     size_t block_size = 32;
 
-    float* rilist_ptr = nullptr; // this is an optional argument and we set it to nullptr if not given
-    if(rilist.element_count() > 1) {
-        rilist_ptr = rilist.typed_data();
-    }
-
     launch_KernelIlistKNN(k, stream, nleavesQ,
         xAf4, xBf4,
         isplitT.typed_data(), isplitQ.typed_data(),
-        leaves_ptr, ilist.typed_data(), rilist_ptr, ilist_splitsQ.typed_data(),
+        leaves_ptr, ilist.typed_data(), ir2list.typed_data(), ilist_splitsQ.typed_data(),
         knn_ptr, boxsize);
     
     cudaError_t last_error = cudaGetLastError();
@@ -305,7 +293,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>() // isplitQ : leaf-ranges in B
         .Arg<ffi::Buffer<ffi::F32>>() // leaves : pos and levels of leaves
         .Arg<ffi::Buffer<ffi::S32>>() // ilist : interaction list
-        .Arg<ffi::Buffer<ffi::F32>>() // rilist : (lower) interaction radii
+        .Arg<ffi::Buffer<ffi::F32>>() // ir2list : (lower) interaction radii
         .Arg<ffi::Buffer<ffi::S32>>() // ilist_splitsQ : leaf-ranges in ilist
         .Ret<ffi::Buffer<ffi::S32>>() // knn : output knn list
         .Attr<float>("boxsize"),

@@ -9,16 +9,13 @@ jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform=
 jax.ffi.register_ffi_target("ConstructIlist", nb_knn.ConstructIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", nb_knn.SegmentSort(), platform="CUDA")
 
-def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, rilist=None, xQ=None,  isplitQ=None, k=32, boxsize=0.):
+def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
     if xQ is None: xQ = xT
     if isplitQ is None: isplitQ = isplitT
 
-    if rilist is None: 
-        rilist = jnp.zeros((1,), dtype=jnp.float32)
-    
-    assert rilist.shape == ilist.shape, "rilist must have the same shape as ilist"
+    assert ir2list.shape == ilist.shape, "rilist must have the same shape as ilist"
 
     assert xT.dtype == xQ.dtype == jnp.float32
     assert xT.shape[-1] == xQ.shape[-1] == xleaf.shape[-1] == 3
@@ -33,7 +30,7 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, rilist=
 
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
     knn = jax.ffi.ffi_call("IlistKNNSearch", (out_type, ))(
-        x4a, x4b, isplitT, isplitQ, x4leaf, ilist, rilist, ilist_splitsB,
+        x4a, x4b, isplitT, isplitQ, x4leaf, ilist, ir2list, ilist_splitsB,
         boxsize=np.float32(boxsize)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
@@ -43,7 +40,7 @@ ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"
 
 
 def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits, k=32, boxsize=0., 
-                    alloc_fac=128, sort_alloc_fac=2.2, sort=False):
+                    alloc_fac=128, sort_alloc_fac=2.2, sort=True):
     assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
 
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
@@ -56,7 +53,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
     else:
         leaf_ilist_rad = jax.ShapeDtypeStruct((), jnp.float32)
 
-    radii, il, ilr, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
+    radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ilist_splits,
         k=np.int32(k), boxsize=np.float32(boxsize), sort=bool(sort)
     )
@@ -66,7 +63,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
                           f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
     ispl = ispl + conditional_callback(ispl[-1] > il.size, myerror, ispl[-1], il.size)
 
-    return radii, il, ilr, ispl
+    return radii, il, ir2l, ispl
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac", "sort", "sort_alloc_fac"])
 
 
@@ -175,8 +172,8 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
 
     if len(xleaf) <= stop_coarsen:
         il, ispl = dense_ilist(len(xleaf))
-        ilr = jnp.zeros((), dtype=jnp.float32)
-        return il, ilr, ispl
+        ir2l = jnp.zeros((), dtype=jnp.float32)
+        return il, ir2l, ispl
     
     spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
         xleaf, max_size=max_size, nleaf=nleaf, num_part=num_part)
@@ -186,21 +183,21 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
     il2, ril2, ispl2 = build_ilist_recursive(
         xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
         alloc_fac=alloc_fac*np.sqrt(refine_fac), sort=sort)
-    radii, il, ilr, ispl = build_ilist_knn(
+    radii, il, ir2l, ispl = build_ilist_knn(
         xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=alloc_fac, 
         k=k, sort=sort, boxsize=boxsize)
     
-    return il, ilr, ispl
+    return il, ir2l, ispl
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize'])
 
 def knn(posz, k=16, boxsize=0., sort_ilist=True, alloc_fac=256.):
     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=32)
 
-    il, ilr, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*15, refine_fac=15, sort=sort_ilist,
+    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*15, refine_fac=15, sort=sort_ilist,
                                           num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
 
-    rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ispl, rilist=ilr, k=k, boxsize=boxsize)
+    rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)
 
     return rknn, iknn
 knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac"])
