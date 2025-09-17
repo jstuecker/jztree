@@ -18,7 +18,7 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ilist_splitsB, rilist=
     if rilist is None: 
         rilist = jnp.zeros((1,), dtype=jnp.float32)
     
-    assert (rilist.shape == ilist.shape) or (rilist.size <= 1), "rilist must have the same shape as ilist"
+    assert rilist.shape == ilist.shape, "rilist must have the same shape as ilist"
 
     assert xT.dtype == xQ.dtype == jnp.float32
     assert xT.shape[-1] == xQ.shape[-1] == xleaf.shape[-1] == 3

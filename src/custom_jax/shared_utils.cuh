@@ -137,6 +137,54 @@ __device__ struct PrefetchList {
     }
 };
 
+template<class A, class B>
+struct Pair { A first; B second; };
+
+// ---- 2-array specialization ----
+template <typename T0, typename T1>
+__device__ struct PrefetchList2 {
+    T0 const* __restrict__ data0;
+    T1 const* __restrict__ data1;
+    T0 local0;
+    T1 local1;
+    int icur, iend;
+    int loff;
+
+    __device__ __forceinline__
+    PrefetchList2(const T0* __restrict__ d0,
+                 const T1* __restrict__ d1,
+                 int istart_, int iend_)
+        : data0(d0), data1(d1), icur(istart_), iend(iend_), loff(0)
+    {
+        int idx = icur + threadIdx.x;
+        if (idx < iend) {
+            local0 = data0[idx];
+            local1 = data1[idx];
+        }
+    }
+
+    __device__ __forceinline__ Pair<T0,T1> next() {
+        if (loff >= blockDim.x) {
+            icur += blockDim.x;
+            int idx = icur + threadIdx.x;
+            if (idx < iend) {
+                local0 = data0[idx];
+                local1 = data1[idx];
+            }
+            loff = 0;
+        }
+        unsigned mask = __activemask();
+        int src = loff++;
+        T0 a = __shfl_sync(mask, local0, src);
+        T1 b = __shfl_sync(mask, local1, src);
+        return {a, b};
+    }
+
+    __device__ __forceinline__ bool finished() const {
+        return icur + loff >= iend;
+    }
+};
+
 template <class T>
 __device__ inline T warp_broadcast(const T& x, int src_lane, unsigned mask = __activemask()) {
     static_assert(std::is_trivially_copyable<T>::value,

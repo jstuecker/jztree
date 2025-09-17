@@ -172,7 +172,7 @@ __global__ void KernelIlistKNN(
     const int* isplitQ,         // leaf-ranges in B
     const Node* leaves,         // binary levels of A
     const int* ilist,           // interaction list
-    const float* r2list,         // (lower) interaction radii
+    const float* r2list,        // (lower) interaction radii
     const int* ilist_splitsQ,   // B leaf-ranges in ilist
     Neighbor* knn,              // output knn list
     float boxsize               // ignored for now
@@ -188,30 +188,28 @@ __global__ void KernelIlistKNN(
 
     __shared__ Particle particles[32];
 
-    bool use_rlist = (r2list != nullptr);
-
-    PrefetchList<int> pf_ilist(ilist, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
+    PrefetchList2<int,float> pf_ilist(ilist, r2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
     while(!pf_ilist.finished()) {
-        int ileafT = pf_ilist.next();
+        Pair<int,float> interaction = pf_ilist.next();
+        int ileafT = interaction.first;
+        float r2T = interaction.second;
+        // int ileafT = pf_ilist.next();
 
-        if(use_rlist) {
-            float r2next = r2list[pf_ilist.icur + pf_ilist.loff - 1];
+        if(r2list != nullptr) {
+            // If the radii of the interactions are provided, it is assumed that interactions
+            // and radii are sorted by their radii. (The radii are the lower leaf-leaf distance)
+            // Then we can skip all subsequent leaves once we encounter one that is farther away
+            // than any of the current nearest neighbors
+            // In practice, this saves a lot of time!
 
-            bool accept = (r2next <= nearestK.max_r2());
+            // float r2next = r2list[pf_ilist.icur + pf_ilist.loff - 1];
+
+            bool accept = (r2T <= nearestK.max_r2());
             bool any_accept = syncthreads_or(accept);
             if(!any_accept)
                 break;
         }
-        
-
-        /* First check whether any particle needs to interact with the leaf*/
-        // Node leaf = leaves[ileafT];
-        // float r2leaf = NodePartMinDist2(leaf, posQ, boxsize);
-        // bool accept = (r2leaf <= nearestK.max_r2());
-        // bool any_accept = syncthreads_or(accept);
-        // if(!any_accept)
-        //     continue;
 
         /* Now load the leaf */
         int ipartT = isplitT[ileafT] + threadIdx.x;
