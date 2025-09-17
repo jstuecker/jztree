@@ -66,7 +66,7 @@ def test_ilist_rfac(rfac):
     N = 1024*177
     posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N))
 
-    msize = 64
+    msize = 48
     spl, nleaf, llvl, xleaf, numleaves = cj.knn.summarize_leaves(posz, max_size=msize)
 
     rfacA = 15
