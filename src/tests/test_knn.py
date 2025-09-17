@@ -21,20 +21,17 @@ def test_segment_sort():
     print(f"Ids different {jnp.sum(inew != inew2)}/{len(inew)} (this is ok, if radii are identical):")
     assert jnp.all(rnew == r[inew2])
 
-def setup_particles(N=5555, duplicate=False):
+def get_pos(N=5555, duplicate=False):
     pos0 = jax.random.uniform(jax.random.PRNGKey(1), (N,3), dtype=jnp.float32, minval=0., maxval=2.)
     if duplicate:
         pos0 = jnp.concatenate((pos0, pos0, pos0, pos0))
-    mass0 = jnp.ones(len(pos0), dtype=jnp.float32)
     
-    return pos0, mass0
+    return pos0
 
 # @pytest.mark.parametrize("final_size", [13, 33, 64, 77, 135, 255, 256, 299, 317, 339, 411, 415, 477])
 def test_summarize_identity():
     print("")
-    pos0, mass0 = setup_particles(144387)
-    pos0 = pos0 - 0.5
-    posz, idz = cj.tree.pos_zorder_sort.jit(pos0)
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(144387) - 0.5)
     spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(
         posz, max_size=1)
     
@@ -48,7 +45,7 @@ def test_summarize_identity():
 @pytest.mark.parametrize("final_size", [13, 33, 39, 43, 63, 64, 77, 135, 255, 256, 299, 317, 339, 411, 415, 477])
 def test_double_summarize(final_size):
     print("")
-    pos0, mass0 = setup_particles(144387)
+    pos0, mass0 = get_pos(144387)
     posz, idz = cj.tree.pos_zorder_sort.jit(pos0)
     spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(
         posz, max_size=final_size)
@@ -63,3 +60,24 @@ def test_double_summarize(final_size):
     assert jnp.all(nleaf == nleaf_ref)
     assert jnp.all(xleaf == xleaf_ref)
     assert numleaves == numleaves_ref
+
+def test_ilist_rfac():
+    N = 1024*177
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N))
+
+    msize = 64
+    spl, nleaf, llvl, xleaf, numleaves = cj.knn.summarize_leaves(posz, max_size=msize)
+
+    rfacA = 15
+    il, ir2l, ispl = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfacA, 
+        refine_fac=rfacA, num_part=len(posz), k=16)
+    
+    for rfacB in 2,4,8,16,31,:
+        il2, ir2l2, ispl2 = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfacB, refine_fac=rfacB,
+                                                    num_part=len(posz), k=16)
+
+        assert jnp.all(ispl2 == ispl), f"Splits different for rfac {rfacA} and {rfacB}"
+        assert jnp.all(ir2l2[:ispl2[-1]] == ir2l[:ispl[-1]]), f"Radii different for rfac {rfacA} and {rfacB}"
+
+    # Note the ids can differ for identical radii:
+    print(f"Fraction ids equal {jnp.mean(il2[:ispl2[-1]] == il[:ispl[-1]])}") 
