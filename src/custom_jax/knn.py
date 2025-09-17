@@ -210,6 +210,6 @@ def segment_sort(key, val, isplit, smem_size=512):
 
     out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
     key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
-        key, val, isplit, tile_size=np.int32(smem_size)
+        key, val, isplit, smem_size=np.int32(smem_size)
     )
     return key_sorted, val_sorted
