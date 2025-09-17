@@ -494,8 +494,7 @@ __global__ void KernelInsertInteractions(
     int* ilist_out,
     float* ilist_radii,
     int nmax,
-    float boxsize,
-    bool get_radii=false
+    float boxsize
 ) {
     int nodeQ = blockIdx.x;
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
@@ -539,14 +538,13 @@ __global__ void KernelInsertInteractions(
                 if(offset >= nmax)
                     return; // We have run out of space, just return
 
-                if(get_radii){
-                    if(r2 == 0.f) {
-                        // For the direct neighbourhood we add a tiny contribution of the maximum
-                        // distance so that sorting guarantees that we start with the leaf itself
-                        r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
-                    }
-                    ilist_radii[offset] = r2;
+                if(r2 == 0.f) {
+                    // For the direct neighbourhood we add a tiny contribution of the maximum
+                    // distance so that sorting guarantees that we start with the leaf itself
+                    r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
                 }
+                ilist_radii[offset] = r2;
+                
                 ilist_out[offset] = ileafT_start + j;
                 ninserted += 1;
             }
@@ -621,8 +619,7 @@ ffi::Error HostConstructIlist(
         leaf_ilist->typed_data(),
         leaf_ilist_rad->typed_data(),
         leaf_ilist->element_count(),
-        boxsize,
-        sort
+        boxsize
     );
     
     if(sort) {
