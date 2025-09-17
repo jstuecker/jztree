@@ -6,6 +6,8 @@
 #include "shared_utils.cuh"
 #include <cub/cub.cuh>
 
+#define INTERACTION_BINS 16
+
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
@@ -416,8 +418,8 @@ __global__ void KernelCountInteractions(
         // This is the radius at which every point in Q would include every other point in Q
         float rbase2 = 4.0f*dotf3(extQ, extQ); // factor 4, since ext is half the node size
         
-        LogBinMap<20> binmap(rbase2, bins_per_log2);
-        CumHist<20> rhist;
+        LogBinMap<INTERACTION_BINS> binmap(rbase2, bins_per_log2);
+        CumHist<INTERACTION_BINS> rhist;
 
         PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
 
@@ -608,7 +610,7 @@ ffi::Error HostConstructIlist(
     int* lsplits_ptr = leaf_ilist_splits->typed_data();
     cudaMemsetAsync(lsplits_ptr, 0, sizeof(int)*(nleaves+1), stream);
 
-    constexpr int BINS = 20;
+    constexpr int BINS = INTERACTION_BINS;
     float bins_per_log2 = BINS / log2f(rfac_maxbin);
 
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
