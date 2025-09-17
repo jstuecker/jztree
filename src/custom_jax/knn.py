@@ -199,17 +199,17 @@ def knn(posz, k=16, boxsize=0., alloc_fac=256.):
     return rknn, iknn
 knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac"])
 
-def segment_sort(key, val, isplit, tile_size=512):
+def segment_sort(key, val, isplit, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
     assert key.dtype == jnp.float32
     assert val.dtype == jnp.int32
     assert isplit.dtype == jnp.int32
     assert key.shape == val.shape
     assert isplit.ndim == 1
-    assert tile_size in (64, 128, 256, 512, 1024, 2048)
+    assert smem_size >= 64
 
     out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
     key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
-        key, val, isplit, tile_size=np.int32(tile_size)
+        key, val, isplit, tile_size=np.int32(smem_size)
     )
     return key_sorted, val_sorted

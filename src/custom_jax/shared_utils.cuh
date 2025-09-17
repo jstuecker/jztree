@@ -319,11 +319,11 @@ __device__ void bitonic_sort(float* skeys, int32_t* svals, int len) {
 
 // -------- Kernel: segmented sort (keys + values) --------
 __global__ void segmented_bitonic_sort_kv(
-    float* __restrict__ keys,             // in/out float32 keys
-    int32_t* __restrict__ values,         // in/out int32 values (permute with keys)
-    const int32_t* __restrict__ offsets,  // len = num_segments + 1
+    float* __restrict__ keys,
+    int32_t* __restrict__ values,
+    const int32_t* __restrict__ offsets,
     int32_t num_segments,
-    int32_t tile_size 
+    int32_t smem_size // the maximum segment length where we do the sort in shared memory
 )
 {
     int seg = blockIdx.x;
@@ -334,32 +334,23 @@ __global__ void segmented_bitonic_sort_kv(
     int32_t len   = max(end - start, 0);
     if (len <= 1) return;
 
-    if(len <= tile_size) { // We can do the sort in shared memory
+    if(len <= smem_size) { // We can do the sort in shared memory
         extern __shared__ unsigned char smem[];
         float*   skeys = reinterpret_cast<float*>(smem);
-        int32_t* svals = reinterpret_cast<int32_t*>(skeys + tile_size);
+        int32_t* svals = reinterpret_cast<int32_t*>(skeys + smem_size);
 
-        int n = min(tile_size, len);
-        int nPow2 = min((int)next_pow2_u32((unsigned)n), tile_size);
-
-        // Load keys/values into shared memory (with padding)
-        for (int i = threadIdx.x; i < nPow2; i += blockDim.x) {
-            float   k = INFTY;
-            int32_t v = 0;
-            if (i < n) {
-                k = keys[start + i];
-                v = values[start + i];
-            }
-            skeys[i] = k;
-            svals[i] = v;
+        // Load to shared memory
+        for (int i = threadIdx.x; i < len; i += blockDim.x) {
+            skeys[i] = keys[start + i];
+            svals[i] = values[start + i];
         }
         __syncthreads();
 
-        // Sort
-        bitonic_sort(skeys, svals, nPow2);
+        // Sort in shared memory
+        bitonic_sort(skeys, svals, len);
 
-        // Store back only the real elements
-        for (int i = threadIdx.x; i < n; i += blockDim.x) {
+        // Store back
+        for (int i = threadIdx.x; i < len; i += blockDim.x) {
             keys[start + i]   = skeys[i];
             values[start + i] = svals[i];
         }
