@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import custom_jax as cj
-
+import pytest
 
 def test_segment_sort():
     spl = jnp.insert(jnp.sort(jax.random.randint(jax.random.PRNGKey(0), (5000,), 0, 1000000)), 0, 0)
@@ -28,21 +28,15 @@ def setup_particles(N=5555, duplicate=False):
     
     return pos0, mass0
 
-def test_double_summarize():
+@pytest.mark.parametrize("final_size", [13, 64, 133, 255])
+def test_double_summarize(final_size):
     pos0, mass0 = setup_particles()
     posz, idz = cj.tree.pos_zorder_sort.jit(pos0)
-    spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(posz, max_size=13)
+    spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(posz, max_size=final_size)
 
-    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(posz, max_size=6)
-    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(xleaf, max_size=13, nleaf=nleaf, num_part=len(posz))
+    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(posz, max_size=final_size//3)
+    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(xleaf, max_size=final_size, nleaf=nleaf, num_part=len(posz))
     
-    assert jnp.all(nleaf == nleaf_ref)
-    assert jnp.all(xleaf == xleaf_ref)
-    assert numleaves == numleaves_ref
-
-    spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(posz, max_size=64)
-    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(xleaf, max_size=64, nleaf=nleaf, num_part=len(posz))
-
     assert jnp.all(nleaf == nleaf_ref)
     assert jnp.all(xleaf == xleaf_ref)
     assert numleaves == numleaves_ref
