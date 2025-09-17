@@ -79,7 +79,7 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
         # In principle ref_fac + 2 should be enough, but I guess some rounding errors in the
         # ref_fac corrupt this sometimes (?) for now let's leave a bit slack
         scan_size = int(2.*ref_fac + 3) 
-    assert scan_size < 1024, "This probably should not happen..."
+    assert scan_size <= 1024, "This probably should not happen..."
 
     block_size = np.clip((scan_size//64) * 64, 64, 512)
 
@@ -88,6 +88,7 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     nleaves_filled = jnp.count_nonzero(nleaf)
     
     max_new_leaves = div_ceil(num_part, np.maximum(max_size//2, 1))
+    # print("scan size:", scan_size, max_size)
 
     assert xleaf.dtype == jnp.float32
     assert xleaf.shape[-1] == 3

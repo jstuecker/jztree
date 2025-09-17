@@ -120,17 +120,18 @@ __device__ struct PrefetchList {
         iend = iend_;
         loff = 0;
 
-        int idx = icur + threadIdx.x;
+        int idx = icur + (threadIdx.x & (warpSize - 1));;
         if (idx < iend) {
             local = data[idx];
         }
     }
 
     __device__ __forceinline__ T next() {
-        if(loff >= blockDim.x) {
-            icur += blockDim.x;
-            if(icur + threadIdx.x < iend) {
-                local = data[icur + threadIdx.x];
+        if(loff >= warpSize) {
+            icur += warpSize;
+            int idx = icur + (threadIdx.x & (warpSize - 1));
+            if(idx < iend) {
+                local = data[idx];
             }
             loff = 0;
         }
@@ -170,7 +171,7 @@ __device__ struct PrefetchList2 {
         iend = iend_;
         loff = 0;
 
-        int idx = icur + threadIdx.x;
+        int idx = icur + (threadIdx.x & (warpSize - 1));
         if (idx < iend) {
             local0 = data0[idx];
             local1 = data1[idx];
@@ -178,9 +179,9 @@ __device__ struct PrefetchList2 {
     }
 
     __device__ __forceinline__ Pair<T0,T1> next() {
-        if (loff >= blockDim.x) {
-            icur += blockDim.x;
-            int idx = icur + threadIdx.x;
+        if (loff >= warpSize) {
+            icur += warpSize;
+            int idx = icur + (threadIdx.x & (warpSize - 1));
             if (idx < iend) {
                 local0 = data0[idx];
                 local1 = data1[idx];
@@ -261,8 +262,8 @@ __device__ struct PointedPrefetchList {
     }
 
     __device__ __forceinline__ T next() {
-        if(loff >= blockDim.x) {
-            icur += blockDim.x;
+        if(loff >= warpSize) {
+            icur += warpSize;
             if(icur + threadIdx.x < iend) {
                 plocal = ptrs[icur + threadIdx.x];
                 local = data[plocal];

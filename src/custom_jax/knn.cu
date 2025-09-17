@@ -219,6 +219,8 @@ __global__ void KernelIlistKNN(
                     float r2 = distance_squared(p.pos, posQ, boxsize);
                     nearestK.consider(r2, p.id);
                 }
+
+                __syncthreads();
             }
         }
         
