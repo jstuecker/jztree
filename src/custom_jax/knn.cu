@@ -178,51 +178,54 @@ __global__ void KernelIlistKNN(
     float boxsize               // ignored for now
 ) {
     int ileafQ = blockIdx.x;
-
     int iqstart = isplitQ[ileafQ], iqend = isplitQ[ileafQ + 1];
-    int ipartQ = min(iqstart + threadIdx.x, iqend - 1);
 
-    float3 posQ = xQ[ipartQ].pos;
+    for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
+        int ipartQ = min(qoff + threadIdx.x, iqend - 1);
 
-    SortedNearestK<k> nearestK(INFTY, -1);
+        float3 posQ = xQ[ipartQ].pos;
 
-    __shared__ Particle particles[32];
+        SortedNearestK<k> nearestK(INFTY, -1);
 
-    PrefetchList2<int,float> pf_ilist(ilist, ir2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
+        __shared__ Particle particles[32];
 
-    while(!pf_ilist.finished()) {
-        Pair<int,float> interaction = pf_ilist.next();
-        int ileafT = interaction.first;
-        float r2T = interaction.second;
+        PrefetchList2<int,float> pf_ilist(ilist, ir2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
-        // r2T are the lower leaf-leaf distances and the interactions are sorted by these rmax2
-        // Once we encounter an interaction that is farther away than any of the current nearest 
-        // neighbors, we can skip all subsequent interactions. Since the interaction lists are 
-        // build on worst case assumptions, this saves a lot of time in practice!
-        bool any_accept = syncthreads_or(r2T <= nearestK.max_r2());
-        if(!any_accept) break;
+        while(!pf_ilist.finished()) {
+            Pair<int,float> interaction = pf_ilist.next();
+            int ileafT = interaction.first;
+            float r2T = interaction.second;
 
-        /* Now load the leaf */
-        int ipartT = isplitT[ileafT] + threadIdx.x;
-        int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
+            // r2T are the lower leaf-leaf distances and the interactions are sorted by these rmax2
+            // Once we encounter an interaction that is farther away than any of the current nearest 
+            // neighbors, we can skip all subsequent interactions. Since the interaction lists are 
+            // build on worst case assumptions, this saves a lot of time in practice!
+            bool any_accept = syncthreads_or(r2T <= nearestK.max_r2());
+            if(!any_accept) break;
 
-        if (threadIdx.x < npartT)
-            particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
+            /* Now load the leaf */
+            int ipartT = isplitT[ileafT] + threadIdx.x;
+            int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
+
+            if (threadIdx.x < npartT)
+                particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
+            __syncthreads();
+
+            // Now search for the nearest neighbors in A
+            for (int j = 0; j < npartT; j++) {
+                Particle p = particles[j];
+                float r2 = distance_squared(p.pos, posQ, boxsize);
+                nearestK.consider(r2, p.id);
+            }
+        }
+        
+        if(qoff + threadIdx.x < iqend) {
+            #pragma unroll
+            for(int i = 0; i < k; i++) {
+                knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
+            }
+        }
         __syncthreads();
-
-        // Now search for the nearest neighbors in A
-        for (int j = 0; j < npartT; j++) {
-            Particle p = particles[j];
-            float r2 = distance_squared(p.pos, posQ, boxsize);
-            nearestK.consider(r2, p.id);
-        }
-    }
-    
-    if(iqstart + threadIdx.x < iqend) {
-        #pragma unroll
-        for(int i = 0; i < k; i++) {
-            knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
-        }
     }
 }
 
