@@ -487,6 +487,7 @@ __global__ void KernelInsertInteractions(
     const Node* leaves,
     const int* isplit,
     const int* node_ilist,
+    const float* node_ir2list,
     const int* node_ilist_splits,
     const int* out_splits,
     const float* rmax,
@@ -506,9 +507,17 @@ __global__ void KernelInsertInteractions(
 
     int ninserted = 0;
 
-    PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    //PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    
     while(!pf_ilist.finished()) {
-        int nodeT = pf_ilist.next();
+        Pair<int,float> interaction = pf_ilist.next();
+        int nodeT = interaction.first;
+        float r2T = interaction.second;
+
+        bool any_accept = syncthreads_or(r2T <= rmaxQ2);
+        if(!any_accept) break;
+
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
         int nleavesT = ileafT_end - ileafT_start;
 
@@ -605,6 +614,7 @@ ffi::Error HostConstructIlist(
         leaves_ptr,
         isplit.typed_data(),
         node_ilist.typed_data(),
+        node_ir2list.typed_data(),
         node_ilist_splits.typed_data(),
         lsplits_ptr,
         rmax_ptr,
