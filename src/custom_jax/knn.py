@@ -39,7 +39,7 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ir2list, ilist_splitsB
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
 
 def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits, k=32, boxsize=0., 
-                    alloc_fac=128):
+                    alloc_fac=128, rfac_maxbin=32.):
     assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
 
     assert node_ilist.shape == node_ir2list.shape, "node_ilist and node_ir2list must have the same shape"
@@ -53,8 +53,8 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
 
     radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits,
-        blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
-        k=np.int32(k), boxsize=np.float32(boxsize)
+        k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
+        rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize)
     )
 
     def myerror(n1, n2):

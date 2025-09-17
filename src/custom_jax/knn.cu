@@ -386,6 +386,7 @@ __global__ void KernelCountInteractions(
     int* interaction_count,
     float* rmax_out,
     int k,
+    float bins_per_log2,
     float boxsize
 ) {
 
@@ -415,7 +416,7 @@ __global__ void KernelCountInteractions(
         // This is the radius at which every point in Q would include every other point in Q
         float rbase2 = 4.0f*dotf3(extQ, extQ); // factor 4, since ext is half the node size
         
-        LogBinMap<20> binmap(rbase2, 4.0f);
+        LogBinMap<20> binmap(rbase2, bins_per_log2);
         CumHist<20> rhist;
 
         PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
@@ -597,17 +598,18 @@ ffi::Error HostConstructIlist(
         int k,
         size_t blocksize_fill,
         size_t blocksize_sort,
+        float rfac_maxbin,
         float boxsize
     )
 {
     Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
     int nnodes = isplit.element_count() - 1;
     int nleaves = leaves_npart.element_count();
-
-    float* rmax2_ptr = rmax2->typed_data();
-
     int* lsplits_ptr = leaf_ilist_splits->typed_data();
     cudaMemsetAsync(lsplits_ptr, 0, sizeof(int)*(nleaves+1), stream);
+
+    constexpr int BINS = 20;
+    float bins_per_log2 = BINS / log2f(rfac_maxbin);
 
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
@@ -619,8 +621,9 @@ ffi::Error HostConstructIlist(
         node_ir2list.typed_data(),
         node_ilist_splits.typed_data(),
         lsplits_ptr + 1,
-        rmax2_ptr,
+        rmax2->typed_data(),
         k,
+        bins_per_log2,
         boxsize
     );
     
@@ -649,7 +652,7 @@ ffi::Error HostConstructIlist(
         node_ir2list.typed_data(),
         node_ilist_splits.typed_data(),
         lsplits_ptr,
-        rmax2_ptr,
+        rmax2->typed_data(),
         leaf_ilist->typed_data(),
         leaf_ilist_rad->typed_data(),
         leaf_ilist->element_count(),
@@ -693,6 +696,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int>("k")
         .Attr<size_t>("blocksize_fill")
         .Attr<size_t>("blocksize_sort")
+        .Attr<float>("rfac_maxbin")
         .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
