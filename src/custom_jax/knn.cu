@@ -444,7 +444,7 @@ __global__ void KernelCountInteractions(
                 }
                 __syncthreads();
                 
-                for(int j = 0; j < ileafT_end - ileafT_start; j++) {
+                for(int j = 0; j < min(ileafT_end - itoff, 32); j++) {
                     float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     int bin = binmap.r2_to_bin(r2);
@@ -486,7 +486,7 @@ __global__ void KernelCountInteractions(
                 }
                 __syncthreads();
                 
-                for(int j = 0; j < ileafT_end - ileafT_start; j++) {
+                for(int j = 0; j < min(ileafT_end - itoff, 32); j++) {
                     float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     ncount += (r2 <= rmax2);
@@ -525,6 +525,7 @@ __global__ void KernelInsertInteractions(
         float3 xQ = leafQ.center;
         float3 extQ = LvlToHalfExt(leafQ.level);
         float rmaxQ2 = rmax2[ileafQ];
+        int out_offset = out_splits[ileafQ];
 
         int ninserted = 0;
 
@@ -551,14 +552,14 @@ __global__ void KernelInsertInteractions(
                     extT[threadIdx.x] = LvlToHalfExt(leafT.level);
                 }
                 __syncthreads();
-                for(int j = 0; j < ileafT_end - ileafT_start; j++) {
+                for(int j = 0; j < min(ileafT_end - itoff, 32); j++) {
                     float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
-                    if(r2 <= rmaxQ2){ // ******* later avoid double insertion here
-                        int offset = out_splits[ileafQ] + ninserted;
+                    if((iqoff + threadIdx.x < ileafQ_end) && (r2 <= rmaxQ2)){
+                        int offset = out_offset + ninserted;
 
                         if(offset >= nmax)
-                            return; // We have run out of space, just return
+                            break; // We have run out of space, just return
 
                         if(r2 == 0.f) {
                             // For the direct neighbourhood we add a tiny contribution of the maximum

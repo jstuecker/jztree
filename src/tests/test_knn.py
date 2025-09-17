@@ -61,7 +61,7 @@ def test_double_summarize(final_size):
     assert jnp.all(xleaf == xleaf_ref)
     assert numleaves == numleaves_ref
 
-@pytest.mark.parametrize("rfac", [2, 4, 8, 16, 17, 23, 32])
+@pytest.mark.parametrize("rfac", [2, 8, 17, 32, 60, 133])
 def test_ilist_rfac(rfac):
     N = 1024*177
     posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N))
