@@ -175,7 +175,8 @@ __global__ void KernelIlistKNN(
     const float* ir2list,       // (lower) interaction rmax2
     const int* ilist_splitsQ,   // B leaf-ranges in ilist
     Neighbor* knn,              // output knn list
-    float boxsize               // ignored for now
+    int max_leaf_size,          // maximum leaf size (for shared memory allocation)
+    float boxsize               // if > 0, use for periodic wrapping
 ) {
     int ileafQ = blockIdx.x;
     int iqstart = isplitQ[ileafQ], iqend = isplitQ[ileafQ + 1];
@@ -187,7 +188,7 @@ __global__ void KernelIlistKNN(
 
         SortedNearestK<k> nearestK(INFTY, -1);
 
-        __shared__ Particle particles[32];
+        extern __shared__ Particle particles[];
 
         PrefetchList2<int,float> pf_ilist(ilist, ir2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
@@ -204,11 +205,11 @@ __global__ void KernelIlistKNN(
             if(!any_accept) break;
 
             /* Now load the leaf */
-            int ipartT = isplitT[ileafT] + threadIdx.x;
-            int npartT = isplitT[ileafT + 1] - isplitT[ileafT];
+            int ipartTstart = isplitT[ileafT];
+            int npartT = isplitT[ileafT + 1] - ipartTstart;
 
-            if (threadIdx.x < npartT)
-                particles[threadIdx.x] = {xT[ipartT].pos, ipartT};
+            for(int i = threadIdx.x; i < min(max_leaf_size, npartT); i += blockDim.x)
+                particles[i] = {xT[ipartTstart + i].pos, ipartTstart + i};
             __syncthreads();
 
             // Now search for the nearest neighbors in A
@@ -230,19 +231,21 @@ __global__ void KernelIlistKNN(
 }
 
 void launch_KernelIlistKNN(
-    int k, cudaStream_t stream, int nleavesQ, 
+    int k, cudaStream_t stream, int block_size, int nleavesQ, 
     const PosR* xT, const PosR* xQ,
     const int* isplitT, const int* isplitQ, const Node* leaves,
     const int* ilist, const float* ir2list, const int* ilist_splitsQ,
-    Neighbor* knn, float boxsize) {
+    Neighbor* knn, int max_leaf_size, float boxsize) {
+        
+    int alloc_size = max_leaf_size * sizeof(Particle);
 
     switch(k) {
-        case 4: KernelIlistKNN<4><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
-        case 8: KernelIlistKNN<8><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
-        case 12: KernelIlistKNN<12><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
-        case 16: KernelIlistKNN<16><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
-        case 32: KernelIlistKNN<32><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
-        case 64: KernelIlistKNN<64><<< nleavesQ, 32, 0, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, boxsize); break;
+        case 4: KernelIlistKNN<4><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_leaf_size, boxsize); break;
+        case 8: KernelIlistKNN<8><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_leaf_size, boxsize); break;
+        case 12: KernelIlistKNN<12><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_leaf_size, boxsize); break;
+        case 16: KernelIlistKNN<16><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_leaf_size, boxsize); break;
+        case 32: KernelIlistKNN<32><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_leaf_size, boxsize); break;
+        case 64: KernelIlistKNN<64><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_leaf_size, boxsize); break;
         default:
             throw std::runtime_error("Unsupported k value in launch_KernelIlistKNN");
     }
@@ -270,12 +273,13 @@ ffi::Error HostIlistKNNSearch(
     Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
 
     size_t block_size = 32;
+    int max_leaf_size = 64;
 
-    launch_KernelIlistKNN(k, stream, nleavesQ,
+    launch_KernelIlistKNN(k, stream, block_size, nleavesQ,
         xAf4, xBf4,
         isplitT.typed_data(), isplitQ.typed_data(),
         leaves_ptr, ilist.typed_data(), ir2list.typed_data(), ilist_splitsQ.typed_data(),
-        knn_ptr, boxsize);
+        knn_ptr, max_leaf_size, boxsize);
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
