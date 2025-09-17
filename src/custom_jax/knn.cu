@@ -447,10 +447,10 @@ __global__ void KernelCountInteractions(
     // // since we need to include any leaf that may contain particles within rmax
     int ncount = 0;
 
-    PrefetchList2<int,float> pf_ilist2(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    pf_ilist.restart(node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
 
-    while(!pf_ilist2.finished()) {
-        Pair<int,float> interaction = pf_ilist2.next();
+    while(!pf_ilist.finished()) {
+        Pair<int,float> interaction = pf_ilist.next();
         int nodeT = interaction.first;
         float r2T = interaction.second;
 
@@ -507,7 +507,6 @@ __global__ void KernelInsertInteractions(
 
     int ninserted = 0;
 
-    //PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
     PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
     
     while(!pf_ilist.finished()) {

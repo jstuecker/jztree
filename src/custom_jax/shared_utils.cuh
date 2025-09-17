@@ -109,14 +109,20 @@ __device__ struct PrefetchList {
     int icur, iend;
     int loff;
 
-    __device__ __forceinline__ PrefetchList(const T* __restrict__ data_, const int istart_, const int iend_) {
-        data = data_;
+    __device__ __forceinline__
+    PrefetchList(const T* __restrict__ data_, int istart_, int iend_) : data(data_)
+    {
+        restart(istart_, iend_);
+    }
+
+    __device__ __forceinline__ void restart(int istart_, int iend_) {
         icur = istart_;
         iend = iend_;
         loff = 0;
 
-        if(icur + threadIdx.x < iend) {
-            local = data[icur + threadIdx.x];
+        int idx = icur + threadIdx.x;
+        if (idx < iend) {
+            local = data[idx];
         }
     }
 
@@ -154,8 +160,16 @@ __device__ struct PrefetchList2 {
     PrefetchList2(const T0* __restrict__ d0,
                  const T1* __restrict__ d1,
                  int istart_, int iend_)
-        : data0(d0), data1(d1), icur(istart_), iend(iend_), loff(0)
+        : data0(d0), data1(d1)
     {
+        restart(istart_, iend_);
+    }
+
+    __device__ __forceinline__ void restart(int istart_, int iend_) {
+        icur = istart_;
+        iend = iend_;
+        loff = 0;
+
         int idx = icur + threadIdx.x;
         if (idx < iend) {
             local0 = data0[idx];
