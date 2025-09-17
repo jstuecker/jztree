@@ -199,10 +199,8 @@ __global__ void KernelIlistKNN(
         // Once we encounter an interaction that is farther away than any of the current nearest 
         // neighbors, we can skip all subsequent interactions. Since the interaction lists are 
         // build on worst case assumptions, this saves a lot of time in practice!
-        bool accept = (r2T <= nearestK.max_r2());
-        bool any_accept = syncthreads_or(accept);
-        if(!any_accept)
-            break;
+        bool any_accept = syncthreads_or(r2T <= nearestK.max_r2());
+        if(!any_accept) break;
 
         /* Now load the leaf */
         int ipartT = isplitT[ileafT] + threadIdx.x;
@@ -360,7 +358,7 @@ struct LogBinMap {
     __device__ __forceinline__ float bin_end(int ibin)
     {
         if(ibin < BINS)
-            return __powf(2.0f, 0.5f*logrbase2 + float(ibin+1.0f-OFFSET)*(1.0f/bins_per_log2));
+            return __powf(2.0f, logrbase2 + float(ibin+1.0f-OFFSET)*(2.0f/bins_per_log2));
         else
             return INFTY;
     }
@@ -371,6 +369,7 @@ __global__ void KernelCountInteractions(
     const int* leaves_npart,
     const int* isplit,
     const int* node_ilist,
+    const float* node_ir2list,
     const int* node_ilist_splits,
     int* interaction_count,
     float* rmax_out,
@@ -404,10 +403,18 @@ __global__ void KernelCountInteractions(
     LogBinMap<20> binmap(rbase2, 4.0f);
     CumHist<20> rhist;
 
-    PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+
+    float rmax2 = INFTY;
 
     while(!pf_ilist.finished()) {
-        int nodeT = pf_ilist.next();
+        Pair<int,float> interaction = pf_ilist.next();
+        int nodeT = interaction.first;
+        float r2T = interaction.second;
+
+        bool any_accept = syncthreads_or(r2T <= rmax2);
+        if(!any_accept) break;
+
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
         int nleavesT = ileafT_end - ileafT_start;
 
@@ -429,20 +436,26 @@ __global__ void KernelCountInteractions(
             rhist.insert(bin, npartT[j]);
         }
         __syncthreads();
-    }
 
-    int ibin = rhist.find(k);
-    float rmax = binmap.bin_end(ibin);
-    float rmax2 = rmax*rmax;
+        int ibin = rhist.find(k);
+        rmax2 = binmap.bin_end(ibin);
+    }
 
     // // Now we have to go again through all leaves and count how many we need to interact with
     // // Note that here we need to use the minimal distance, not the maximal one
     // // since we need to include any leaf that may contain particles within rmax
     int ncount = 0;
 
-    PrefetchList<int> pf_ilist2(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+    PrefetchList2<int,float> pf_ilist2(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+
     while(!pf_ilist2.finished()) {
-        int nodeT = pf_ilist2.next();
+        Pair<int,float> interaction = pf_ilist2.next();
+        int nodeT = interaction.first;
+        float r2T = interaction.second;
+
+        bool any_accept = syncthreads_or(r2T <= rmax2);
+        if(!any_accept) break;
+
         int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
         int nleavesT = ileafT_end - ileafT_start;
 
@@ -465,7 +478,7 @@ __global__ void KernelCountInteractions(
 
     // Output our results:
     if(threadIdx.x <= ileafQ_end - ileafQ_start) {
-        rmax_out[ileafQ] = rmax;
+        rmax_out[ileafQ] = sqrtf(rmax2);
         interaction_count[ileafQ] = ncount;
     }
 }
@@ -538,6 +551,7 @@ ffi::Error HostConstructIlist(
         ffi::Buffer<ffi::S32> leaves_npart,
         ffi::Buffer<ffi::S32> isplit,
         ffi::Buffer<ffi::S32> node_ilist,
+        ffi::Buffer<ffi::F32> node_ir2list,
         ffi::Buffer<ffi::S32> node_ilist_splits,
         ffi::ResultBuffer<ffi::F32> radii,
         ffi::ResultBuffer<ffi::S32> leaf_ilist,
@@ -562,6 +576,7 @@ ffi::Error HostConstructIlist(
         leaves_npart.typed_data(),
         isplit.typed_data(),
         node_ilist.typed_data(),
+        node_ir2list.typed_data(),
         node_ilist_splits.typed_data(),
         lsplits_ptr + 1,
         rmax_ptr,
@@ -625,6 +640,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>() 
         .Arg<ffi::Buffer<ffi::S32>>()
         .Arg<ffi::Buffer<ffi::S32>>()
+        .Arg<ffi::Buffer<ffi::F32>>() 
         .Arg<ffi::Buffer<ffi::S32>>()
         .Ret<ffi::Buffer<ffi::F32>>()
         .Ret<ffi::Buffer<ffi::S32>>()

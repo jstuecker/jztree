@@ -39,9 +39,11 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ir2list, ilist_splitsB
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
 
 
-def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits, k=32, boxsize=0., 
+def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits, k=32, boxsize=0., 
                     alloc_fac=128, sort_alloc_fac=2.2, sort=True):
     assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
+
+    assert node_ilist.shape == node_ir2list.shape, "node_ilist and node_ir2list must have the same shape"
 
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
 
@@ -54,7 +56,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ilist_
         leaf_ilist_rad = jax.ShapeDtypeStruct((), jnp.float32)
 
     radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
-        x4leaf, npart_leaf, isplit, node_ilist, node_ilist_splits,
+        x4leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits,
         k=np.int32(k), boxsize=np.float32(boxsize), sort=bool(sort)
     )
 
@@ -162,7 +164,7 @@ def brute_force_node_ilist_prep(octree, k=16):
     return leaf_cent, level_leaf, npart_leaf, isplit, node_ilist, node_ilist_splits
 
 def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None, 
-        refine_fac=8, k=16, stop_coarsen=128, sort=False, boxsize=0., alloc_fac=128.):
+        refine_fac=8, k=16, stop_coarsen=128, sort=True, boxsize=0., alloc_fac=128.):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
@@ -172,7 +174,7 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
 
     if len(xleaf) <= stop_coarsen:
         il, ispl = dense_ilist(len(xleaf))
-        ir2l = jnp.zeros((), dtype=jnp.float32)
+        ir2l = jnp.zeros(il.shape, dtype=jnp.float32)
         return il, ir2l, ispl
     
     spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
@@ -180,11 +182,11 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
     # Now build the list on the coarser levels
     # We increase the allocation factor a bit, because the total allocation will anyways be much
     # smaller on the coarser levels and we don't want it to fail on coarser levels
-    il2, ril2, ispl2 = build_ilist_recursive(
+    il2, ir2l, ispl2 = build_ilist_recursive(
         xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
         alloc_fac=alloc_fac*np.sqrt(refine_fac), sort=sort)
     radii, il, ir2l, ispl = build_ilist_knn(
-        xleaf, lvleaf, nleaf, spl2, il2, ispl2, alloc_fac=alloc_fac, 
+        xleaf, lvleaf, nleaf, spl2, il2, ir2l, ispl2, alloc_fac=alloc_fac, 
         k=k, sort=sort, boxsize=boxsize)
     
     return il, ir2l, ispl
