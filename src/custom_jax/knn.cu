@@ -400,11 +400,13 @@ __global__ void KernelCountInteractions(
     // (3) We go through the leaves again and count how many we need to check at that distance
     //     (Note that here we need to use the lower bound of the distance between leaves)
 
-    int nodeQ = blockIdx.x;
+    extern __shared__ unsigned char smem[];
 
+    int nodeQ = blockIdx.x;
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
     for(int iqoff = ileafQ_start; iqoff < ileafQ_end; iqoff += blockDim.x) {
-        int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1);
+        // we set overhead threads to the last leaf to avoid adding many conditionals
+        int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1); 
         Node leafQ = leaves[ileafQ];
         float3 xQ = leafQ.center;
         float3 extQ = LvlToHalfExt(leafQ.level);
@@ -430,11 +432,11 @@ __global__ void KernelCountInteractions(
 
             int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
-            __shared__ float3 xT[32];
-            __shared__ float3 extT[32];
-            __shared__ int npartT[32];
+            float3* xT = reinterpret_cast<float3*>(smem);
+            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
+            int* npartT = reinterpret_cast<int*>(extT + blockDim.x);
 
-            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += 32) {
+            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < ileafT_end) {
                     Node leafT = leaves[ilT];
@@ -444,7 +446,7 @@ __global__ void KernelCountInteractions(
                 }
                 __syncthreads();
                 
-                for(int j = 0; j < min(ileafT_end - itoff, 32); j++) {
+                for(int j = 0; j < min(ileafT_end - itoff, blockDim.x); j++) {
                     float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     int bin = binmap.r2_to_bin(r2);
@@ -474,10 +476,10 @@ __global__ void KernelCountInteractions(
 
             int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
-            __shared__ float3 xT[32];
-            __shared__ float3 extT[32];
+            float3* xT = reinterpret_cast<float3*>(smem);
+            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
 
-            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += 32) {
+            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < ileafT_end) {
                     Node leafT = leaves[ilT];
@@ -486,7 +488,7 @@ __global__ void KernelCountInteractions(
                 }
                 __syncthreads();
                 
-                for(int j = 0; j < min(ileafT_end - itoff, 32); j++) {
+                for(int j = 0; j < min(ileafT_end - itoff, blockDim.x); j++) {
                     float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     ncount += (r2 <= rmax2);
@@ -516,6 +518,8 @@ __global__ void KernelInsertInteractions(
     int nmax,
     float boxsize
 ) {
+    extern __shared__ unsigned char smem[];
+
     int nodeQ = blockIdx.x;
 
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
@@ -541,10 +545,10 @@ __global__ void KernelInsertInteractions(
 
             int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
-            __shared__ float3 xT[32];
-            __shared__ float3 extT[32];
+            float3* xT = reinterpret_cast<float3*>(smem);
+            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
 
-            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += 32) {
+            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < ileafT_end) {
                     Node leafT = leaves[ilT];
@@ -552,7 +556,7 @@ __global__ void KernelInsertInteractions(
                     extT[threadIdx.x] = LvlToHalfExt(leafT.level);
                 }
                 __syncthreads();
-                for(int j = 0; j < min(ileafT_end - itoff, 32); j++) {
+                for(int j = 0; j < min(ileafT_end - itoff, blockDim.x); j++) {
                     float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     if((iqoff + threadIdx.x < ileafQ_end) && (r2 <= rmaxQ2)){
@@ -603,7 +607,10 @@ ffi::Error HostConstructIlist(
     int* lsplits_ptr = leaf_ilist_splits->typed_data();
     cudaMemsetAsync(lsplits_ptr, 0, sizeof(int)*(nleaves+1), stream);
 
-    KernelCountInteractions<<< nnodes, 32, 0, stream>>>(
+    int block_size = 32;
+    size_t smem_alloc_size = block_size * (2*sizeof(float3) + sizeof(int));
+
+    KernelCountInteractions<<< nnodes, block_size, smem_alloc_size, stream>>>(
         leaves_ptr,
         leaves_npart.typed_data(),
         isplit.typed_data(),
@@ -633,7 +640,10 @@ ffi::Error HostConstructIlist(
         lsplits_ptr + 1, lsplits_ptr + 1, nleaves, stream);
 
     // Now insert the interactions
-    KernelInsertInteractions<<< nnodes, 32, 0, stream>>>(
+    block_size = 32;
+    smem_alloc_size = block_size * 2*sizeof(float3);
+
+    KernelInsertInteractions<<< nnodes, block_size, smem_alloc_size, stream>>>(
         leaves_ptr,
         isplit.typed_data(),
         node_ilist.typed_data(),
@@ -653,11 +663,11 @@ ffi::Error HostConstructIlist(
     // (Probably because it uses dynamic dispatches internally)
     // Since most segments are small enough to be sorted in shared memory, this adds a very
     // small overhead (~ O(2ms) for 1M particles). So it is well worth it.
-    int block_size = 64;
+    int block_size_sort = 64;
     int smem_size = 512;
     size_t smem_bytes = smem_size * sizeof(KV);
     int nsegs = leaf_ilist_splits->element_count() - 1;
-    segmented_bitonic_sort_kv<<< nsegs, block_size, smem_bytes, stream>>>(
+    segmented_bitonic_sort_kv<<< nsegs, block_size_sort, smem_bytes, stream>>>(
         leaf_ilist_rad->typed_data(), leaf_ilist->typed_data(), 
         leaf_ilist_splits->typed_data(), nsegs, smem_size);
     
