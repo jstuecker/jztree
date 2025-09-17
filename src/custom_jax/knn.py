@@ -54,6 +54,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
 
     radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits,
+        blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
         k=np.int32(k), boxsize=np.float32(boxsize)
     )
 

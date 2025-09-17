@@ -595,6 +595,8 @@ ffi::Error HostConstructIlist(
         ffi::ResultBuffer<ffi::F32> leaf_ilist_rad,
         ffi::ResultBuffer<ffi::S32> leaf_ilist_splits,
         int k,
+        size_t blocksize_fill,
+        size_t blocksize_sort,
         float boxsize
     )
 {
@@ -607,10 +609,9 @@ ffi::Error HostConstructIlist(
     int* lsplits_ptr = leaf_ilist_splits->typed_data();
     cudaMemsetAsync(lsplits_ptr, 0, sizeof(int)*(nleaves+1), stream);
 
-    int block_size = 32;
-    size_t smem_alloc_size = block_size * (2*sizeof(float3) + sizeof(int));
+    size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
-    KernelCountInteractions<<< nnodes, block_size, smem_alloc_size, stream>>>(
+    KernelCountInteractions<<< nnodes, blocksize_fill, smem_alloc_size, stream>>>(
         leaves_ptr,
         leaves_npart.typed_data(),
         isplit.typed_data(),
@@ -640,10 +641,8 @@ ffi::Error HostConstructIlist(
         lsplits_ptr + 1, lsplits_ptr + 1, nleaves, stream);
 
     // Now insert the interactions
-    block_size = 32;
-    smem_alloc_size = block_size * 2*sizeof(float3);
-
-    KernelInsertInteractions<<< nnodes, block_size, smem_alloc_size, stream>>>(
+    smem_alloc_size = blocksize_fill * 2*sizeof(float3);
+    KernelInsertInteractions<<< nnodes, blocksize_fill, smem_alloc_size, stream>>>(
         leaves_ptr,
         isplit.typed_data(),
         node_ilist.typed_data(),
@@ -663,11 +662,10 @@ ffi::Error HostConstructIlist(
     // (Probably because it uses dynamic dispatches internally)
     // Since most segments are small enough to be sorted in shared memory, this adds a very
     // small overhead (~ O(2ms) for 1M particles). So it is well worth it.
-    int block_size_sort = 64;
     int smem_size = 512;
     size_t smem_bytes = smem_size * sizeof(KV);
     int nsegs = leaf_ilist_splits->element_count() - 1;
-    segmented_bitonic_sort_kv<<< nsegs, block_size_sort, smem_bytes, stream>>>(
+    segmented_bitonic_sort_kv<<< nsegs, blocksize_sort, smem_bytes, stream>>>(
         leaf_ilist_rad->typed_data(), leaf_ilist->typed_data(), 
         leaf_ilist_splits->typed_data(), nsegs, smem_size);
     
@@ -693,6 +691,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::Buffer<ffi::F32>>()
         .Ret<ffi::Buffer<ffi::S32>>()
         .Attr<int>("k")
+        .Attr<size_t>("blocksize_fill")
+        .Attr<size_t>("blocksize_sort")
         .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
