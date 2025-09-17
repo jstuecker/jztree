@@ -190,16 +190,16 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize'])
 
-def knn(posz, k=16, boxsize=0., alloc_fac=256.):
-    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=32)
+def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=32):
+    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=max_leaf_size)
 
-    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=32*15, refine_fac=15,
+    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=max_leaf_size*15, refine_fac=15,
                                           num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
 
     rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)
 
     return rknn, iknn
-knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac"])
+knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])
 
 def segment_sort(key, val, isplit, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
