@@ -32,10 +32,13 @@ def setup_particles(N=5555, duplicate=False):
 def test_double_summarize(final_size):
     pos0, mass0 = setup_particles()
     posz, idz = cj.tree.pos_zorder_sort.jit(pos0)
-    spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(posz, max_size=final_size)
+    spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(
+        posz, max_size=final_size, scan_size=256)
 
-    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(posz, max_size=final_size//3)
-    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(xleaf, max_size=final_size, nleaf=nleaf, num_part=len(posz))
+    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(
+        posz, max_size=final_size//3, scan_size=256)
+    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(
+        xleaf, max_size=final_size, nleaf=nleaf, num_part=len(posz), scan_size=256)
     
     assert jnp.all(nleaf == nleaf_ref)
     assert jnp.all(xleaf == xleaf_ref)

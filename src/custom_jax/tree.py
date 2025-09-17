@@ -61,7 +61,7 @@ def div_ceil(a, b):
 def prepend_num(arr, val=0):
     return jnp.concatenate([jnp.asarray([val], dtype=arr.dtype), arr], axis=0)
 
-def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=None):
+def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=None, ref_fac=None):
     """Summarizes leaf nodes into parent nodes
     """
     if nleaf is None:
@@ -71,13 +71,20 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
         num = prepend_num(jnp.cumsum(nleaf), 0)
     if num_part is None:
         num_part = len(xleaf)
-    assert num_part / max_size >= len(xleaf) / 64
+    if ref_fac is None:
+        scan_size = 2*max_size + 1
+    else:
+        scan_size = int(3 * ref_fac) + 2
+    scan_size = 2*max_size + 1
+    block_size = scan_size
+    # scan_size = 64
 
     # We may have some invalid leaves at the end
     # Let's keep track until where our leaves are valid
     nleaves_filled = jnp.count_nonzero(nleaf)
     
     max_new_leaves = div_ceil(num_part, np.maximum(max_size//2, 1))
+    print("scan size:", scan_size, max_size)
 
     assert xleaf.dtype == jnp.float32
     assert xleaf.shape[-1] == 3
@@ -87,7 +94,8 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
     out_splits_type = jax.ShapeDtypeStruct((xnleaf.shape[0]+1,), jnp.int32)
 
     flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,))(
-        xnleaf, nleaves_filled, block_size=np.uint64(block_size), max_size=np.uint64(max_size))[0]
+        xnleaf, nleaves_filled, max_size=np.uint64(max_size),
+        block_size=np.uint64(block_size), scan_size=np.uint64(scan_size))[0]
 
     # Get the splitting points of leaves
     splits = jnp.where(flag_split > -1000, size=max_new_leaves+1, fill_value=nleaves_filled)[0]
@@ -104,7 +112,7 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
 
     return splits, new_nleaf, new_leaf_lvl, new_leaf_cent, numleaves
 
-summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size", "num_part"))
+summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size", "num_part", "ref_fac"))
 
 # Matches CUDA's float32 behavior
 def float_xor_msb(a, b):

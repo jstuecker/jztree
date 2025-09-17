@@ -148,7 +148,6 @@ struct NodePointers {
 __global__ void KernelBinarySearchLeftParent(const float3* pos_in, NodePointers nodes, int n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     bool valid_thread = (idx < n-1);
-    int Nnodes = n + 1; 
 
     // Node indices are offset by 1, because we put a fake node at the beginning
     // but we don't launch the kernel for it
@@ -310,13 +309,13 @@ struct PosN {
     int32_t n;
 };
 
-template<int BLOCK_SIZE, int SCAN_SIZE>
 __global__ void KernelSummarizeLeaves(
     const PosN* xnleaf,
     const int* nleaves_filled,
-    int32_t* split_flags, 
+    int32_t* split_flags,
     size_t max_size,
-    size_t n_leaves
+    size_t n_leaves,
+    int scan_size
 ) {
     int nfilled = nleaves_filled[0];
 
@@ -325,15 +324,19 @@ __global__ void KernelSummarizeLeaves(
     int node_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     // Load data preceding and following our block into shared memory
-    constexpr int nload = BLOCK_SIZE + 2*SCAN_SIZE + 1;
-    __shared__ PosN xn[nload];
-    __shared__ int level[nload - 1];
+    int nload = blockDim.x + 2*scan_size + 1;
+    extern __shared__ unsigned char smem[];
+    PosN*   xn = reinterpret_cast<PosN*>(smem);
+    int32_t* level = reinterpret_cast<int32_t*>(xn + nload);
 
-    int ioff = blockIdx.x * BLOCK_SIZE - SCAN_SIZE - 1;
+    // __shared__ PosN xn[nload];
+    // __shared__ int level[nload - 1];
+
+    int ioff = blockIdx.x * blockDim.x - scan_size - 1;
     
     // Note: we may load some points duplicate at the boundary, but that is ok (they will have 
     // level 0). Keeping it this way simplifies the indexing logic later
-    for(int i = threadIdx.x; i < nload; i += BLOCK_SIZE) {
+    for(int i = threadIdx.x; i < nload; i += blockDim.x) {
         int ifrom = ioff + i;
         if(ifrom < 0)
             xn[i] = {make_float3(-CUDART_INF_F, -CUDART_INF_F, -CUDART_INF_F), 0};
@@ -344,20 +347,20 @@ __global__ void KernelSummarizeLeaves(
     }
 
     __syncthreads();
-    for(int i = threadIdx.x; i < nload-1; i += BLOCK_SIZE) {
+    for(int i = threadIdx.x; i < nload-1; i += blockDim.x) {
         level[i] = msb_diff_level(xn[i].pos, xn[i + 1].pos);
     }
 
     // Find the boundaries of each node
     int lbound = 0, lsize = 0;
-    int idx = threadIdx.x + SCAN_SIZE;
+    int idx = threadIdx.x + scan_size;
     int mylevel = level[idx];
-    for(int i = idx - SCAN_SIZE; i < idx; i++) {
+    for(int i = idx - scan_size; i < idx; i++) {
         lbound = level[i] > mylevel ? i : lbound;
         lsize = xn[i+1].n + (level[i] >= mylevel ? 0 : lsize);
     }
     int rbound = 0, rsize = 0;
-    for(int i = idx + SCAN_SIZE; i > idx; i--) {
+    for(int i = idx + scan_size; i > idx; i--) {
         rbound = level[i] > mylevel ? i : rbound;
         rsize = xn[i].n + (level[i] >= mylevel ? 0 : rsize);
     }
@@ -381,26 +384,23 @@ ffi::Error HostSummarizeLeaves(
     ffi::Buffer<ffi::F32> xnleaf,
     ffi::Buffer<ffi::S32> nleaves_filled,
     ffi::ResultBuffer<ffi::S32> flags_split,
+    size_t max_size,
     size_t block_size,
-    size_t max_size
+    size_t scan_size
 ) {
     cudaError_t last_error = cudaGetLastError();
 
     size_t n_leaves = xnleaf.element_count()/4;
 
-    constexpr size_t block = 64;
-    constexpr size_t scan_size = 64;
+    size_t alloc_bytes = (block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t));
 
-    // if (max_size >= scan_size) {
-    //     return ffi::Error::InvalidArgument("max_size must be < 64 for now. Will improve it later.");
-    // }
-
-    KernelSummarizeLeaves<block,scan_size><<< div_ceil(n_leaves+1, block), block, 0, stream>>>(
+    KernelSummarizeLeaves<<< div_ceil(n_leaves+1, block_size), block_size, alloc_bytes, stream>>>(
         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
         nleaves_filled.typed_data(),
         flags_split->typed_data(),
         max_size,
-        n_leaves
+        n_leaves,
+        scan_size
     );
 
     if (last_error != cudaSuccess) {
@@ -416,8 +416,9 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::F32>>()        // xleaf
         .Arg<ffi::Buffer<ffi::S32>>()        // nleaves_filled
         .Ret<ffi::Buffer<ffi::S32>>()        // flags_split
+        .Attr<size_t>("max_size")
         .Attr<size_t>("block_size")
-        .Attr<size_t>("max_size"),
+        .Attr<size_t>("scan_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 
