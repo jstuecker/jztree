@@ -15,7 +15,8 @@ def lvl_to_ext(level_binary):
 
 def get_node_box(x, level_binary):
     node_size = lvl_to_ext(level_binary)
-    node_cent = (jnp.floor(x / node_size) + 0.5) * node_size
+    node_cent = (jnp.floor(x / node_size) + 0.5) * node_size   # might have some round-off issues
+    # node_cent = x + (0.5 * node_size - jnp.mod(x, node_size))
     return node_cent, node_size
 
 def pos_zorder_sort(x, block_size=64):
@@ -61,7 +62,7 @@ def div_ceil(a, b):
 def prepend_num(arr, val=0):
     return jnp.concatenate([jnp.asarray([val], dtype=arr.dtype), arr], axis=0)
 
-def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=None, ref_fac=None):
+def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None):
     """Summarizes leaf nodes into parent nodes
     """
     if nleaf is None:
@@ -72,12 +73,10 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
     if num_part is None:
         num_part = len(xleaf)
     if ref_fac is None:
-        scan_size = 2*max_size + 1
+        scan_size = max_size + 1
     else:
-        scan_size = int(3 * ref_fac) + 2
-    scan_size = 2*max_size + 1
-    block_size = scan_size
-    # scan_size = 64
+        scan_size = int(ref_fac + 2)
+    block_size = np.clip((scan_size//64) * 64, 64, 512)
 
     # We may have some invalid leaves at the end
     # Let's keep track until where our leaves are valid
@@ -103,16 +102,16 @@ def summarize_leaves(xleaf, nleaf=None, block_size=64, max_size=64, num_part=Non
 
     new_leaf_lvl = jnp.minimum(flag_split[splits[:-1]], flag_split[splits[1:]]) - 1
 
+    numleaves = jnp.count_nonzero(new_nleaf)
 
     new_leaf_cent = get_node_box(xleaf[splits[:-1]], new_leaf_lvl)[0]
-
-    numleaves = jnp.count_nonzero(new_nleaf)
+    new_leaf_cent = jnp.where(jnp.arange(len(new_leaf_cent))[:,None] < numleaves, new_leaf_cent, 0.)
 
     # assert numleaves <= max_new_leaves, "Please provide nptot if leaves are not particles"
 
     return splits, new_nleaf, new_leaf_lvl, new_leaf_cent, numleaves
 
-summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("block_size", "max_size", "num_part", "ref_fac"))
+summarize_leaves.jit = jax.jit(summarize_leaves, static_argnames=("max_size", "num_part", "ref_fac"))
 
 # Matches CUDA's float32 behavior
 def float_xor_msb(a, b):

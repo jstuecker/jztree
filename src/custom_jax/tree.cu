@@ -313,8 +313,8 @@ __global__ void KernelSummarizeLeaves(
     const PosN* xnleaf,
     const int* nleaves_filled,
     int32_t* split_flags,
-    size_t max_size,
-    size_t n_leaves,
+    int max_size,
+    int n_leaves,
     int scan_size
 ) {
     int nfilled = nleaves_filled[0];
@@ -328,10 +328,7 @@ __global__ void KernelSummarizeLeaves(
     extern __shared__ unsigned char smem[];
     PosN*   xn = reinterpret_cast<PosN*>(smem);
     int32_t* level = reinterpret_cast<int32_t*>(xn + nload);
-
-    // __shared__ PosN xn[nload];
-    // __shared__ int level[nload - 1];
-
+    
     int ioff = blockIdx.x * blockDim.x - scan_size - 1;
     
     // Note: we may load some points duplicate at the boundary, but that is ok (they will have 
@@ -340,7 +337,7 @@ __global__ void KernelSummarizeLeaves(
         int ifrom = ioff + i;
         if(ifrom < 0)
             xn[i] = {make_float3(-CUDART_INF_F, -CUDART_INF_F, -CUDART_INF_F), 0};
-        else if(ifrom >= n_leaves)
+        else if(ifrom >= nfilled)
             xn[i] = {make_float3(CUDART_INF_F, CUDART_INF_F, CUDART_INF_F), 0};
         else
             xn[i] = xnleaf[ifrom];
@@ -350,18 +347,17 @@ __global__ void KernelSummarizeLeaves(
     for(int i = threadIdx.x; i < nload-1; i += blockDim.x) {
         level[i] = msb_diff_level(xn[i].pos, xn[i + 1].pos);
     }
+    __syncthreads();
 
     // Find the boundaries of each node
-    int lbound = 0, lsize = 0;
     int idx = threadIdx.x + scan_size;
     int mylevel = level[idx];
+    int lsize = 0;
     for(int i = idx - scan_size; i < idx; i++) {
-        lbound = level[i] > mylevel ? i : lbound;
         lsize = xn[i+1].n + (level[i] >= mylevel ? 0 : lsize);
     }
-    int rbound = 0, rsize = 0;
+    int rsize = 0;
     for(int i = idx + scan_size; i > idx; i--) {
-        rbound = level[i] > mylevel ? i : rbound;
         rsize = xn[i].n + (level[i] >= mylevel ? 0 : rsize);
     }
 
@@ -388,8 +384,6 @@ ffi::Error HostSummarizeLeaves(
     size_t block_size,
     size_t scan_size
 ) {
-    cudaError_t last_error = cudaGetLastError();
-
     size_t n_leaves = xnleaf.element_count()/4;
 
     size_t alloc_bytes = (block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t));
@@ -403,6 +397,7 @@ ffi::Error HostSummarizeLeaves(
         scan_size
     );
 
+    cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
     }
