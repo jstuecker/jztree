@@ -65,7 +65,7 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
                           f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
     ispl = ispl + conditional_callback(ispl[-1] > il.size, myerror, ispl[-1], il.size)
 
-    return radii, il, ir2l, ispl
+    return il, ir2l, ispl
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac", "sort", "sort_alloc_fac"])
 
 
@@ -185,7 +185,7 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=64, num_part=None,
     il2, ir2l, ispl2 = build_ilist_recursive(
         xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
         alloc_fac=alloc_fac*np.sqrt(refine_fac), sort=sort)
-    radii, il, ir2l, ispl = build_ilist_knn(
+    il, ir2l, ispl = build_ilist_knn(
         xleaf, lvleaf, nleaf, spl2, il2, ir2l, ispl2, alloc_fac=alloc_fac, 
         k=k, sort=sort, boxsize=boxsize)
     

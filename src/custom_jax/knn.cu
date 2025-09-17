@@ -172,7 +172,7 @@ __global__ void KernelIlistKNN(
     const int* isplitQ,         // leaf-ranges in B
     const Node* leaves,         // binary levels of A
     const int* ilist,           // interaction list
-    const float* ir2list,       // (lower) interaction radii
+    const float* ir2list,       // (lower) interaction rmax2
     const int* ilist_splitsQ,   // B leaf-ranges in ilist
     Neighbor* knn,              // output knn list
     float boxsize               // ignored for now
@@ -195,7 +195,7 @@ __global__ void KernelIlistKNN(
         int ileafT = interaction.first;
         float r2T = interaction.second;
 
-        // r2T are the lower leaf-leaf distances and the interactions are sorted by these radii
+        // r2T are the lower leaf-leaf distances and the interactions are sorted by these rmax2
         // Once we encounter an interaction that is farther away than any of the current nearest 
         // neighbors, we can skip all subsequent interactions. Since the interaction lists are 
         // build on worst case assumptions, this saves a lot of time in practice!
@@ -291,7 +291,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>() // isplitQ : leaf-ranges in B
         .Arg<ffi::Buffer<ffi::F32>>() // leaves : pos and levels of leaves
         .Arg<ffi::Buffer<ffi::S32>>() // ilist : interaction list
-        .Arg<ffi::Buffer<ffi::F32>>() // ir2list : (lower) interaction radii
+        .Arg<ffi::Buffer<ffi::F32>>() // ir2list : (lower) interaction rmax2
         .Arg<ffi::Buffer<ffi::S32>>() // ilist_splitsQ : leaf-ranges in ilist
         .Ret<ffi::Buffer<ffi::S32>>() // knn : output knn list
         .Attr<float>("boxsize"),
@@ -478,7 +478,7 @@ __global__ void KernelCountInteractions(
 
     // Output our results:
     if(threadIdx.x <= ileafQ_end - ileafQ_start) {
-        rmax_out[ileafQ] = sqrtf(rmax2);
+        rmax_out[ileafQ] = rmax2;
         interaction_count[ileafQ] = ncount;
     }
 }
@@ -490,7 +490,7 @@ __global__ void KernelInsertInteractions(
     const float* node_ir2list,
     const int* node_ilist_splits,
     const int* out_splits,
-    const float* rmax,
+    const float* rmax2,
     int* ilist_out,
     float* ilist_radii,
     int nmax,
@@ -503,7 +503,7 @@ __global__ void KernelInsertInteractions(
     Node leafQ = leaves[ileafQ];
     float3 xQ = leafQ.center;
     float3 extQ = LvlToHalfExt(leafQ.level);
-    float rmaxQ2 = rmax[ileafQ]*rmax[ileafQ];
+    float rmaxQ2 = rmax2[ileafQ];
 
     int ninserted = 0;
 
@@ -562,7 +562,7 @@ ffi::Error HostConstructIlist(
         ffi::Buffer<ffi::S32> node_ilist,
         ffi::Buffer<ffi::F32> node_ir2list,
         ffi::Buffer<ffi::S32> node_ilist_splits,
-        ffi::ResultBuffer<ffi::F32> radii,
+        ffi::ResultBuffer<ffi::F32> rmax2,
         ffi::ResultBuffer<ffi::S32> leaf_ilist,
         ffi::ResultBuffer<ffi::F32> leaf_ilist_rad,
         ffi::ResultBuffer<ffi::S32> leaf_ilist_splits,
@@ -575,7 +575,7 @@ ffi::Error HostConstructIlist(
     int nnodes = isplit.element_count() - 1;
     int nleaves = leaves_npart.element_count();
 
-    float* rmax_ptr = radii->typed_data();
+    float* rmax2_ptr = rmax2->typed_data();
 
     int* lsplits_ptr = leaf_ilist_splits->typed_data();
     cudaMemsetAsync(lsplits_ptr, 0, sizeof(int)*(nleaves+1), stream);
@@ -588,7 +588,7 @@ ffi::Error HostConstructIlist(
         node_ir2list.typed_data(),
         node_ilist_splits.typed_data(),
         lsplits_ptr + 1,
-        rmax_ptr,
+        rmax2_ptr,
         k,
         boxsize
     );
@@ -617,7 +617,7 @@ ffi::Error HostConstructIlist(
         node_ir2list.typed_data(),
         node_ilist_splits.typed_data(),
         lsplits_ptr,
-        rmax_ptr,
+        rmax2_ptr,
         leaf_ilist->typed_data(),
         leaf_ilist_rad->typed_data(),
         leaf_ilist->element_count(),
