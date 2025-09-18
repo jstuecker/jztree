@@ -95,8 +95,8 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     # This tends to be more likely when few nodes are left, so for most cases requiring a minimal
     # allocation size fixes it. However, to have a way out if things go wrong, we add an assertion
     # below and expose the allocation factors to the user.
-    max_new_leaves = int(div_ceil(num_part, np.maximum(max_size//2, 1)) * alloc_fac_nodes)
-    max_new_leaves = int(np.maximum(max_new_leaves, alloc_min))
+    max_new_leaves = int(div_ceil(num_part, np.maximum(max_size//2, 1)))
+    max_new_leaves = int(np.maximum(max_new_leaves, alloc_min) * alloc_fac_nodes)
 
     assert xleaf.dtype == jnp.float32
     assert xleaf.shape[-1] == 3
@@ -120,7 +120,8 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     def assert_leaves_complete(nfilled, nshould):
         # If this check fails, it likely means that we did not predict a large enough allocation
         # for the new leaves. (See explanation in the comment above)
-        assert nfilled == nshould, f"Leaves not completely filled: {nfilled} != {nshould}. May be solved by increasing alloc_fac_nodes or alloc_min"
+        assert nfilled == nshould, (f"Leaves not completely filled: {nfilled} != {nshould}."
+                                    + "May be solved by increasing alloc_fac_nodes")
     conditional_callback(splits[-1] != nleaves_filled, assert_leaves_complete, splits[-1], nleaves_filled)
 
     new_leaf_cent = get_node_box(xleaf[splits[:-1]], jnp.full_like(new_leaf_lvl, new_leaf_lvl))[0]

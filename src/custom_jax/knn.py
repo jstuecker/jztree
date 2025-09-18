@@ -104,8 +104,8 @@ def dense_ilist(nleaves, leaf_mask=None, ngroup=32):
 
     return spl, ilist.flatten(), ir2list.flatten(), isplits
 
-def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=48, num_part=None, 
-        refine_fac=8, k=16, stop_coarsen=2048, boxsize=0., alloc_fac=128.):
+def build_ilist_recursive(xleaf, lvleaf, nleaf, k=16, boxsize=0., max_size=48, num_part=None, 
+                          refine_fac=8, stop_coarsen=2048, alloc_fac=128., alloc_fac_nodes=1.):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
@@ -121,30 +121,19 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=48, num_part=None,
         refine_fac = min(refine_fac, max_ref)
 
         spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
-            xleaf, max_size=max_size*refine_fac, nleaf=nleaf, num_part=num_part, ref_fac=refine_fac)
+            xleaf, max_size=max_size*refine_fac, nleaf=nleaf, num_part=num_part, 
+            ref_fac=refine_fac, alloc_fac_nodes=alloc_fac_nodes)
         il_c, ir2l_c, ispl_c = build_ilist_recursive(
-            xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
-            alloc_fac=alloc_fac*np.sqrt(refine_fac), refine_fac=refine_fac, k=k, 
-            stop_coarsen=stop_coarsen, boxsize=boxsize)
+            xleaf2, lvleaf2, nleaf2, k=k, boxsize=boxsize, max_size=max_size*refine_fac, 
+            num_part=num_part, refine_fac=refine_fac, stop_coarsen=stop_coarsen, 
+            alloc_fac=alloc_fac*np.sqrt(refine_fac), alloc_fac_nodes=alloc_fac_nodes)
     
     il, ir2l, ispl = build_ilist_knn(
-        xleaf, lvleaf, nleaf, spl2, il_c, ir2l_c, ispl_c, alloc_fac=alloc_fac, 
-        k=k, boxsize=boxsize)
+        xleaf, lvleaf, nleaf, spl2, il_c, ir2l_c, ispl_c, k=k, boxsize=boxsize, alloc_fac=alloc_fac)
     
     return il, ir2l, ispl
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize', 'alloc_fac'])
-
-def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
-    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=max_leaf_size)
-
-    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=max_leaf_size, refine_fac=15,
-                                          num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
-
-    rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)
-
-    return rknn, iknn
-knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])
 
 def segment_sort(key, val, isplit, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
@@ -160,3 +149,64 @@ def segment_sort(key, val, isplit, smem_size=512):
         key, val, isplit, smem_size=np.int32(smem_size)
     )
     return key_sorted, val_sorted
+
+
+# =================================== User exposed functions ===================================== #
+
+def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
+    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=max_leaf_size)
+
+    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=max_leaf_size, refine_fac=15,
+                                          num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
+
+    rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)
+
+    return rknn, iknn
+knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])
+
+
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class KNNConfig:
+    max_leaf_size: int = 48
+    rfac : float = 8.
+    alloc_fac_ilist: float = 256.
+    alloc_fac_nodes: float = 1.
+    stop_coarsen: int = 2048
+
+@dataclass
+class KNNData:
+    spl: jnp.ndarray
+    xleaf: jnp.ndarray
+    llvl: jnp.ndarray
+    ilist: jnp.ndarray
+    ir2list: jnp.ndarray
+    ilist_splits: jnp.ndarray
+
+def evaluate_knn(KNNData):
+    # """Evaluates the kNN for a given set of positions and precomputed interaction list
+    # """
+    # if idz is None:
+    #     idz = jnp.arange(len(posz), dtype=jnp.int32)
+    # rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)
+    # iknn = idz[iknn]
+    # return rknn, iknn
+    pass
+
+
+# def pepare_knn(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig()):
+#     """Prepares a dictionary that can be used to call query_knn
+#     """
+#     boxsize = 0. if boxsize is None else boxsize
+
+#     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(
+#         posz, max_size=cfg.max_leaf_size, alloc_fac_nodes=cfg.alloc_fac_nodes)
+
+#     il, ir2l, ispl = build_ilist_recursive(
+#         xleaf, llvl, nleaf, num_part=len(posz), k=k, boxsize=boxsize,
+#         max_size=cfg.max_leaf_size, refine_fac=cfg.rfac, alloc_fac=cfg.alloc_fac_ilist, 
+#         stop_coarsen=cfg.stop_coarsen, alloc_fac_nodes=cfg.alloc_fac_nodes)
+
+#     return spl, xleaf, llvl, il, ir2l, ispl
+    
