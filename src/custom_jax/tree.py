@@ -191,17 +191,21 @@ def ztree_diff_level(p1, p2):
 ztree_diff_level.jit = jax.jit(ztree_diff_level)
 
 
-def search_sorted_z(xz, xz_query, block_size=64):
+def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
     """Finds the indices in xz where elements of xz_query would be inserted to keep order.
     This is similar to np.searchsorted, but works for 3D points sorted in Z-order.
     On equality maintains the rule: xz[idx] < v <= xz[idx+1]
+    if leaf_search is True, it is assumed that xz contains one point per leaf and we 
+    return the index of the leaf that the query point belongs to.
     """
     assert xz.dtype ==  xz_query.dtype == jnp.float32
     assert xz.shape[-1] == xz_query.shape[-1] == 3
 
     out_type = jax.ShapeDtypeStruct((xz_query.shape[0],), jnp.int32)
-    inds = jax.ffi.ffi_call("SearchSortedZ", (out_type,))(xz, xz_query, block_size=np.uint64(block_size))[0]
+    inds = jax.ffi.ffi_call("SearchSortedZ", (out_type,))(
+        xz, xz_query, block_size=np.uint64(block_size), leaf_search=leaf_search)[0]
     return inds
+search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "leaf_search"))
 
 # ================================= Deprecated functions   ======================================= #
 # They will be deleted later, for now we keep them for comparison purposes

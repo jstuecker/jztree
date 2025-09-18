@@ -29,7 +29,18 @@ def get_pos(N=5555, duplicate=False, xmin=0., xmax=1.):
     
     return pos0
 
-# @pytest.mark.parametrize("final_size", [13, 33, 64, 77, 135, 255, 256, 299, 317, 339, 411, 415, 477])
+def test_search_sorted_z():
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(1387, xmin=0.1, xmax=0.4))
+    posz2, idz2 = cj.tree.pos_zorder_sort.jit(get_pos(2222, xmin=0.1, xmax=0.4))
+
+    iself = cj.tree.search_sorted_z.jit(posz, posz)
+    assert jnp.all(iself == jnp.arange(len(posz), dtype=jnp.int32))
+
+    i2 = cj.tree.search_sorted_z.jit(posz, posz2)
+    pos_ins = jnp.insert(posz, i2, posz2, axis=0)
+    pos_ins_ref = cj.tree.pos_zorder_sort.jit(pos_ins)[0]
+    assert jnp.all(pos_ins == pos_ins_ref), "If indices were right, we should already be in z-order"
+
 @pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (0.5,1.0), (-1, -0.5), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_summarize_identity(xmin, xmax):
     print("")

@@ -422,7 +422,8 @@ __global__ void KernelSearchSortedZ(
     size_t n_have,
     const float3* posz_query,
     size_t n_query,
-    int32_t* indices
+    int32_t* indices,
+    bool leaf_search
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n_query)
@@ -442,16 +443,29 @@ __global__ void KernelSearchSortedZ(
         }
     }
 
-    // Generally we need to insert at imin + 1, but there are two special cases at the boundaries
-    if(imin == 0) {
-        indices[idx] = z_pos_less(posz_have[0], xquery) ? 1 : 0;
-    }
-    else if(imin == n_have - 1) {
-        indices[idx] = z_pos_less(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
+    int iout;
+    if(leaf_search) {
+        // In this scenario, we need to learn whether the particle belongs to the left or right leaf
+        // it always belongs to the one with the smaller difference level
+        int lv1 = msb_diff_level(posz_have[imin], xquery);
+        int lv2 = (imax < n_have) ? msb_diff_level(posz_have[imax], xquery) : 388;
+        if(lv1 <= lv2)
+            iout = imin;
+        else
+            iout = imax;
     }
     else {
-        indices[idx] = imin + 1;
+        // If we are doing a normal binary search, the index is in general imin + 1
+        // and we only need to take care of the boundary cases
+        if(imin == 0)
+            iout = z_pos_less(posz_have[0], xquery) ? 1 : 0;
+        else if(imin == n_have - 1)
+            iout = z_pos_less(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
+        else
+            iout = imin + 1;
     }
+
+    indices[idx] = iout;
 }
 
 ffi::Error SearchSortedZHost(
@@ -459,17 +473,21 @@ ffi::Error SearchSortedZHost(
     ffi::Buffer<ffi::F32> posz_have,
     ffi::Buffer<ffi::F32> posz_query,
     ffi::ResultBuffer<ffi::S32> indices,
+    bool leaf_search,
     size_t block_size
 ) {
     size_t n_have = posz_have.element_count()/3;
     size_t n_query = posz_query.element_count()/3;
+    float3* posz_ptr = reinterpret_cast<float3*>(posz_have.typed_data());
+    float3* posz_query_ptr = reinterpret_cast<float3*>(posz_query.typed_data());
 
     KernelSearchSortedZ<<< div_ceil(n_query, block_size), block_size, 0, stream>>>(
-        reinterpret_cast<const float3*>(posz_have.typed_data()),
+        posz_ptr,
         n_have,
-        reinterpret_cast<const float3*>(posz_query.typed_data()),
+        posz_query_ptr,
         n_query,
-        indices->typed_data()
+        indices->typed_data(),
+        leaf_search
     );
 
     cudaError_t last_error = cudaGetLastError();
@@ -486,10 +504,10 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::F32>>()        // posz_have
         .Arg<ffi::Buffer<ffi::F32>>()        // posz_query
         .Ret<ffi::Buffer<ffi::S32>>()        // indices
+        .Attr<bool>("leaf_search")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
-
 
 NB_MODULE(nb_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
