@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import custom_jax as cj
 import pytest
 import numpy as np
+from scipy.spatial import cKDTree
 
 def test_segment_sort():
     spl = jnp.insert(jnp.sort(jax.random.randint(jax.random.PRNGKey(0), (5000,), 0, 1000000)), 0, 0)
@@ -21,8 +22,8 @@ def test_segment_sort():
     print(f"Ids different {jnp.sum(inew != inew2)}/{len(inew)} (this is ok, if radii are identical):")
     assert jnp.all(rnew == r[inew2])
 
-def get_pos(N=5555, duplicate=False):
-    pos0 = jax.random.uniform(jax.random.PRNGKey(1), (N,3), dtype=jnp.float32, minval=0., maxval=2.)
+def get_pos(N=5555, duplicate=False, xmin=0., xmax=1.):
+    pos0 = jax.random.uniform(jax.random.PRNGKey(1), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)
     if duplicate:
         pos0 = jnp.concatenate((pos0, pos0, pos0, pos0))
     
@@ -31,7 +32,7 @@ def get_pos(N=5555, duplicate=False):
 # @pytest.mark.parametrize("final_size", [13, 33, 64, 77, 135, 255, 256, 299, 317, 339, 411, 415, 477])
 def test_summarize_identity():
     print("")
-    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(144387) - 0.5)
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(144387, xmin=-0.5, xmax=0.5))
     spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(
         posz, max_size=1)
     
@@ -81,3 +82,20 @@ def test_ilist_rfac(rfac):
 
     # Note the ids can differ for identical radii:
     print(f"Fraction ids equal {jnp.mean(il2[:ispl2[-1]] == il[:ispl[-1]])}") 
+
+@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
+def test_domain(xmin, xmax):
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*128, xmin=xmin, xmax=xmax))
+
+    rnn, inn = cj.knn.knn.jit(posz, k=16)
+
+    tree = cKDTree(np.array(posz))
+    rnn2, inn2 = tree.query(np.array(posz), k=16)
+
+    assert jnp.allclose(rnn, rnn2), "Inferred radii differ. This should never happen for exact knn"
+
+    degenerate_radii = jnp.sum(rnn[:,1:] == rnn[:,:-1])
+    nids_diff = jnp.sum(inn2[:,:-1] != inn[:,:-1])
+    print(f"Ids different: {nids_diff}. Expected up to: {degenerate_radii}")
+
+    assert  nids_diff <= degenerate_radii, "Ids are different (not explained by degenerate radii)"
