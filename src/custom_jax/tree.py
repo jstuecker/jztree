@@ -190,7 +190,6 @@ def ztree_diff_level(p1, p2):
     return level
 ztree_diff_level.jit = jax.jit(ztree_diff_level)
 
-
 def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
     """Finds the indices in xz where elements of xz_query would be inserted to keep order.
     This is similar to np.searchsorted, but works for 3D points sorted in Z-order.

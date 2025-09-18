@@ -43,10 +43,10 @@ def test_search_sorted_z():
 
 def test_leaf_search():
     posz = cj.tree.pos_zorder_sort(get_pos(144387))[0]
-    # summarize leaves
+    # Create some reduced leaves
     spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(posz, max_size=32)
 
-    # Now check whether we can learn the right leaf numbers just from the leaf positions
+    # Check whether we can learn the right leaf numbers just from the leaf positions
     ileaf = cj.tree.search_sorted_z(xleaf, posz, leaf_search=True)
     spl2 = jnp.searchsorted(ileaf, jnp.arange(len(xleaf)+1), side="left")
 
@@ -153,3 +153,14 @@ def test_npart(npart):
     posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
 
     check_against_ckdtree(posz)
+
+def test_query_skip():
+    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
+
+    data = cj.knn.prepare_knn.jit(pos0, k=16)
+
+    rnnz, innz = cj.knn.evaluate_knnz.jit(data)
+    rnnz2, innz2 = cj.knn.evaluate_knnz.jit(data, posz_query=data.posz[::2])
+
+    assert jnp.all(rnnz[::2] == rnnz2)
+    print(jnp.all(innz[::2] == innz2))

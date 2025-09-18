@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import custom_jax.nb_knn as nb_knn
-from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort
+from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort, search_sorted_z
 from .common import conditional_callback
 
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
@@ -189,14 +189,24 @@ class KNNData:
     ir2list: jnp.ndarray    # interaction r2 list (lower bound leaf-leaf distances squared)
     ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
 
-def evaluate_knn(d : KNNData, pos_query=None):
+def evaluate_knnz(d : KNNData, posz_query=None):
     """Evaluates the kNN for a given set of positions and precomputed interaction list
     """
+    if posz_query is not None:
+        # To use custom query points we need to group them by our original leaves
+        # we can represent each leaf by the first of the particles inside
+        xleaf = jnp.where((d.spl[1:] > d.spl[:-1])[:,None], d.posz[d.spl[:-1]], jnp.inf)
+        ileaf = search_sorted_z(xleaf, posz_query, leaf_search=True)
+        spl_query = jnp.searchsorted(ileaf, jnp.arange(len(xleaf)+1), side="left")
+    else:
+        posz_query, spl_query = None, None
+    
     rnnz, innz = ilist_knn_search(
-        d.posz, d.spl, d.ilist, d.ir2list, d.ilist_spl, k=d.k, boxsize=d.boxsize)
+        d.posz, d.spl, d.ilist, d.ir2list, d.ilist_spl, k=d.k, boxsize=d.boxsize,
+        xQ=posz_query, isplitQ=spl_query)
     
     return rnnz, innz
-evaluate_knn.jit = jax.jit(evaluate_knn)
+evaluate_knnz.jit = jax.jit(evaluate_knnz)
 
 def pepare_knnz(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions posz
