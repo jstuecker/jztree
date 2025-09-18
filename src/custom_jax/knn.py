@@ -73,26 +73,36 @@ def cumsum_starting_with_zero(num):
     cs = jnp.cumsum(num, axis=0)
     return jnp.concatenate([jnp.array([0], dtype=num.dtype), cs], axis=0)
 
-def masked_prefix(mask):
+def masked_prefix_sum(mask):
     off, _ = offset_sum(mask)
     off_masked = jnp.where(mask, off, len(mask))
     return off_masked
     
-def dense_ilist(num, mask=None):
+def dense_ilist(nleaves, leaf_mask=None, ngroup=32):
+    num = (nleaves + ngroup - 1) // ngroup
+    
     ilist = jnp.array((jnp.arange(num, dtype=jnp.int32),)*num)
     isplits = jnp.arange(num+1, dtype=jnp.int32)*num
+    spl = jnp.minimum(ngroup*jnp.arange(0, num + 1, dtype=jnp.int32), nleaves)
 
-    if mask is not None: 
-        # Mask interactions with nodes > nmax
-        # We write this in this way, to make sure nmax does not need to be known at compile time
-        valid = mask[None,:] & mask[:,None]
+    if leaf_mask is not None: 
+        # translate to node mask (any leaf must be valid)
+        lcum = cumsum_starting_with_zero(leaf_mask)
+        node_mask = lcum[spl[1:]-1] > lcum[spl[:-1]]
+
+        # Now create a reduced ilist that only contains valid interactions
+        valid = node_mask[None,:] & node_mask[:,None]
         nvalid = jnp.sum(valid, axis=1)
 
-        prefix = masked_prefix(valid.flatten())
+        prefix = masked_prefix_sum(valid.flatten())
         ilist = ilist.flatten().at[prefix].set(ilist.flatten())
         isplits = jnp.concatenate([jnp.array([0]), jnp.cumsum(nvalid)])
+        
+        spl = jnp.minimum(spl, lcum[-1])
 
-    return ilist.flatten(), isplits
+    ir2list = jnp.zeros(ilist.shape, dtype=jnp.float32)
+
+    return spl, ilist.flatten(), ir2list.flatten(), isplits
 
 def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=48, num_part=None, 
         refine_fac=8, k=16, stop_coarsen=2048, boxsize=0., alloc_fac=128.):
@@ -104,29 +114,18 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=48, num_part=None,
     max_ref = (2 * num_part / max_size) / stop_coarsen
 
     if max_ref <= 2.: 
-        # We are very close to the target level, don't coarsen any more
-        # We bundle 4 leaves each
-        nnodes = (len(xleaf) + 31) // 32
-        inodes = jnp.arange(nnodes, dtype=jnp.int32)
-        il_c, ispl_c = dense_ilist(nnodes, nleaf[32*inodes] > 0)
+        # We are very close to the target level, don't coarsen any more and instead use
+        # a dens interaction list
+        spl2, il_c, ir2l_c, ispl_c = dense_ilist(len(xleaf), nleaf > 0, ngroup=32)
+    else:
+        refine_fac = min(refine_fac, max_ref)
 
-        ir2l_c = jnp.zeros(il_c.shape, dtype=jnp.float32)
-        spl2 = 32*jnp.arange(0, nnodes + 1, dtype=jnp.int32)
-
-        il, ir2l, ispl = build_ilist_knn(
-            xleaf, lvleaf, nleaf, spl2, il_c, ir2l_c, ispl_c, alloc_fac=alloc_fac, 
-            k=k, boxsize=boxsize)
-
-        return il, ir2l, ispl
-
-    refine_fac = min(refine_fac, max_ref)
-
-    spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
-        xleaf, max_size=max_size*refine_fac, nleaf=nleaf, num_part=num_part, ref_fac=refine_fac)
-    il_c, ir2l_c, ispl_c = build_ilist_recursive(
-        xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
-        alloc_fac=alloc_fac*np.sqrt(refine_fac), refine_fac=refine_fac, k=k, 
-        stop_coarsen=stop_coarsen, boxsize=boxsize)
+        spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
+            xleaf, max_size=max_size*refine_fac, nleaf=nleaf, num_part=num_part, ref_fac=refine_fac)
+        il_c, ir2l_c, ispl_c = build_ilist_recursive(
+            xleaf2, lvleaf2, nleaf2, max_size=max_size*refine_fac, num_part=num_part,
+            alloc_fac=alloc_fac*np.sqrt(refine_fac), refine_fac=refine_fac, k=k, 
+            stop_coarsen=stop_coarsen, boxsize=boxsize)
     
     il, ir2l, ispl = build_ilist_knn(
         xleaf, lvleaf, nleaf, spl2, il_c, ir2l_c, ispl_c, alloc_fac=alloc_fac, 

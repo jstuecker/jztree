@@ -74,12 +74,12 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     if num_part is None:
         num_part = len(xleaf)
     if ref_fac is None:
-        scan_size = max_size + 1
+        scan_size = max(max_size + 1, 16)
     else:
         # Haven't perfectly understood yet, what scan_size is needed in the worst case...
         # In principle ref_fac + 2 should be enough, but I guess some rounding errors in the
         # ref_fac corrupt this sometimes (?) for now let's leave a bit slack
-        scan_size = int(2.*ref_fac + 3) 
+        scan_size = max(int(2.*ref_fac + 3), 16)
     assert scan_size <= 1024, "This is an absurd level of de-refinement. Please choose a smaller ref_fac or max_size"
 
     block_size = np.clip((scan_size//64) * 64, 64, 512)
