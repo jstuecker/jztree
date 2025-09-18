@@ -41,6 +41,17 @@ def test_search_sorted_z():
     pos_ins_ref = cj.tree.pos_zorder_sort.jit(pos_ins)[0]
     assert jnp.all(pos_ins == pos_ins_ref), "If indices were right, we should already be in z-order"
 
+def test_leaf_search():
+    posz = cj.tree.pos_zorder_sort(get_pos(144387))[0]
+    # summarize leaves
+    spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(posz, max_size=32)
+
+    # Now check whether we can learn the right leaf numbers just from the leaf positions
+    ileaf = cj.tree.search_sorted_z(xleaf, posz, leaf_search=True)
+    spl2 = jnp.searchsorted(ileaf, jnp.arange(len(xleaf)+1), side="left")
+
+    assert jnp.all(spl == spl2), "Leaf ranges should be identical"
+
 @pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (0.5,1.0), (-1, -0.5), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_summarize_identity(xmin, xmax):
     print("")
