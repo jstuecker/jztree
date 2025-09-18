@@ -3,6 +3,7 @@ import jax
 import jax.numpy as jnp
 
 import custom_jax.nb_tree as nb_tree
+from .common import conditional_callback
 
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
@@ -61,9 +62,10 @@ def div_ceil(a, b):
 def prepend_num(arr, val=0):
     return jnp.concatenate([jnp.asarray([val], dtype=arr.dtype), arr], axis=0)
 
-def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None):
+def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None, alloc_fac_nodes=1., alloc_min=128):
     """Summarizes leaf nodes into parent nodes
     """
+
     if nleaf is None:
         nleaf = jnp.ones((xleaf.shape[0],), dtype=jnp.int32)
         num = jnp.arange(0, len(xleaf)+1, dtype=jnp.int32)
@@ -78,7 +80,7 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
         # In principle ref_fac + 2 should be enough, but I guess some rounding errors in the
         # ref_fac corrupt this sometimes (?) for now let's leave a bit slack
         scan_size = int(2.*ref_fac + 3) 
-    assert scan_size <= 1024, "This probably should not happen..."
+    assert scan_size <= 1024, "This is an absurd level of de-refinement. Please choose a smaller ref_fac or max_size"
 
     block_size = np.clip((scan_size//64) * 64, 64, 512)
 
@@ -86,7 +88,15 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     # Let's keep track until where our leaves are valid
     nleaves_filled = jnp.count_nonzero(nleaf)
     
-    max_new_leaves = div_ceil(num_part, np.maximum(max_size//2, 1))
+    # This is an estimate of how many new leaves we may get. In general this is very robust and
+    # may allocate up to 2x more leaves than needed.
+    # However, for very imbalanced trees (may happen if the domain aligns very badly with the 
+    # particle distribution) it may happen that we underestimate the number of new needed leaves.
+    # This tends to be more likely when few nodes are left, so for most cases requiring a minimal
+    # allocation size fixes it. However, to have a way out if things go wrong, we add an assertion
+    # below and expose the allocation factors to the user.
+    max_new_leaves = int(div_ceil(num_part, np.maximum(max_size//2, 1)) * alloc_fac_nodes)
+    max_new_leaves = int(np.maximum(max_new_leaves, alloc_min))
 
     assert xleaf.dtype == jnp.float32
     assert xleaf.shape[-1] == 3
@@ -107,7 +117,14 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
 
     numleaves = jnp.count_nonzero(new_nleaf)
 
+    def assert_leaves_complete(nfilled, nshould):
+        # If this check fails, it likely means that we did not predict a large enough allocation
+        # for the new leaves. (See explanation in the comment above)
+        assert nfilled == nshould, f"Leaves not completely filled: {nfilled} != {nshould}. May be solved by increasing alloc_fac_nodes or alloc_min"
+    conditional_callback(splits[-1] != nleaves_filled, assert_leaves_complete, splits[-1], nleaves_filled)
+
     new_leaf_cent = get_node_box(xleaf[splits[:-1]], jnp.full_like(new_leaf_lvl, new_leaf_lvl))[0]
+    new_leaf_cent = jnp.where(jnp.arange(len(new_leaf_cent))[:,None] < numleaves, new_leaf_cent, jnp.nan)
 
     return splits, new_nleaf, new_leaf_lvl, new_leaf_cent, numleaves
 

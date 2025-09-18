@@ -65,21 +65,40 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
     return il, ir2l, ispl
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac"])
 
-def dense_ilist(num):
+def offset_sum(num):
+    cs = jnp.cumsum(num, axis=0)
+    return cs - num, cs[-1]
+
+def masked_prefix(mask):
+    off, _ = offset_sum(mask)
+    off_masked = jnp.where(mask, off, len(mask))
+    return off_masked
+    
+def dense_ilist(num, mask=None):
     ilist = jnp.array((jnp.arange(num, dtype=jnp.int32),)*num)
     isplits = jnp.arange(num+1, dtype=jnp.int32)*num
+
+    if mask is not None: 
+        # Mask interactions with nodes > nmax
+        # We write this in this way, to make sure nmax does not need to be known at compile time
+        valid = mask[None,:] & mask[:,None]
+        nvalid = jnp.sum(valid, axis=1)
+
+        prefix = masked_prefix(valid.flatten())
+        ilist = ilist.flatten().at[prefix].set(ilist.flatten())
+        isplits = jnp.concatenate([jnp.array([0]), jnp.cumsum(nvalid)])
+
     return ilist.flatten(), isplits
 
 def build_ilist_recursive(xleaf, lvleaf, nleaf, max_size=48, num_part=None, 
-        refine_fac=8, k=16, stop_coarsen=128, boxsize=0., alloc_fac=128.):
+        refine_fac=8, k=16, stop_coarsen=16, boxsize=0., alloc_fac=128.):
     """Recursively builds an interaction list for kNN search. This is done by recursively:
     (1) Coarsen the leaves
     (2) Get the interaction list for the coarsened leaves (recursively)
     (3) Use the interaction list of the coarsened leaves to build the finer interaction list
     """
-
-    if len(xleaf) <= stop_coarsen:
-        il, ispl = dense_ilist(len(xleaf))
+    if 2 * (num_part // max_size) <= stop_coarsen:
+        il, ispl = dense_ilist(len(xleaf), nleaf > 0)
         ir2l = jnp.zeros(il.shape, dtype=jnp.float32)
         return il, ir2l, ispl
     

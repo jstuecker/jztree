@@ -365,6 +365,8 @@ struct LogBinMap {
 
     __device__ __forceinline__ int r2_to_bin(float r2)
     {
+        if(isnan(r2) || (r2 >= INFTY)) return BINS; // overflow bin
+
         float logr2 = __log2f(r2);
         return __float2int_rd((logr2 - logrbase2) * 0.5f * bins_per_log2 + OFFSET);
     }
@@ -458,7 +460,9 @@ __global__ void KernelCountInteractions(
                 __syncthreads();
 
                 int ibin = rhist.find(k);
-                rmax2 = binmap.bin_end(ibin);
+                // add a small safety margin, since our floating point operations might not
+                // be exactly invertible
+                rmax2 = binmap.bin_end(ibin) * (1.f + 1e-6f); 
             }
         }
 

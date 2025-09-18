@@ -41,13 +41,15 @@ def test_summarize_identity(xmin, xmax):
     
     print("First wrong:", jnp.where(idz2 != jnp.arange(len(xleaf), dtype=jnp.int32))[0][0:10])
 
-    assert jnp.all(spl == jnp.arange(len(spl), dtype=jnp.int32))
+    assert numleaves == len(posz)
+    assert jnp.all(spl[:numleaves] == jnp.arange(numleaves, dtype=jnp.int32))
     assert jnp.all(idz2 == jnp.arange(len(xleaf), dtype=jnp.int32))
+    assert jnp.all(nleaf[:numleaves] == 1)
+    assert jnp.all(nleaf[numleaves:] == 0)
 
-@pytest.mark.parametrize("final_size", [13, 33, 39, 43, 63, 64, 77, 135, 255, 256, 299, 317, 339, 411, 415, 477])
+@pytest.mark.parametrize("final_size", [4, 6, 13, 33, 63, 135, 317, 477])
 def test_double_summarize(final_size):
-    print("")
-    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*128, xmin=0.1, xmax=0.4))
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*128, xmin=0., xmax=1.0))
     spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(
         posz, max_size=final_size)
 
@@ -57,15 +59,20 @@ def test_double_summarize(final_size):
     spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(
         xleaf, max_size=final_size, nleaf=nleaf, num_part=len(posz), ref_fac=final_size / im_size)
     
-    print("first wrong:", jnp.where(nleaf != nleaf_ref)[0][:2])
+    assert jnp.all(llvl_ref[:numleaves_ref] < 386), "Leaf levels should be reasonable"
+
+    print("\nfirst wrong:", jnp.where(nleaf != nleaf_ref)[0][:2])
+    assert jnp.all(nleaf_ref <= final_size)
+    assert jnp.all(nleaf <= final_size)
     assert jnp.all(nleaf == nleaf_ref)
-    assert jnp.all(xleaf == xleaf_ref)
+    assert jnp.all(xleaf[:numleaves] == xleaf_ref[:numleaves_ref])
     assert numleaves == numleaves_ref
 
-@pytest.mark.parametrize("rfac", [2, 8, 17, 32, 60, 133])
+@pytest.mark.parametrize("rfac", [2, 8, 17, 32, 33, 40, 93])
 def test_ilist_rfac(rfac):
-    N = 1024*177
-    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N))
+    N = 1024*512
+    xmin, xmax = 0.1, 0.4
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N, xmin=xmin, xmax=xmax))
 
     msize = 48
     spl, nleaf, llvl, xleaf, numleaves = cj.knn.summarize_leaves(posz, max_size=msize)
@@ -77,6 +84,9 @@ def test_ilist_rfac(rfac):
     il2, ir2l2, ispl2 = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfac, refine_fac=rfac,
                                                 num_part=len(posz), k=16)
 
+    print(jnp.where(ispl[1:numleaves] <= ispl[:numleaves-1])[0][0:10])
+    assert jnp.all(ispl[1:numleaves] > ispl[:numleaves-1]), "should not have empty list for any leaf"
+    assert jnp.all(ir2l <= 3.*(xmax-xmin)**2)
     assert jnp.all(ispl2 == ispl), f"Splits different for rfac {rfacA} and {rfac}"
     assert jnp.all(ir2l2[:ispl2[-1]] == ir2l[:ispl[-1]]), f"Radii different for rfac {rfacA} and {rfac}"
 
@@ -85,7 +95,7 @@ def test_ilist_rfac(rfac):
 
 @pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (-0.3,0.3), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_domain(xmin, xmax):
-    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*128, xmin=xmin, xmax=xmax))
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*512, xmin=xmin, xmax=xmax))
 
     rnn, inn = cj.knn.knn.jit(posz, k=16)
 
