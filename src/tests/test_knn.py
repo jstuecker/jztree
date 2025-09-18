@@ -116,7 +116,7 @@ def test_ilist_rfac(rfac):
     print(f"Fraction ids equal {jnp.mean(il2[:ispl2[-1]] == il[:ispl[-1]])}") 
 
 def check_against_ckdtree(posz, k=16, boxsize=None):
-    rnn, inn = cj.knn.knn.jit(posz, k=k, boxsize=0. if boxsize is None else boxsize)
+    rnn, inn = cj.knn.knn_old.jit(posz, k=k, boxsize=0. if boxsize is None else boxsize)
 
     tree = cKDTree(np.array(posz), boxsize=boxsize)
     rnn2, inn2 = tree.query(np.array(posz), k=k)

@@ -151,7 +151,7 @@ def segment_sort(key, val, isplit, smem_size=512):
 
 # =================================== User exposed functions ===================================== #
 
-def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
+def knn_old(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=max_leaf_size)
 
     il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=max_leaf_size, refine_fac=15,
@@ -160,7 +160,7 @@ def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
     rknn, iknn = ilist_knn_search(posz, spl, il, ir2l, ispl, k=k, boxsize=boxsize)
 
     return rknn, iknn
-knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])
+knn_old.jit = jax.jit(knn_old, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])
 
 def inverse_indices(iargsort):
     """Given the indices that would sort an array, return the indices that would unsort it"""
@@ -277,3 +277,19 @@ def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData
 
     return data
 prepare_knn.jit = jax.jit(prepare_knn, static_argnames=["k", "boxsize", "cfg"])
+
+def knn_z(posz, k=16, boxsize=0., cfg : KNNConfig = KNNConfig(), posz_query=None):
+    """Finds the k nearest neighbors of posz using a kNN search with interaction list
+    posz is assumed to be sorted in z-order (use "knn" if it is not)
+    """
+    data = prepare_knn_z(posz, k, boxsize=boxsize, cfg=cfg)
+    rknn, iknn = evaluate_knn_z(data, posz_query=posz_query)
+    return rknn, iknn
+knn_z.jit = jax.jit(knn_z, static_argnames=["k", "boxsize", "cfg"])
+
+def knn(pos0, k=16, boxsize=0., cfg : KNNConfig = KNNConfig(), pos_query=None):
+    """Finds the k nearest neighbors of pos0 using a kNN search with interaction list"""
+    data = prepare_knn(pos0, k, boxsize=boxsize, cfg=cfg)
+    rknn, iknn = evaluate_knn(data, pos_query=pos_query)
+    return rknn, iknn
+knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "cfg"])
