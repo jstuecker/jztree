@@ -78,11 +78,11 @@ def test_ilist_rfac(rfac):
     spl, nleaf, llvl, xleaf, numleaves = cj.knn.summarize_leaves(posz, max_size=msize)
 
     rfacA = 15
-    il, ir2l, ispl = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfacA, 
+    il, ir2l, ispl = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize, 
         refine_fac=rfacA, num_part=len(posz), k=16)
     
-    il2, ir2l2, ispl2 = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize*rfac, refine_fac=rfac,
-                                                num_part=len(posz), k=16)
+    il2, ir2l2, ispl2 = cj.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize, 
+        refine_fac=rfac, num_part=len(posz), k=16)
 
     print(jnp.where(ispl[1:numleaves] <= ispl[:numleaves-1])[0][0:10])
     assert jnp.all(ispl[1:numleaves] > ispl[:numleaves-1]), "should not have empty list for any leaf"
