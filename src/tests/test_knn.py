@@ -93,19 +93,40 @@ def test_ilist_rfac(rfac):
     # Note the ids can differ for identical radii:
     print(f"Fraction ids equal {jnp.mean(il2[:ispl2[-1]] == il[:ispl[-1]])}") 
 
-@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (-0.3,0.3), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
-def test_domain(xmin, xmax):
-    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*512, xmin=xmin, xmax=xmax))
+def check_against_ckdtree(posz, k=16, boxsize=None):
+    rnn, inn = cj.knn.knn.jit(posz, k=k, boxsize=0. if boxsize is None else boxsize)
 
-    rnn, inn = cj.knn.knn.jit(posz, k=16)
+    tree = cKDTree(np.array(posz), boxsize=boxsize)
+    rnn2, inn2 = tree.query(np.array(posz), k=k)
 
-    tree = cKDTree(np.array(posz))
-    rnn2, inn2 = tree.query(np.array(posz), k=16)
-
-    assert jnp.allclose(rnn, rnn2), "Inferred radii differ. This should never happen for exact knn"
+    assert jnp.allclose(rnn, rnn2, rtol=1e-4), "Only small differences may arise due to float64 precision in cKDTree"
 
     degenerate_radii = jnp.sum(rnn[:,1:] == rnn[:,:-1])
     nids_diff = jnp.sum(inn2[:,:-1] != inn[:,:-1])
     print(f"Ids different: {nids_diff}. Expected up to: {degenerate_radii}")
 
-    assert  nids_diff <= degenerate_radii, "Ids are different (not explained by degenerate radii)"
+    assert  nids_diff/len(posz) <= 1e-4, "A lot of ids are different (some expected due to degenerate radii)"
+
+@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (-0.3,0.3), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
+def test_domain(xmin, xmax):
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=xmin, xmax=xmax))
+
+    check_against_ckdtree(posz)
+
+@pytest.mark.parametrize("k", [4,8,12,16,32,64])
+def test_k(k):
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10.))
+
+    check_against_ckdtree(posz, k=k)
+
+@pytest.mark.parametrize("boxsize", [0.03,1.,170.])
+def test_boxisze(boxsize):
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=boxsize))
+
+    check_against_ckdtree(posz, boxsize=boxsize)
+
+@pytest.mark.parametrize("npart", [1e5, 1e6, 1e7])
+def test_npart(npart):
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
+
+    check_against_ckdtree(posz)

@@ -203,7 +203,7 @@ __global__ void KernelIlistKNN(
             // Once we encounter an interaction that is farther away than any of the current nearest 
             // neighbors, we can skip all subsequent interactions. Since the interaction lists are 
             // build on worst case assumptions, this saves a lot of time in practice!
-            bool any_accept = syncthreads_or(r2T <= nearestK.max_r2());
+            bool any_accept = syncthreads_or(r2T <= nearestK.max_r2() * (1.0f + 1e-6f));
             if(!any_accept) break;
 
             /* Now load the leaf */
