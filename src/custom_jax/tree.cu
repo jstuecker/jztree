@@ -417,14 +417,60 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
+__global__ void KernelSearchSortedZ(
+    const float3* posz_have,
+    size_t n_have,
+    const float3* posz_query,
+    size_t n_query,
+    int32_t* indices
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n_query)
+        return;
+
+    float3 xquery = posz_query[idx];
+
+    // Binary search for the indices between which xquery would need to be inserted to 
+    // maintain order
+    int imin = 0, imax = n_have;
+    while (imin+1 < imax) {
+        int itest = (imin + imax) >> 1;
+        if (z_pos_less(posz_have[itest], xquery)) {
+            imin = itest;
+        } else {
+            imax = itest;
+        }
+    }
+
+    // Generally we need to insert at imin + 1, but there are two special cases at the boundaries
+    if(imin == 0) {
+        indices[idx] = z_pos_less(posz_have[0], xquery) ? 1 : 0;
+    }
+    else if(imin == n_have - 1) {
+        indices[idx] = z_pos_less(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
+    }
+    else {
+        indices[idx] = imin + 1;
+    }
+}
 
 ffi::Error SearchSortedZHost(
     cudaStream_t stream, 
     ffi::Buffer<ffi::F32> posz_have,
     ffi::Buffer<ffi::F32> posz_query,
     ffi::ResultBuffer<ffi::S32> indices,
-    size_t block_size = 64
+    size_t block_size
 ) {
+    size_t n_have = posz_have.element_count()/3;
+    size_t n_query = posz_query.element_count()/3;
+
+    KernelSearchSortedZ<<< div_ceil(n_query, block_size), block_size, 0, stream>>>(
+        reinterpret_cast<const float3*>(posz_have.typed_data()),
+        n_have,
+        reinterpret_cast<const float3*>(posz_query.typed_data()),
+        n_query,
+        indices->typed_data()
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

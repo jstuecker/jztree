@@ -192,7 +192,9 @@ ztree_diff_level.jit = jax.jit(ztree_diff_level)
 
 
 def search_sorted_z(xz, xz_query, block_size=64):
-    """Finds the insertion indices of x in zsorted (which must be z-ordered)
+    """Finds the indices in xz where elements of xz_query would be inserted to keep order.
+    This is similar to np.searchsorted, but works for 3D points sorted in Z-order.
+    On equality maintains the rule: xz[idx] < v <= xz[idx+1]
     """
     assert xz.dtype ==  xz_query.dtype == jnp.float32
     assert xz.shape[-1] == xz_query.shape[-1] == 3
