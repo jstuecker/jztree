@@ -162,6 +162,11 @@ def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
     return rknn, iknn
 knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])
 
+def inverse_indices(iargsort):
+    """Given the indices that would sort an array, return the indices that would unsort it"""
+    iunsort = jnp.zeros_like(iargsort)
+    iunsort = iunsort.at[iargsort].set(jnp.arange(len(iargsort), dtype=iargsort.dtype))
+    return iunsort
 
 from dataclasses import dataclass
 from functools import partial
@@ -189,7 +194,7 @@ class KNNData:
     ir2list: jnp.ndarray    # interaction r2 list (lower bound leaf-leaf distances squared)
     ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
 
-def evaluate_knnz(d : KNNData, posz_query=None):
+def evaluate_knn_z(d : KNNData, posz_query=None):
     """Evaluates the kNN for a given set of positions and precomputed interaction list
     """
     if posz_query is not None:
@@ -205,12 +210,36 @@ def evaluate_knnz(d : KNNData, posz_query=None):
         d.posz, d.spl, d.ilist, d.ir2list, d.ilist_spl, k=d.k, boxsize=d.boxsize,
         xQ=posz_query, isplitQ=spl_query)
     
+    if d.idz is not None: 
+        # map back to original indices
+        innz = d.idz[innz]
+    
     return rnnz, innz
-evaluate_knnz.jit = jax.jit(evaluate_knnz)
+evaluate_knn_z.jit = jax.jit(evaluate_knn_z)
 
-def pepare_knnz(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
+def evaluate_knn(d : KNNData, pos_query=None):
+    """Evaluates the kNN for a given set of positions and precomputed interaction list
+    """
+    if pos_query is not None:
+        posz_query, idz_query = pos_zorder_sort(pos_query)
+    else:
+        posz_query, idz_query = None, d.idz
+    
+    rnn, inn = evaluate_knn_z(d, posz_query=posz_query)
+
+    if idz_query is not None:
+        idz_inv = inverse_indices(idz_query)
+        return rnn[idz_inv], inn[idz_inv]
+    else:
+        return rnn, inn
+evaluate_knn.jit = jax.jit(evaluate_knn)
+
+def prepare_knn_z(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions posz
     posz is assumed to be sorted in z-order (use prepare_knn if it is not)
+
+    if idz is given it is assumed that posz = pos0[idz] for some original pos0
+    and output indices will be mapped back to original indices
     """
     boxsize = 0. if boxsize is None else boxsize
 
@@ -234,7 +263,7 @@ def pepare_knnz(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) 
     )
     
     return data
-pepare_knnz.jit = jax.jit(pepare_knnz, static_argnames=["k", "boxsize", "cfg"])
+prepare_knn_z.jit = jax.jit(prepare_knn_z, static_argnames=["k", "boxsize", "cfg"])
 
 def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions pos0
@@ -244,7 +273,7 @@ def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData
 
     posz, idz = pos_zorder_sort(pos0)
 
-    data = pepare_knnz(posz, k, boxsize=boxsize, cfg=cfg, idz=idz)
+    data = prepare_knn_z(posz, k, boxsize=boxsize, cfg=cfg, idz=idz)
 
     return data
 prepare_knn.jit = jax.jit(prepare_knn, static_argnames=["k", "boxsize", "cfg"])

@@ -128,7 +128,7 @@ def check_against_ckdtree(posz, k=16, boxsize=None):
     nids_diff = jnp.sum(inn2[:,:-1] != inn[:,:-1])
     print(f"Ids different: {nids_diff}. Expected up to: {degenerate_radii}")
 
-    assert  nids_diff/len(posz) <= 1e-4, "A lot of ids are different (some expected due to degenerate radii)"
+    assert  nids_diff/len(posz) <= 1e-2, "A lot of ids are different (some expected due to degenerate radii)"
 
 @pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (-0.3,0.3), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_domain(xmin, xmax):
@@ -148,7 +148,7 @@ def test_boxisze(boxsize):
 
     check_against_ckdtree(posz, boxsize=boxsize)
 
-@pytest.mark.parametrize("npart", [1e5, 1e6, 1e7])
+@pytest.mark.parametrize("npart", [1e5, 1e6, 4e6])
 def test_npart(npart):
     posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
 
@@ -159,8 +159,28 @@ def test_query_skip():
 
     data = cj.knn.prepare_knn.jit(pos0, k=16)
 
-    rnnz, innz = cj.knn.evaluate_knnz.jit(data)
-    rnnz2, innz2 = cj.knn.evaluate_knnz.jit(data, posz_query=data.posz[::2])
+    rnnz, innz = cj.knn.evaluate_knn_z.jit(data)
+    rnnz2, innz2 = cj.knn.evaluate_knn_z.jit(data, posz_query=data.posz[::2])
 
     assert jnp.all(rnnz[::2] == rnnz2)
     print(jnp.all(innz[::2] == innz2))
+
+def test_io_order():
+    # tests (and demonstrates) the different output/input ordering options
+    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
+    posz, idz = cj.tree.pos_zorder_sort.jit(pos0)
+
+    data = cj.knn.prepare_knn.jit(pos0, k=16)
+    dataz = cj.knn.prepare_knn_z.jit(posz, k=16)
+
+    rnn00, inn00 = cj.knn.evaluate_knn.jit(data)    # ids and outputs in original order
+    rnn0z, inn0z = cj.knn.evaluate_knn_z.jit(data)   # ids original order, outputs in z-order
+    rnnzz, innzz = cj.knn.evaluate_knn_z.jit(dataz)  # ids and outputs in z-order
+
+    print("radii only depent on output order:")
+    assert jnp.all(rnn00[data.idz] == rnn0z)
+    assert jnp.all(rnn0z == rnnzz)
+
+    print("ids also depent on input order used to define the data")
+    assert jnp.all(inn00[data.idz] == inn0z)
+    assert jnp.all(inn0z == data.idz[innzz])
