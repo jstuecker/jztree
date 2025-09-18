@@ -8,6 +8,7 @@ from .common import conditional_callback
 jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
 jax.ffi.register_ffi_target("SummarizeLeaves", nb_tree.SummarizeLeaves(), platform="CUDA")
+jax.ffi.register_ffi_target("SearchSortedZ", nb_tree.SearchSortedZ(), platform="CUDA")
 
 def lvl_to_ext(level_binary):
     olvl, omod = level_binary//3, level_binary % 3
@@ -189,6 +190,16 @@ def ztree_diff_level(p1, p2):
     return level
 ztree_diff_level.jit = jax.jit(ztree_diff_level)
 
+
+def search_sorted_z(xz, xz_query, block_size=64):
+    """Finds the insertion indices of x in zsorted (which must be z-ordered)
+    """
+    assert xz.dtype ==  xz_query.dtype == jnp.float32
+    assert xz.shape[-1] == xz_query.shape[-1] == 3
+
+    out_type = jax.ShapeDtypeStruct((xz_query.shape[0],), jnp.int32)
+    inds = jax.ffi.ffi_call("SearchSortedZ", (out_type,))(xz, xz_query, block_size=np.uint64(block_size))[0]
+    return inds
 
 # ================================= Deprecated functions   ======================================= #
 # They will be deleted later, for now we keep them for comparison purposes

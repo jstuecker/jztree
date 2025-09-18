@@ -328,7 +328,7 @@ __global__ void KernelSummarizeLeaves(
     extern __shared__ unsigned char smem[];
     PosN*   xn = reinterpret_cast<PosN*>(smem);
     int32_t* level = reinterpret_cast<int32_t*>(xn + nload);
-    
+
     int ioff = blockIdx.x * blockDim.x - scan_size - 1;
     
     // Note: we may load some points duplicate at the boundary, but that is ok (they will have 
@@ -414,13 +414,42 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("max_size")
         .Attr<size_t>("block_size")
         .Attr<size_t>("scan_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+
+ffi::Error SearchSortedZHost(
+    cudaStream_t stream, 
+    ffi::Buffer<ffi::F32> posz_have,
+    ffi::Buffer<ffi::F32> posz_query,
+    ffi::ResultBuffer<ffi::S32> indices,
+    size_t block_size = 64
+) {
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SearchSortedZ, SearchSortedZHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::F32>>()        // posz_have
+        .Arg<ffi::Buffer<ffi::F32>>()        // posz_query
+        .Ret<ffi::Buffer<ffi::S32>>()        // indices
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
 
 
 NB_MODULE(nb_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
     m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
+    m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
     // A bunch of deprecated functions
     // m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });
     // m.def("OldI3zsort", []() { return EncapsulateFfiCall(OldI3zsort); });
