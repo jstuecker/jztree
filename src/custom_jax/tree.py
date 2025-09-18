@@ -15,8 +15,7 @@ def lvl_to_ext(level_binary):
 
 def get_node_box(x, level_binary):
     node_size = lvl_to_ext(level_binary)
-    node_cent = (jnp.floor(x / node_size) + 0.5) * node_size   # might have some round-off issues
-    # node_cent = x + (0.5 * node_size - jnp.mod(x, node_size))
+    node_cent = x + jnp.sign(x)*(0.5 * node_size - jnp.mod(jnp.abs(x), node_size))
     return node_cent, node_size
 
 def pos_zorder_sort(x, block_size=64):
@@ -88,7 +87,6 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     nleaves_filled = jnp.count_nonzero(nleaf)
     
     max_new_leaves = div_ceil(num_part, np.maximum(max_size//2, 1))
-    # print("scan size:", scan_size, max_size)
 
     assert xleaf.dtype == jnp.float32
     assert xleaf.shape[-1] == 3
@@ -110,9 +108,6 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     numleaves = jnp.count_nonzero(new_nleaf)
 
     new_leaf_cent = get_node_box(xleaf[splits[:-1]], jnp.full_like(new_leaf_lvl, new_leaf_lvl))[0]
-    # new_leaf_cent = jnp.where(jnp.arange(len(new_leaf_cent))[:,None] < numleaves, new_leaf_cent, 0.)
-
-    # assert numleaves <= max_new_leaves, "Please provide nptot if leaves are not particles"
 
     return splits, new_nleaf, new_leaf_lvl, new_leaf_cent, numleaves
 

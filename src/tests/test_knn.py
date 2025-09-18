@@ -30,9 +30,10 @@ def get_pos(N=5555, duplicate=False, xmin=0., xmax=1.):
     return pos0
 
 # @pytest.mark.parametrize("final_size", [13, 33, 64, 77, 135, 255, 256, 299, 317, 339, 411, 415, 477])
-def test_summarize_identity():
+@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (0.5,1.0), (-1, -0.5), (0, 1e6), (-1, 1), (-0.5, 1.)])
+def test_summarize_identity(xmin, xmax):
     print("")
-    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(144387, xmin=-0.5, xmax=0.5))
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(144387, xmin=xmin, xmax=xmax))
     spl, nleaf, llvl, xleaf, numleaves = cj.tree.summarize_leaves.jit(
         posz, max_size=1)
     
@@ -46,8 +47,7 @@ def test_summarize_identity():
 @pytest.mark.parametrize("final_size", [13, 33, 39, 43, 63, 64, 77, 135, 255, 256, 299, 317, 339, 411, 415, 477])
 def test_double_summarize(final_size):
     print("")
-    pos0, mass0 = get_pos(144387)
-    posz, idz = cj.tree.pos_zorder_sort.jit(pos0)
+    posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*128, xmin=0.1, xmax=0.4))
     spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = cj.tree.summarize_leaves.jit(
         posz, max_size=final_size)
 
@@ -83,7 +83,7 @@ def test_ilist_rfac(rfac):
     # Note the ids can differ for identical radii:
     print(f"Fraction ids equal {jnp.mean(il2[:ispl2[-1]] == il[:ispl[-1]])}") 
 
-@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
+@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (-0.3,0.3), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_domain(xmin, xmax):
     posz, idz = cj.tree.pos_zorder_sort.jit(get_pos(N=1024*128, xmin=xmin, xmax=xmax))
 
