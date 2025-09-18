@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import custom_jax.nb_knn as nb_knn
-from .tree import summarize_leaves, lvl_to_ext, get_node_box
+from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort
 from .common import conditional_callback
 
 jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
@@ -164,6 +164,7 @@ knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_s
 
 
 from dataclasses import dataclass
+from functools import partial
 
 @dataclass(frozen=True)
 class KNNConfig:
@@ -173,38 +174,67 @@ class KNNConfig:
     alloc_fac_nodes: float = 1.
     stop_coarsen: int = 2048
 
+@partial(jax.tree_util.register_dataclass, 
+         meta_fields=["k", "boxsize"],
+         data_fields=["posz", "idz", "spl", "ilist", "ir2list", "ilist_spl"])
 @dataclass
 class KNNData:
-    spl: jnp.ndarray
-    xleaf: jnp.ndarray
-    llvl: jnp.ndarray
-    ilist: jnp.ndarray
-    ir2list: jnp.ndarray
-    ilist_splits: jnp.ndarray
+    k : int
+    boxsize : float
 
-def evaluate_knn(KNNData):
-    # """Evaluates the kNN for a given set of positions and precomputed interaction list
-    # """
-    # if idz is None:
-    #     idz = jnp.arange(len(posz), dtype=jnp.int32)
-    # rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)
-    # iknn = idz[iknn]
-    # return rknn, iknn
-    pass
+    posz: jnp.ndarray       # z-sorted positions
+    idz: jnp.ndarray        # ids so that posz = pos0[idz]
+    spl: jnp.ndarray        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
+    ilist: jnp.ndarray      # interaction list (leaf indices)
+    ir2list: jnp.ndarray    # interaction r2 list (lower bound leaf-leaf distances squared)
+    ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
 
-
-# def pepare_knn(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig()):
-#     """Prepares a dictionary that can be used to call query_knn
-#     """
-#     boxsize = 0. if boxsize is None else boxsize
-
-#     spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(
-#         posz, max_size=cfg.max_leaf_size, alloc_fac_nodes=cfg.alloc_fac_nodes)
-
-#     il, ir2l, ispl = build_ilist_recursive(
-#         xleaf, llvl, nleaf, num_part=len(posz), k=k, boxsize=boxsize,
-#         max_size=cfg.max_leaf_size, refine_fac=cfg.rfac, alloc_fac=cfg.alloc_fac_ilist, 
-#         stop_coarsen=cfg.stop_coarsen, alloc_fac_nodes=cfg.alloc_fac_nodes)
-
-#     return spl, xleaf, llvl, il, ir2l, ispl
+def evaluate_knn(d : KNNData, pos_query=None):
+    """Evaluates the kNN for a given set of positions and precomputed interaction list
+    """
+    rnnz, innz = ilist_knn_search(
+        d.posz, d.spl, d.ilist, d.ir2list, d.ilist_spl, k=d.k, boxsize=d.boxsize)
     
+    return rnnz, innz
+evaluate_knn.jit = jax.jit(evaluate_knn)
+
+def pepare_knnz(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
+    """Prepares an instance of KNNData for a given set of positions posz
+    posz is assumed to be sorted in z-order (use prepare_knn if it is not)
+    """
+    boxsize = 0. if boxsize is None else boxsize
+
+    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(
+        posz, max_size=cfg.max_leaf_size, alloc_fac_nodes=cfg.alloc_fac_nodes)
+    
+    il, ir2l, ispl = build_ilist_recursive(
+        xleaf, llvl, nleaf, num_part=len(posz), k=k, boxsize=boxsize,
+        max_size=cfg.max_leaf_size, refine_fac=cfg.rfac, alloc_fac=cfg.alloc_fac_ilist, 
+        stop_coarsen=cfg.stop_coarsen, alloc_fac_nodes=cfg.alloc_fac_nodes)
+    
+    data = KNNData(
+        k=k,
+        boxsize=boxsize,
+        posz=posz,
+        idz=idz,
+        spl=spl,
+        ilist=il,
+        ir2list=ir2l,
+        ilist_spl=ispl
+    )
+    
+    return data
+pepare_knnz.jit = jax.jit(pepare_knnz, static_argnames=["k", "boxsize", "cfg"])
+
+def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData:
+    """Prepares an instance of KNNData for a given set of positions pos0
+    pos0 is NOT assumed to be sorted in z-order (use prepare_knnz to skip sorting)
+    """
+    boxsize = 0. if boxsize is None else boxsize
+
+    posz, idz = pos_zorder_sort(pos0)
+
+    data = pepare_knnz(posz, k, boxsize=boxsize, cfg=cfg, idz=idz)
+
+    return data
+prepare_knn.jit = jax.jit(prepare_knn, static_argnames=["k", "boxsize", "cfg"])

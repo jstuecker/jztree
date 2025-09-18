@@ -99,6 +99,7 @@ def check_against_ckdtree(posz, k=16, boxsize=None):
     tree = cKDTree(np.array(posz), boxsize=boxsize)
     rnn2, inn2 = tree.query(np.array(posz), k=k)
 
+    assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
     assert jnp.allclose(rnn, rnn2, rtol=1e-4), "Only small differences may arise due to float64 precision in cKDTree"
 
     degenerate_radii = jnp.sum(rnn[:,1:] == rnn[:,:-1])
