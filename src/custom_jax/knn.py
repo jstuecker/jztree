@@ -9,7 +9,7 @@ jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform=
 jax.ffi.register_ffi_target("ConstructIlist", nb_knn.ConstructIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", nb_knn.SegmentSort(), platform="CUDA")
 
-def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
+def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
     if xQ is None: xQ = xT
@@ -18,19 +18,17 @@ def ilist_knn_search(xT, isplitT, xleaf, lvl_leaf, ilist, ir2list, ilist_splitsB
     assert ir2list.shape == ilist.shape, "rilist must have the same shape as ilist"
 
     assert xT.dtype == xQ.dtype == jnp.float32
-    assert xT.shape[-1] == xQ.shape[-1] == xleaf.shape[-1] == 3
+    assert xT.shape[-1] == xQ.shape[-1] == 3
     assert isplitT.dtype == isplitQ.dtype == jnp.int32
-    assert lvl_leaf.dtype == ilist.dtype == ilist_splitsB.dtype == jnp.int32
+    assert ilist.dtype == ilist_splitsB.dtype == jnp.int32
     assert k in (4,8,12,16,32,64), "Only k=4,8,12,16,32,64 supported"
 
     x4a = jnp.concatenate((xT, jnp.zeros(xT.shape[:-1])[...,None]), axis=-1)
     x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)
 
-    x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
-
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
     knn = jax.ffi.ffi_call("IlistKNNSearch", (out_type, ))(
-        x4a, x4b, isplitT, isplitQ, x4leaf, ilist, ir2list, ilist_splitsB,
+        x4a, x4b, isplitT, isplitQ, ilist, ir2list, ilist_splitsB,
         boxsize=np.float32(boxsize)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
@@ -159,7 +157,7 @@ def knn(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
     il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=max_leaf_size, refine_fac=15,
                                           num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
 
-    rknn, iknn = ilist_knn_search(posz, spl, xleaf, llvl, il, ir2l, ispl, k=k, boxsize=boxsize)
+    rknn, iknn = ilist_knn_search(posz, spl, il, ir2l, ispl, k=k, boxsize=boxsize)
 
     return rknn, iknn
 knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])

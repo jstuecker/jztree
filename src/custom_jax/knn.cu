@@ -172,7 +172,6 @@ __global__ void KernelIlistKNN(
     const PosR* xQ,             // query positions
     const int* isplitT,         // leaf-ranges in A
     const int* isplitQ,         // leaf-ranges in B
-    const Node* leaves,         // binary levels of A
     const int* ilist,           // interaction list
     const float* ir2list,       // (lower) interaction rmax2
     const int* ilist_splitsQ,   // B leaf-ranges in ilist
@@ -239,19 +238,19 @@ __global__ void KernelIlistKNN(
 void launch_KernelIlistKNN(
     int k, cudaStream_t stream, int block_size, int nleavesQ, 
     const PosR* xT, const PosR* xQ,
-    const int* isplitT, const int* isplitQ, const Node* leaves,
+    const int* isplitT, const int* isplitQ,
     const int* ilist, const float* ir2list, const int* ilist_splitsQ,
     Neighbor* knn, int max_part_smem, float boxsize) {
         
     int alloc_size = max_part_smem * sizeof(Particle);
 
     switch(k) {
-        case 4: KernelIlistKNN<4><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
-        case 8: KernelIlistKNN<8><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
-        case 12: KernelIlistKNN<12><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
-        case 16: KernelIlistKNN<16><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
-        case 32: KernelIlistKNN<32><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
-        case 64: KernelIlistKNN<64><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, leaves, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
+        case 4: KernelIlistKNN<4><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
+        case 8: KernelIlistKNN<8><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
+        case 12: KernelIlistKNN<12><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
+        case 16: KernelIlistKNN<16><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
+        case 32: KernelIlistKNN<32><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
+        case 64: KernelIlistKNN<64><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;
         default:
             throw std::runtime_error("Unsupported k value in launch_KernelIlistKNN");
     }
@@ -263,7 +262,6 @@ ffi::Error HostIlistKNNSearch(
         ffi::Buffer<ffi::F32> xQ, 
         ffi::Buffer<ffi::S32> isplitT,
         ffi::Buffer<ffi::S32> isplitQ,
-        ffi::Buffer<ffi::F32> leaves,
         ffi::Buffer<ffi::S32> ilist,
         ffi::Buffer<ffi::F32> ir2list,
         ffi::Buffer<ffi::S32> ilist_splitsQ,
@@ -276,7 +274,6 @@ ffi::Error HostIlistKNNSearch(
     PosR* xAf4 = reinterpret_cast<PosR*>(xT.typed_data());
     PosR* xBf4 = reinterpret_cast<PosR*>(xQ.typed_data());
     Neighbor* knn_ptr = reinterpret_cast<Neighbor*>(knn->typed_data());
-    Node* leaves_ptr = reinterpret_cast<Node*>(leaves.typed_data());
 
     size_t block_size = 32;
     int max_part_smem = 32;
@@ -284,7 +281,7 @@ ffi::Error HostIlistKNNSearch(
     launch_KernelIlistKNN(k, stream, block_size, nleavesQ,
         xAf4, xBf4,
         isplitT.typed_data(), isplitQ.typed_data(),
-        leaves_ptr, ilist.typed_data(), ir2list.typed_data(), ilist_splitsQ.typed_data(),
+        ilist.typed_data(), ir2list.typed_data(), ilist_splitsQ.typed_data(),
         knn_ptr, max_part_smem, boxsize);
     
     cudaError_t last_error = cudaGetLastError();
@@ -303,7 +300,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::F32>>() // xQ : eval positions
         .Arg<ffi::Buffer<ffi::S32>>() // isplitT : leaf-ranges in A
         .Arg<ffi::Buffer<ffi::S32>>() // isplitQ : leaf-ranges in B
-        .Arg<ffi::Buffer<ffi::F32>>() // leaves : pos and levels of leaves
         .Arg<ffi::Buffer<ffi::S32>>() // ilist : interaction list
         .Arg<ffi::Buffer<ffi::F32>>() // ir2list : (lower) interaction rmax2
         .Arg<ffi::Buffer<ffi::S32>>() // ilist_splitsQ : leaf-ranges in ilist
