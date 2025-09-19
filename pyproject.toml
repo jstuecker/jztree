@@ -6,12 +6,25 @@ build-backend = "scikit_build_core.build"
 name = "custom-jax"
 version = "0.1.0"
 requires-python = ">=3.10"
+dependencies = [
+    "jax[cuda12]>=0.6.2",
+    "nanobind>=2.9.2",
+    "numpy>=2.2.6",
+    "scikit-build-core>=0.11.6",
+]
 #dependencies = ["jax", "ninja"]
 
 [tool.scikit-build]
 editable.rebuild = true
 editable.verbose = true
 build-dir = "build"
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.30.1",
+    "matplotlib>=3.10.6",
+    "pytest>=8.4.2",
+]
 
 [project.entry-points."fmdj.plugins"]
 custom_jax = "custom_jax.fmdj_plugin:register"

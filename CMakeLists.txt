@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.15)
 
+if(DEFINED ENV{PYTHON_EXECUTABLE} AND NOT DEFINED Python_EXECUTABLE)
+  set(Python_EXECUTABLE "$ENV{PYTHON_EXECUTABLE}" CACHE FILEPATH "Python executable to use")
+endif()
+
 project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -11,10 +15,18 @@ if (NOT CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES 86) # For now we fix this to 86, can improve this later
 endif()
 
-find_package(Python 3.11 REQUIRED COMPONENTS Interpreter Development.Module)
-find_package(nanobind CONFIG REQUIRED)
+find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
+message(STATUS "Using Python: ${Python_EXECUTABLE}")
 find_package(nanobind CONFIG REQUIRED)
 find_package(CUDAToolkit REQUIRED)
+
+if (NOT Python_Development.Module_FOUND)
+  message(FATAL_ERROR
+    "Python headers not found for ${Python_EXECUTABLE}.\n"
+    "Recommended: Use a uv-managed Python:\n"
+    "  uv python install 3.12 && uv python pin 3.12 && uv pip install -e . --no-build-isolation\n"
+  )
+endif()
 
 execute_process(
   COMMAND "${Python_EXECUTABLE}" -c "from jax import ffi; print(ffi.include_dir())"

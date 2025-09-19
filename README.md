@@ -24,3 +24,10 @@ which will properly write the used paths into 'build/compile_commands.json' so t
 
 # Other notes:
 * Probably I can remove dependence on thrust when deleting deprecated code
+
+
+# Useful commands
+#uv python install 3.12
+#uv python pin 3.12
+#uv add --dev ipykernel
+uv pip install -e . --no-build-isolation
