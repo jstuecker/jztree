@@ -113,8 +113,14 @@ def ilist_fphi(xm, isplit, interactions=None, irange=None, softening=1e-2, block
     return fphi
 ilist_fphi.defvjp(ilist_fphi_fwd, ilist_fphi_bwd)
 
-ilist_fphi_jit = jax.jit(ilist_fphi, static_argnames=("softening", "block_size", "interactions_per_block"))
+ilist_fphi.jit = jax.jit(ilist_fphi, static_argnames=("softening", "block_size", "interactions_per_block"))
 
+def dense_ilist(n, bls):
+    bls = 32
+    ispl = jnp.clip(jnp.arange(0, (n // bls) + 1) * bls, 0, n)
+    iar = jnp.arange(len(ispl)-1)
+    ilist = jnp.stack(jnp.meshgrid(iar, iar, indexing="ij"), axis=-1)
+    return ispl, ilist.reshape(-1,2)
 
 # ======= Some reference implemetations that can be used for testing =======
 
