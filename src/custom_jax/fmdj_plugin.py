@@ -1,11 +1,11 @@
-from fmdj.variants import Variant, VariantsNew as Var, VariantManagerNew, vm, has_gpu
+from fmdj.variants import Variant, V, VariantManager, vm, has_gpu
 from fmdj import config
 import custom_jax as cj
 import jax.numpy as jnp
 
 TAG = "cuda"
 
-variants = VariantManagerNew()
+variants = VariantManager()
 
 # This decorator helps to convert config parameters to keyword arguments for the functions,
 # reducing boilerplate code when connecting the variants as below.
@@ -35,10 +35,10 @@ def direct_summation_force_cj(xpart, mpart, cfg : config.Config, get_potential=F
 
 def register():
     if has_gpu():
-        variants[Var.ilist_node_to_node][TAG] = Variant(cfg_to_kwargs(cj.multipoles.ilist_node_to_node, ("p", "softening")))
-        variants[Var.ilist_leaf_to_node][TAG] = Variant(cfg_to_kwargs(cj.multipoles.ilist_leaf_to_node, ("p", "softening")))
-        variants[Var.ilist_leaf_to_leaf][TAG] = Variant(_ilist_leaf_to_leaf_cj)
-        variants[Var.direct_summation_force][TAG] = Variant(direct_summation_force_cj)
+        variants[V.ilist_node_to_node][TAG] = Variant(cfg_to_kwargs(cj.multipoles.ilist_node_to_node, ("p", "softening")))
+        variants[V.ilist_leaf_to_node][TAG] = Variant(cfg_to_kwargs(cj.multipoles.ilist_leaf_to_node, ("p", "softening")))
+        variants[V.ilist_leaf_to_leaf][TAG] = Variant(_ilist_leaf_to_leaf_cj)
+        variants[V.direct_summation_force][TAG] = Variant(direct_summation_force_cj)
 
         vm.register_variants(variants)
         print("Custom Jax Plugin registered!")
