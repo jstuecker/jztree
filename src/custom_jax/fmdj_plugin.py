@@ -23,12 +23,12 @@ def _ilist_leaf_to_leaf_cj(xpart, mpart, leaf_bounds, interactions, irange, cfg 
     xm = jnp.concatenate([xpart, mpart[:, None]], axis=-1)
     return cj.forces.ilist_fphi(xm, leaf_bounds, jnp.abs(interactions), irange, softening=cfg.softening)[...,3]
 
-def direct_summation_force_cj(xpart, mpart, cfg : config.Config, get_potential=False):
+def direct_summation_force_cj(xpart, mpart, cfg : config.Config):
     ispl, ilist = cj.forces.dense_ilist(len(xpart), bls=64)
     xm = jnp.concatenate([xpart, mpart[:,None]], axis=1)
     fphi = cj.forces.ilist_fphi.jit(xm, ispl, ilist, softening=cfg.softening, block_size=64, interactions_per_block=16)
 
-    if get_potential:
+    if cfg.get_potential:
         return fphi[..., :3], fphi[..., 3]
     else:
         return fphi[..., :3]
