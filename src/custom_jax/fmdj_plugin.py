@@ -27,6 +27,7 @@ def direct_summation_force_cj(xpart, mpart, cfg : config.Config):
     ispl, ilist = cj.forces.dense_ilist(len(xpart), bls=64)
     xm = jnp.concatenate([xpart, mpart[:,None]], axis=1)
     fphi = cj.forces.ilist_fphi.jit(xm, ispl, ilist, softening=cfg.softening, block_size=64, interactions_per_block=16)
+    fphi = cfg.G() * fphi
 
     if cfg.get_potential:
         return fphi[..., :3], fphi[..., 3]
