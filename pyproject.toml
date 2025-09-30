@@ -1,5 +1,5 @@
 [build-system]
-requires = ["nanobind", "jax>=0.4.31", "scikit-build-core"]
+requires = ["nanobind", "jax[cuda13]", "nvidia-cuda-cccl>=13.0.0", "scikit-build-core", "nanobind>=2.9.2"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -7,16 +7,12 @@ name = "custom-jax"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "jax[cuda13]>=0.6.2",
-    "nanobind>=2.9.2",
+    "jax[cuda13]",
     "numpy>=2.2.6",
-    "nvidia-cuda-cccl>=13.0.85",
-    "scikit-build-core>=0.11.6",
 ]
-#dependencies = ["jax", "ninja"]
 
 [tool.scikit-build]
-editable.rebuild = true
+#editable.rebuild = true
 editable.verbose = true
 build-dir = "build"
 logging.level = "INFO"

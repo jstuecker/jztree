@@ -8,7 +8,6 @@ endif()
 
 find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development.Module)
 message(STATUS "Using Python: ${Python_EXECUTABLE}")
-find_package(nanobind CONFIG REQUIRED)
 
 if (NOT Python_Development.Module_FOUND)
   message(FATAL_ERROR
@@ -18,12 +17,24 @@ if (NOT Python_Development.Module_FOUND)
   )
 endif()
 
+execute_process(
+  COMMAND "${Python_EXECUTABLE}" -c "from nvidia import cu13; print(next(iter(cu13.__path__)))"
+  OUTPUT_VARIABLE CUDA_ROOT
+  ERROR_VARIABLE CUDA_PATH_ERR
+  RESULT_VARIABLE CUDA_PATH_RESULT
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+message(STATUS "Using a python installed cuda directory: ${CUDA_ROOT}")
+if(NOT CUDA_PATH_RESULT EQUAL 0)
+  message(FATAL_ERROR "Could not find python cuda directory: ${CUDA_PATH_ERR}")
+endif()
+
 # ================ Next we will try to set up CUDA paths from a python environment  ================
 # (if possible ---- otherwise default to CMake)
-if(DEFINED ENV{CUDA_ROOT})
+if(DEFINED CUDA_ROOT)
   message(STATUS "Using python/CUDA setup from: $ENV{CUDA_ROOT}")
 
-  set(_cuda_root "$ENV{CUDA_ROOT}")
+  set(_cuda_root "${CUDA_ROOT}")
   set(_cuda_bin   "${_cuda_root}/bin")
   set(_cuda_lib   "${_cuda_root}/lib")
   set(_cuda_inc   "${_cuda_root}/include")
@@ -58,6 +69,8 @@ endif()
 
 # Now let Cmake detect CUDA
 project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX CUDA)
+
+find_package(nanobind CONFIG REQUIRED)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
