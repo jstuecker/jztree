@@ -7,9 +7,10 @@ name = "custom-jax"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "jax[cuda12]>=0.6.2",
+    "jax[cuda13]>=0.6.2",
     "nanobind>=2.9.2",
     "numpy>=2.2.6",
+    "nvidia-cuda-cccl>=13.0.85",
     "scikit-build-core>=0.11.6",
 ]
 #dependencies = ["jax", "ninja"]
@@ -18,6 +19,7 @@ dependencies = [
 editable.rebuild = true
 editable.verbose = true
 build-dir = "build"
+logging.level = "INFO"
 
 [dependency-groups]
 dev = [
