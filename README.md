@@ -19,6 +19,10 @@ nvidia-smi
 ```bash
 pip install .
 ```
+To check whether the installation was successful, run
+```
+python src/benchmarks/hello_world.py
+```
 (Note: Installation speed my be significantly higher with [uv pip](https://docs.astral.sh/uv/) )
 ### Editable installation
 If you want to edit source files, it is recommended that you install like this:
