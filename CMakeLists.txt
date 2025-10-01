@@ -26,12 +26,10 @@ execute_process(
 )
 message(STATUS "Using a python installed cuda directory: ${CUDA_ROOT}")
 if(NOT CUDA_PATH_RESULT EQUAL 0)
-  message(FATAL_ERROR "Could not find python cuda directory: ${CUDA_PATH_ERR}")
-endif()
-
-# ================ Next we will try to set up CUDA paths from a python environment  ================
-# (if possible ---- otherwise default to CMake)
-if(DEFINED CUDA_ROOT)
+  message(WARNING "Could not find python cuda directory - I will assume a system or conda/miniforge" 
+          "-managed installation ") # ${CUDA_PATH_ERR}
+else()
+  # CUDA_ROOT defined via python we will try to set up CUDA paths from a python environment 
   message(STATUS "Using python/CUDA setup from: $ENV{CUDA_ROOT}")
 
   set(_cuda_root "${CUDA_ROOT}")
@@ -63,9 +61,25 @@ if(DEFINED CUDA_ROOT)
   # Need to define the link directory explicitly here so that ninja finds it
   add_link_options(-L${_cuda_root}/lib)
   add_link_options(-L${_cuda_root}/lib64)
-else()
-  message(STATUS "Trying to let cmake detect system CUDA installation")
 endif()
+
+# Somehow some conda environments like to put the env. variable NVCC_PREPEND_FLAGS to "UNSET" 
+# which confuses nvcc. Let's undefine it explicitly in that case:
+# if(DEFINED ENV{NVCC_PREPEND_FLAGS} AND "$ENV{NVCC_PREPEND_FLAGS}" STREQUAL "UNSET")
+#   message(STATUS "Clearing environment NVCC_PREPEND_FLAGS which was set to '$ENV{NVCC_PREPEND_FLAGS}'")
+#   set(ENV{NVCC_PREPEND_FLAGS} "")
+# endif()
+
+# Somehow some conda environments like to put the env. variable NVCC_PREPEND_FLAGS and/or
+# NVCC_PREPEND_FLAGS_BACKUP to "UNSET" which confuses nvcc. 
+# Let's undefine these explicitly in that case:
+foreach(var IN ITEMS NVCC_PREPEND_FLAGS NVCC_PREPEND_FLAGS_BACKUP)
+  if(DEFINED ENV{${var}} AND "$ENV{${var}}" STREQUAL "UNSET")
+    message(STATUS "Clearing environment ${var} which was 'UNSET'")
+    # CMake can't "unset" ENV vars, but setting to empty is equivalent for nvcc
+    set(ENV{${var}} "")
+  endif()
+endforeach()
 
 # Now let Cmake detect CUDA
 project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX CUDA)
