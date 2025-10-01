@@ -1,21 +1,30 @@
 [build-system]
-requires = ["nanobind", "jax[cuda13]", "nvidia-cuda-cccl>=13.0.0", "scikit-build-core", "nanobind>=2.9.2"]
 build-backend = "scikit_build_core.build"
+requires = ["scikit-build-core>=0.11", "nanobind>=2.9.2"]
 
 [project]
 name = "custom-jax"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
-    "jax[cuda13]",
+    "jax",
     "numpy>=2.2.6",
 ]
 
 [tool.scikit-build]
-#editable.rebuild = true
-editable.verbose = true
 build-dir = "build"
 logging.level = "INFO"
+build.requires = ["jax[cuda13]", "nvidia-cuda-cccl>=13.0.0"]
+
+[[tool.scikit-build.overrides]]
+# When the environment variable CUDA_LOCAL is set to true, we assume that CUDA is installed
+# and can be found by CMake. In that case we do not need to require a python installed CUDA13
+if.env.CUDA_LOCAL = true
+build.requires = ["jax"]
+# if installed with -e, we want to rebuild on each import
+if.state = "editable"
+editable.rebuild = true
+editable.verbose = true
 
 [dependency-groups]
 dev = [
