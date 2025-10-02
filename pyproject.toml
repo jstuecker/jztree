@@ -12,6 +12,7 @@ dependencies = [
 ]
 
 [tool.scikit-build]
+cmake.version = ">=3.24"
 build-dir = "build"
 logging.level = "INFO"
 build.requires = ["jax[cuda13]", "nvidia-cuda-cccl>=13.0.0"]

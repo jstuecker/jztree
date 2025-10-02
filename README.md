@@ -65,7 +65,7 @@ pip install -e . --no-build-isolation
 ```
 Note that the editable installation will be rebuild automatically on module load, so that it is not necessary to invoke install again whenever a .cu file changes (it will take a couple of seconds though). However, for this to work properly I found it necessary to use --no-build-isolation. For the "--no-build-isolation" flag to work, it is necessary that the build dependencies are installed separately. You should be able to achieve this by installing these in advance, e.g.
 ```bash
-pip install scikit-build-core nanobind jax[cuda13]
+pip install nvidia-cuda-cccl>=13.0.0 scikit-build-core nanobind jax[cuda13]
 ```
 or similar, depending on your setup.
 

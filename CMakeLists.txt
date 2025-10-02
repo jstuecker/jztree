@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.24)
 
 # ================== Make sure we have a valid python interpreter =================================
 # (We need it to define some paths)
@@ -63,13 +63,6 @@ else()
   add_link_options(-L${_cuda_root}/lib64)
 endif()
 
-# Somehow some conda environments like to put the env. variable NVCC_PREPEND_FLAGS to "UNSET" 
-# which confuses nvcc. Let's undefine it explicitly in that case:
-# if(DEFINED ENV{NVCC_PREPEND_FLAGS} AND "$ENV{NVCC_PREPEND_FLAGS}" STREQUAL "UNSET")
-#   message(STATUS "Clearing environment NVCC_PREPEND_FLAGS which was set to '$ENV{NVCC_PREPEND_FLAGS}'")
-#   set(ENV{NVCC_PREPEND_FLAGS} "")
-# endif()
-
 # Somehow some conda environments like to put the env. variable NVCC_PREPEND_FLAGS and/or
 # NVCC_PREPEND_FLAGS_BACKUP to "UNSET" which confuses nvcc. 
 # Let's undefine these explicitly in that case:
@@ -92,7 +85,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # To simplify finding paths in vscode
 
 if (NOT CMAKE_CUDA_ARCHITECTURES)
   message(STATUS "Defaulting to native CUDA artchitecture")
-  set(CMAKE_CUDA_ARCHITECTURES 86) # For now we fix this to 86, can improve this later
+  set(CMAKE_CUDA_ARCHITECTURES native)
 endif()
 
 # Find FFI Paths
