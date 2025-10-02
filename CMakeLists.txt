@@ -54,8 +54,8 @@ else()
     set(ENV{LIBRARY_PATH} "${_cuda_lib}")
   endif()
 
-  set(CMAKE_CUDA_RUNTIME_LIBRARY Static)   # modern CMake
-  set(CUDA_USE_STATIC_CUDA_RUNTIME ON)     # legacy toggle that some logic still checks
+  set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
+  set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
 
   include_directories(SYSTEM "${_cuda_root}/include" "${_cuda_root}/include/cccl")
   # Need to define the link directory explicitly here so that ninja finds it
@@ -83,8 +83,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # To simplify finding paths in vscode
 
-if (NOT CMAKE_CUDA_ARCHITECTURES)
-  message(STATUS "Defaulting to native CUDA artchitecture")
+if(DEFINED ENV{CUDAARCHS})
+  message(STATUS "User provided CUDAARCHS env: '$ENV{CUDAARCHS}'")
+  message(STATUS "CMAKE_CUDA_ARCHITECTURES: '${CMAKE_CUDA_ARCHITECTURES}'")
+else()
+  message(STATUS "Using native CUDA artchitecture")
   set(CMAKE_CUDA_ARCHITECTURES native)
 endif()
 

@@ -71,9 +71,14 @@ or similar, depending on your setup.
 
 ### uv
 If you want to reconstruct the exact virtual environment that the code was developed in, you can use
-```
+```bash
 uv sync
 source .venv/bin/activate   # optionally activate the created environment
+```
+### CUDA Architectures
+By default code will be compiled only for the native architecture on the compiling system. However, to use custom defined architectures you can define the CUDAARCHS environment variable to override this behaviour. E.g:
+```bash
+CUDAARCHS="75;80;86;87;89" uv pip install .
 ```
 
 # Useufl links
