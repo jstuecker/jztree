@@ -30,7 +30,7 @@ def pos_zorder_sort(x, block_size=64):
     # This is a guess, how much a temporary storage in cub::DeviceMergeSort::SortKeys requires
     # If we estimate too little, an error will be thrown from the C++ code:
     tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), 4), jnp.int32)
-    isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type))(x, block_size=np.uint64(block_size))[0]
+    isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type), vmap_method="sequential")(x, block_size=np.uint64(block_size))[0]
 
     pos = isort[:, :3].view(jnp.float32)
     ids = isort[:, 3].view(jnp.int32)
@@ -106,7 +106,7 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
 
     out_splits_type = jax.ShapeDtypeStruct((xnleaf.shape[0]+1,), jnp.int32)
 
-    flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,))(
+    flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,), vmap_method="sequential")(
         xnleaf, nleaves_filled, max_size=np.uint64(max_size),
         block_size=np.uint64(block_size), scan_size=np.uint64(scan_size))[0]
 
