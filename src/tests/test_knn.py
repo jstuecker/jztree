@@ -22,8 +22,8 @@ def test_segment_sort():
     print(f"Ids different {jnp.sum(inew != inew2)}/{len(inew)} (this is ok, if radii are identical):")
     assert jnp.all(rnew == r[inew2])
 
-def get_pos(N=5555, duplicate=False, xmin=0., xmax=1.):
-    pos0 = jax.random.uniform(jax.random.PRNGKey(1), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)
+def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
+    pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)
     if duplicate:
         pos0 = jnp.concatenate((pos0, pos0, pos0, pos0))
     
@@ -200,6 +200,22 @@ def test_twice_knn():
 
     assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
 
+def test_twice_query():
+    """Test that running the knn twice works. (Might fail with stream capture problems.)"""
+    pos0 = get_pos(1024*128, xmin=0., xmax=1.0, seed=1)
+    posa = get_pos(1024*32, xmin=0., xmax=1.0, seed=2)
+    posb = get_pos(1024*32, xmin=0., xmax=1.0, seed=3)
+
+    def twice_knn(pos0, posa, posb):
+        rnna, inn = cj.knn.knn(pos0, k=16, pos_query=posa)
+        rnnb, inn = cj.knn.knn(pos0, k=16, pos_query=posb)
+        return 0.5*(rnna+rnnb), inn
+    twice_knn.jit = jax.jit(twice_knn)
+
+    rnn, inn = twice_knn.jit(pos0, posa, posb)
+
+    assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
+
 def test_scan_knn():
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
 
@@ -213,6 +229,20 @@ def test_scan_knn():
     rmean2 = jnp.mean(cj.knn.knn(pos, k=16)[0])
 
     assert jnp.allclose(rmean, rmean2)
+
+def test_scan_query():
+    pos0 = get_pos(1024*128, xmin=0., xmax=1.0, seed=1)
+    posa = get_pos(1024*32, xmin=0., xmax=1.0, seed=2)
+    posb = get_pos(1024*32, xmin=0., xmax=1.0, seed=3)
+
+    def myknn(carry, i):
+        pos0, posa, posb = carry
+        rnna, inna = cj.knn.knn(pos0, k=16, pos_query=posa)
+        rnnb, innb = cj.knn.knn(pos0, k=16, pos_query=posb)
+        return (pos0+rnna[0,0], posa+rnnb[0,0], posb+rnnb[0,0]), jnp.mean(rnna + rnnb)
+    # myknn.jit = jax.jit(myknn)
+
+    res, rmean = jax.lax.scan(myknn, (pos0, posa, posb), jnp.arange(0,10))
 
 def test_vmap_knn():
     """This fails so far, because of the conditional io_callback based error handling."""
