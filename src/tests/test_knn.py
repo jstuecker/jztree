@@ -184,3 +184,47 @@ def test_io_order():
     print("ids also depent on input order used to define the data")
     assert jnp.all(inn00[data.idz] == inn0z)
     assert jnp.all(inn0z == data.idz[innzz])
+
+def test_twice_knn():
+    """Test that running the knn twice works. (Might fail with stream capture problems.)"""
+    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
+
+    def twice_knn(pos0):
+        rnn, inn = cj.knn.knn(pos0, k=16)
+        pos0 = pos0 + rnn[:,0:1] * 1e-3 # Basically adds zero, since nearest neighbor distance is 0
+        rnn, inn = cj.knn.knn(pos0, k=16)
+        return rnn, inn
+    twice_knn.jit = jax.jit(twice_knn)
+
+    rnn, inn = twice_knn.jit(pos0)
+
+    assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
+
+def test_scan_knn():
+    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
+
+    def myknn(pos0, i):
+        rnn, inn = cj.knn.knn(pos0, k=16)
+        return pos0+1e-3, jnp.mean(rnn)
+    myknn.jit = jax.jit(myknn)
+
+    pos, rmean = jax.lax.scan(myknn, pos0, jnp.arange(0,10))
+
+    rmean2 = jnp.mean(cj.knn.knn(pos, k=16)[0])
+
+    assert jnp.allclose(rmean, rmean2)
+
+def test_vmap_knn():
+    """This fails so far, because of the conditional io_callback based error handling."""
+    # Not sure whether I want to support vmap... 
+    # It doesn't make too much sense for a knn anyways
+    pos0 = jax.random.uniform(jax.random.PRNGKey(1), (10, 1024*8,3), dtype=jnp.float32, minval=0., maxval=1.)
+
+    def myknn(pos0):
+        rnn, inn = cj.knn.knn(pos0, k=16)
+        return rnn, inn
+    myknn.jit = jax.jit(myknn)
+
+    rnn, inn = jax.vmap(myknn.jit)(pos0)
+
+    assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
