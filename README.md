@@ -67,12 +67,12 @@ Note that the editable installation will be rebuild automatically on module load
 ```bash
 pip install nvidia-cuda-cccl>=13.0.0 scikit-build-core nanobind jax[cuda13]
 ```
-or similar, depending on your setup.
+or similar, depending on your setup. Also a system or conda installed version of cmake may be required.
 
 ### uv
-If you want to reconstruct the exact virtual environment that the code was developed in, you can use
+If you want to reconstruct the exact virtual environment that the code was developed in, you will need a GPU and GPU-driver that are CUDA13 compatible. If you do, you can use [uv](https://docs.astral.sh/uv/) as follows:
 ```bash
-uv sync
+uv sync --group dev
 source .venv/bin/activate   # optionally activate the created environment
 ```
 ### CUDA Architectures
