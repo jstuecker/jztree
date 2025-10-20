@@ -77,6 +77,7 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     if ref_fac is None:
         scan_size = max(max_size + 1, 16)
     else:
+        assert len(xleaf) < num_part, "Don't specify ref_fac at lowest level"
         # Haven't perfectly understood yet, what scan_size is needed in the worst case...
         # In principle ref_fac + 2 should be enough, but I guess some rounding errors in the
         # ref_fac corrupt this sometimes (?) for now let's leave a bit slack
@@ -109,6 +110,9 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,), vmap_method="sequential")(
         xnleaf, nleaves_filled, max_size=np.uint64(max_size),
         block_size=np.uint64(block_size), scan_size=np.uint64(scan_size))[0]
+    
+    # print(flag_split)
+    # print(np.min(flag_split[flag_split>-1000]))
 
     # Get the splitting points of leaves
     splits = jnp.where(flag_split > -1000, size=max_new_leaves+1, fill_value=nleaves_filled)[0]
