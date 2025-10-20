@@ -399,7 +399,127 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+
+template<int p>
+__global__ void MultipolesFromParticlesKernel(
+    const int* __restrict__ isplit,
+    const float4* __restrict__ part_posm,
+    float* __restrict__ mp_out
+) {
+
+
+    constexpr int ncomb = NCOMB(p);
+
+    int inode = blockIdx.x;
+    // int ipart_start = isplit[inode];
+    // int ipart_end = isplit[inode + 1];
+
+    // float Mp[ncomb];
+    // #pragma unroll
+    // for (int iM=0; iM < ncomb; iM++) {
+    //     Mp[iM] = 0.0f;
+    // }
+
+    // for (int ipart = ipart_start + threadIdx.x; ipart < ipart_end; ipart += blockDim.x) {
+    //     float4 posm = part_posm[ipart];
+    //     float mx = posm.w;
+    //     float3 dpos = {posm.x, posm.y, posm.z};
+
+    //     int kflat = 0;
+    //     #pragma unroll
+    //     for(int ksum = 0; ksum <= p; ksum++) {
+    //         #pragma unroll
+    //         for(int kz = 0; kz <= ksum; kz++) {
+    //             #pragma unroll
+    //             for(int ky = 0; ky <= ksum - kz; ky++) {
+    //                 const int kx = ksum - ky - kz;
+    //                 float Mnew = mx;
+    //                 Mnew *= powf(dpos.x, kx);
+    //                 Mnew *= powf(dpos.y, ky);
+    //                 Mnew *= powf(dpos.z, kz);
+
+    //                 atomicAdd(&Mp[kflat], Mnew);
+    //                 kflat += 1;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // // Write output
+    // for (int iM=0; iM < ncomb; iM++) {
+    //     mp_out[inode * ncomb + iM] = Mp[iM];
+    // }
+
+    for (int iM=0; iM < ncomb; iM++) {
+        mp_out[inode * ncomb + iM] = iM;
+    }
+}
+
+
+void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
+    const int *isplit, const float4 *part_posm, float *mp_out) {
+    // This launch mechanic is needed so that p can be treated as a compile time constant
+    // I wish there was a simpler way...
+    switch(p) {
+        case 1: MultipolesFromParticlesKernel<1><<<grid_size, block_size, 0, stream>>>(
+            isplit, part_posm, mp_out); break;
+        case 2: MultipolesFromParticlesKernel<2><<<grid_size, block_size, 0, stream>>>(
+            isplit, part_posm, mp_out); break;
+        case 3: MultipolesFromParticlesKernel<3><<<grid_size, block_size, 0, stream>>>(
+            isplit, part_posm, mp_out); break;
+        case 4: MultipolesFromParticlesKernel<4><<<grid_size, block_size, 0, stream>>>(
+            isplit, part_posm, mp_out); break;
+        case 5: MultipolesFromParticlesKernel<5><<<grid_size, block_size, 0, stream>>>(
+            isplit, part_posm, mp_out); break;
+        case 6: MultipolesFromParticlesKernel<6><<<grid_size, block_size, 0, stream>>>(
+            isplit, part_posm, mp_out); break;
+
+        default: throw std::runtime_error("Unsupported p value for MultipolesFromParticlesKernel"); break;
+    }
+}
+
+
+ffi::Error MultipolesFromParticlesHost(
+    cudaStream_t stream,
+    ffi::Buffer<ffi::S32> isplit,
+    ffi::Buffer<ffi::F32> part_posm,
+    ffi::ResultBuffer<ffi::F32> mp_out, 
+    size_t p,
+    size_t block_size
+)  {
+    size_t nleafs = isplit.element_count() - 1;
+    size_t grid_size = nleafs;
+
+    float4* part_posm_float4 = reinterpret_cast<float4*>(part_posm.typed_data());
+
+
+    launch_MultipolesFromParticlesKernel(p, grid_size, block_size, stream, 
+        isplit.typed_data(), part_posm_float4, 
+        mp_out->typed_data());
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    MultipolesFromParticles, MultipolesFromParticlesHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::S32>>()     // isplit
+        .Arg<ffi::Buffer<ffi::F32>>()     // part.posm
+        .Ret<ffi::Buffer<ffi::F32>>()     // mp output
+        .Attr<size_t>("p")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
+
+
+
 NB_MODULE(nb_multipoles, m) {
     m.def("ilist_m2l", []() { return EncapsulateFfiCall(IlistM2L); });
     m.def("ilist_leaf2node_m2l", []() { return EncapsulateFfiCall(IlistLeaf2NodeM2L); });
+    m.def("multipoles_from_particles", []() { return EncapsulateFfiCall(MultipolesFromParticles); });
 }
