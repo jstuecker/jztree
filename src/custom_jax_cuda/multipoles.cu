@@ -42,6 +42,27 @@ __device__ __forceinline__ float get_xk(const float3& x, int k) {
     return (k == 0) ? x.x : (k == 1 ? x.y : x.z);
 }
 
+__host__ __device__ __forceinline__
+float powi_upto6(float x, int n) {
+    if (n < 0) {               // optional: handle negatives
+        int m = -n;
+        float y = powi_upto6(x, m);
+        return 1.0f / y;
+    }
+
+    switch (n) {
+        case 0: return 1.0f;
+        case 1: return x;
+        case 2: return x * x;
+        case 3: { float x2 = x * x; return x2 * x; }
+        case 4: { float x2 = x * x; return x2 * x2; }
+        case 5: { float x2 = x * x; float x4 = x2 * x2; return x4 * x; }
+        case 6: { float x2 = x * x; float x3 = x2 * x; return x3 * x3; }
+        default: // fallback if someone passes >6
+            return powf(x, (float)n);
+    }
+}
+
 __device__ __forceinline__ float fact_upto6f(unsigned k) {
     float f = 1.f;
     f *= (k >= 2) ? 2.f : 1.f;
@@ -50,6 +71,15 @@ __device__ __forceinline__ float fact_upto6f(unsigned k) {
     f *= (k >= 5) ? 5.f : 1.f;
     f *= (k >= 6) ? 6.f : 1.f;
     return f;
+}
+
+__device__ __forceinline__ float binomial(unsigned n, unsigned k) {
+    if (k > n) return 0.f;
+    float res = 1.f;
+    for (unsigned i = 1; i <= k; i++) {
+        res *= float(n - (k - i)) / float(i);
+    }
+    return res;
 }
 
 __device__ __forceinline__ float fact3f(unsigned kx, unsigned ky, unsigned kz) {
@@ -403,29 +433,33 @@ __global__ void MultipolesFromParticlesKernel(
 }
 
 template<int p>
-__inline__ __device__ void shift_multipoles(float *mp, float *mp_tmp, float3 dpos) {
-    // int kflat = 0;
-    // int iflat = 0;
-    // #pragma unroll
-    // for(int ksum = 0; ksum <= p; ksum++) {
-    //     #pragma unroll
-    //     for(int kz = 0; kz <= ksum; kz++) {
-    //         #pragma unroll
-    //         for(int ky = 0; ky <= ksum - kz; ky++) {
-    //             const int kx = ksum - ky - kz;
-    //             #pragma unroll
-    //             for(int i = 0; i <= kx; i++) {
-    //                 float coeff = 1.f; //
-    //                 mp_tmp[iflat] = 0.f;
-    //                 iflat += 1;
-    //             }
-    //         }
-    //     }
-    // }
+__inline__ __device__ void shift_multipoles(float *mp, float *mp_out, float3 dpos) {
+    int iflat = 0;
+    #pragma unroll
+    for(int ksum = 0; ksum <= p; ksum++) {
+        #pragma unroll
+        for(int kz = 0; kz <= ksum; kz++) {
+            #pragma unroll
+            for(int ky = 0; ky <= ksum - kz; ky++) {
+                const int kx = ksum - ky - kz;
 
-    for(int i=0; i < NCOMB(p); i++) {
-        mp_tmp[i] = mp[i];
+                float mnew = 0.f;
+                #pragma unroll
+                for(int i = 0; i <= kx; i++) {
+                    float coeff = binomial(kx, i);
+                    mnew += coeff * powi_upto6(dpos.x, kx - i) * mp[multi_to_flat(i, ky, kz)];
+                }
+
+                mp_out[iflat] = mnew;
+                iflat += 1;
+            }
+        }
     }
+
+
+    // for(int i=0; i < NCOMB(p); i++) {
+    //     mp_out[i] = mp[i];
+    // }
 }
 
 
@@ -490,9 +524,9 @@ __global__ void CoarsenMultipolesKernel(
     for (int ioff = istart; ioff < iend; ioff += blockDim.x) {
         int index = ioff + threadIdx.x;
         // compute displacement from child center to inode com
-        float dx = xcent[index].x - com.x;
-        float dy = xcent[index].y - com.y;
-        float dz = xcent[index].z - com.z;
+        // float dx = com.x - xcent[index].x;
+        // float dy = com.y - xcent[index].y;
+        float3 dpos = make_float3(com.x-xcent[index].x, com.y-xcent[index].y, com.z-xcent[index].z);
 
         // load source multipoles
         // compute shifted multipoles into a small stack array
@@ -504,11 +538,10 @@ __global__ void CoarsenMultipolesKernel(
             else
                 src[i] = 0.f;
         }
-            
 
         float moved[NCOMB(p)];
         
-        shift_multipoles<p>(src, moved, make_float3(dx, dy, dz));
+        shift_multipoles<p>(src, moved, dpos);
 
         for(int iM=4; iM < ncomb; iM++) {
             float val = moved[iM];
@@ -517,42 +550,6 @@ __global__ void CoarsenMultipolesKernel(
                 atomicAdd(&mp[iM], sum);
             }
         }
-
-        // Precompute powers of -dx, -dy, -dz up to p
-        // float px[7]; float py[7]; float pz[7];
-        // px[0] = py[0] = pz[0] = 1.f;
-        // float ndx = -dx, ndy = -dy, ndz = -dz;
-        // for (int t = 1; t <= p; ++t) {
-        //     px[t] = px[t-1] * ndx;
-        //     py[t] = py[t-1] * ndy;
-        //     pz[t] = pz[t-1] * ndz;
-        // }
-
-        // // For each target multi-index compute shifted value
-        // int dst_idx = 0;
-        // for (int a = 0; a <= p; ++a) {
-        //     for (int b = 0; b <= p - a; ++b) {
-        //         for (int c = 0; c <= p - a - b; ++c) {
-        //             float acc = 0.f;
-        //             for (int i = 0; i <= a; ++i) {
-        //                 for (int j = 0; j <= b; ++j) {
-        //                     for (int k = 0; k <= c; ++k) {
-        //                         int src_idx = multi_to_flat(i, j, k);
-        //                         // binomial coefficients via factorial helper
-        //                         float bin = fact_upto6f(a) / (fact_upto6f(i) * fact_upto6f(a - i));
-        //                         bin *= fact_upto6f(b) / (fact_upto6f(j) * fact_upto6f(b - j));
-        //                         bin *= fact_upto6f(c) / (fact_upto6f(k) * fact_upto6f(c - k));
-
-        //                         acc += bin * px[a - i] * py[b - j] * pz[c - k] * src[src_idx];
-        //                     }
-        //                 }
-        //             }
-        //             // accumulate into global output
-        //             atomicAdd(&mp_out[inode * ncomb + dst_idx], acc);
-        //             dst_idx += 1;
-        //         }
-        //     }
-        // }
     }
     __syncthreads();
 
