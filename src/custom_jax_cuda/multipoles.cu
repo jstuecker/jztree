@@ -434,6 +434,8 @@ __global__ void MultipolesFromParticlesKernel(
 
 template<int p>
 __inline__ __device__ void shift_multipoles(float *mp, float *mp_out, float3 dpos) {
+
+    // Shift in x
     int iflat = 0;
     #pragma unroll
     for(int ksum = 0; ksum <= p; ksum++) {
@@ -455,11 +457,51 @@ __inline__ __device__ void shift_multipoles(float *mp, float *mp_out, float3 dpo
             }
         }
     }
+        
+    // Shift in y
+    iflat = 0;
+    #pragma unroll
+    for(int ksum = 0; ksum <= p; ksum++) {
+        #pragma unroll
+        for(int kz = 0; kz <= ksum; kz++) {
+            #pragma unroll
+            for(int ky = 0; ky <= ksum - kz; ky++) {
+                const int kx = ksum - ky - kz;
 
+                float mnew = 0.f;
+                #pragma unroll
+                for(int j = 0; j <= ky; j++) {
+                    float coeff = binomial(ky, j);
+                    mnew += coeff * powi_upto6(dpos.y, ky - j) * mp_out[multi_to_flat(kx, j, kz)];
+                }
 
-    // for(int i=0; i < NCOMB(p); i++) {
-    //     mp_out[i] = mp[i];
-    // }
+                mp[iflat] = mnew;
+                iflat += 1;
+            }
+        }
+    }
+
+    // Shift in z
+    iflat = 0;
+    #pragma unroll
+    for(int ksum = 0; ksum <= p; ksum++) {
+        #pragma unroll
+        for(int kz = 0; kz <= ksum; kz++) {
+            #pragma unroll
+            for(int ky = 0; ky <= ksum - kz; ky++) {
+                const int kx = ksum - ky - kz;
+                float mnew = 0.f;
+                #pragma unroll
+                for(int l = 0; l <= kz; l++) {
+                    float coeff = binomial(kz, l);
+                    mnew += coeff * powi_upto6(dpos.z, kz - l) * mp[multi_to_flat(kx, ky, l)];
+                }
+
+                mp_out[iflat] = mnew;
+                iflat += 1;
+            }
+        }
+    }
 }
 
 
