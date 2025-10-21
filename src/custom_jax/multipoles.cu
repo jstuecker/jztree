@@ -1,5 +1,5 @@
 #include <type_traits>
-
+#include <math_constants.h> // CUDART_NAN_F, CUDART_NAN
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 #include "shared_utils.cuh"
@@ -399,65 +399,113 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<float>("epsilon"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+struct PosMass {
+    float x, y, z, mass;
+};
+
+__inline__ __device__ float warp_reduce_sum(float v) {
+    unsigned m = 0xffffffff;
+    for (int offset = 16; offset > 0; offset >>= 1)
+        v += __shfl_down_sync(m, v, offset);
+    return v;
+}
 
 template<int p>
 __global__ void MultipolesFromParticlesKernel(
     const int* __restrict__ isplit,
-    const float4* __restrict__ part_posm,
+    const PosMass* __restrict__ part_posm,
     float* __restrict__ mp_out
 ) {
-
-
     constexpr int ncomb = NCOMB(p);
 
     int inode = blockIdx.x;
-    // int ipart_start = isplit[inode];
-    // int ipart_end = isplit[inode + 1];
+    int ipart_start = isplit[inode];
+    int ipart_end = isplit[inode + 1];
 
-    // float Mp[ncomb];
-    // #pragma unroll
-    // for (int iM=0; iM < ncomb; iM++) {
-    //     Mp[iM] = 0.0f;
-    // }
+    if (ipart_start >= ipart_end) {
+        for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
+            mp_out[inode * ncomb + iM] = (iM >= 1) && (iM <= 3) ?  CUDART_NAN_F : 0.f;
+        }
+        return;
+    }
 
-    // for (int ipart = ipart_start + threadIdx.x; ipart < ipart_end; ipart += blockDim.x) {
-    //     float4 posm = part_posm[ipart];
-    //     float mx = posm.w;
-    //     float3 dpos = {posm.x, posm.y, posm.z};
+    __shared__ float mp[ncomb];
+    #pragma unroll
+    for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
+        mp[iM] = 0.0f;
+    }
+    __syncthreads();
 
-    //     int kflat = 0;
-    //     #pragma unroll
-    //     for(int ksum = 0; ksum <= p; ksum++) {
-    //         #pragma unroll
-    //         for(int kz = 0; kz <= ksum; kz++) {
-    //             #pragma unroll
-    //             for(int ky = 0; ky <= ksum - kz; ky++) {
-    //                 const int kx = ksum - ky - kz;
-    //                 float Mnew = mx;
-    //                 Mnew *= powf(dpos.x, kx);
-    //                 Mnew *= powf(dpos.y, ky);
-    //                 Mnew *= powf(dpos.z, kz);
+    // First pass: compute total mass and center of mass
+    for (int ioff = ipart_start; ioff < ipart_end; ioff += blockDim.x) {
+        PosMass posm;
+        if (ioff + threadIdx.x < ipart_end)
+            posm = part_posm[ioff + threadIdx.x];
+        else
+            posm = PosMass{0.f, 0.f, 0.f, 0.f};
 
-    //                 atomicAdd(&Mp[kflat], Mnew);
-    //                 kflat += 1;
-    //             }
-    //         }
-    //     }
-    // }
+        float m = warp_reduce_sum(posm.mass);
+        float mx = warp_reduce_sum(posm.mass * posm.x);
+        float my = warp_reduce_sum(posm.mass * posm.y);
+        float mz = warp_reduce_sum(posm.mass * posm.z);
 
-    // // Write output
-    // for (int iM=0; iM < ncomb; iM++) {
-    //     mp_out[inode * ncomb + iM] = Mp[iM];
-    // }
+        if ((threadIdx.x & 31) == 0) {
+            atomicAdd(&mp[0], m);
+            atomicAdd(&mp[1], mx);
+            atomicAdd(&mp[2], my);
+            atomicAdd(&mp[3], mz);
+        }
+    }
+    __syncthreads();
+    float3 com = { mp[1] / mp[0], mp[2] / mp[0], mp[3] / mp[0] };
+    if (threadIdx.x == 0) {
+        mp[1] = com.x; mp[2] = com.y; mp[3] = com.z;
+    }
+    __syncthreads();
 
-    for (int iM=0; iM < ncomb; iM++) {
-        mp_out[inode * ncomb + iM] = iM;
+    // Second pass: compute multipoles around center of mass
+    for (int ioff = ipart_start; ioff < ipart_end; ioff += blockDim.x) {
+        PosMass dpos;
+        if (ioff + threadIdx.x < ipart_end) {
+            PosMass posm = part_posm[ioff + threadIdx.x];
+            dpos = PosMass{ posm.x - com.x, posm.y - com.y, posm.z - com.z, posm.mass};
+        }
+        else
+            dpos = PosMass{0.f, 0.f, 0.f, 0.f};
+
+        int kflat = -1;
+        #pragma unroll
+        for(int ksum = 0; ksum <= p; ksum++) {
+            #pragma unroll
+            for(int kz = 0; kz <= ksum; kz++) {
+                #pragma unroll
+                for(int ky = 0; ky <= ksum - kz; ky++) {
+                    kflat += 1;
+                    if (ksum <= 1)
+                        continue; // Skip monopole and dipole terms (already computed)
+                    const int kx = ksum - ky - kz;
+
+                    float mnew = dpos.mass * powf(dpos.x, kx) * powf(dpos.y, ky) * powf(dpos.z, kz);
+
+                    float msum = warp_reduce_sum(mnew);
+                    if ((threadIdx.x & 31) == 0)
+                        atomicAdd(&mp[kflat], msum);
+                }
+            }
+        }
+    }
+
+    __syncthreads();
+
+    // Write output
+    for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
+        mp_out[inode * ncomb + iM] = mp[iM];
     }
 }
 
 
 void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
-    const int *isplit, const float4 *part_posm, float *mp_out) {
+    const int *isplit, const PosMass *part_posm, float *mp_out) {
     // This launch mechanic is needed so that p can be treated as a compile time constant
     // I wish there was a simpler way...
     switch(p) {
@@ -487,14 +535,13 @@ ffi::Error MultipolesFromParticlesHost(
     size_t p,
     size_t block_size
 )  {
-    size_t nleafs = isplit.element_count() - 1;
-    size_t grid_size = nleafs;
+    size_t grid_size = isplit.element_count() - 1;
 
-    float4* part_posm_float4 = reinterpret_cast<float4*>(part_posm.typed_data());
+    PosMass* pposm = reinterpret_cast<PosMass*>(part_posm.typed_data());
 
 
     launch_MultipolesFromParticlesKernel(p, grid_size, block_size, stream, 
-        isplit.typed_data(), part_posm_float4, 
+        isplit.typed_data(), pposm, 
         mp_out->typed_data());
 
     cudaError_t last_error = cudaGetLastError();
