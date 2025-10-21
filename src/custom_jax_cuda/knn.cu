@@ -743,7 +743,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     {xla::ffi::Traits::kCmdBufferCompatible});
 
 
-NB_MODULE(nb_knn, m) {
+NB_MODULE(ffi_knn, m) {
     m.def("IlistKNNSearch", []() { return EncapsulateFfiCall(IlistKNNSearch); });
     m.def("ConstructIlist", []() { return EncapsulateFfiCall(ConstructIlist); });
     m.def("SegmentSort", []() { return EncapsulateFfiCall(SegmentSort); });

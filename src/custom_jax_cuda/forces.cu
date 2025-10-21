@@ -431,7 +431,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 // Module Registrations
 // =============================================================
 
-NB_MODULE(nb_forces, m) {
+NB_MODULE(ffi_forces, m) {
     m.def("potential", []() { return EncapsulateFfiCall(Potential); });
     m.def("force", []() { return EncapsulateFfiCall(Force); });
     m.def("ilist_fphi", []() { return EncapsulateFfiCall(IlistForce); });

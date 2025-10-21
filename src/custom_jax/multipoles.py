@@ -5,7 +5,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from custom_jax_cuda import nb_multipoles as ffi_multipoles
+from custom_jax_cuda import ffi_multipoles as ffi_multipoles
 
 jax.ffi.register_ffi_target("ilist_m2l", ffi_multipoles.ilist_m2l(), platform="CUDA")
 jax.ffi.register_ffi_target("ilist_leaf2node_m2l", ffi_multipoles.ilist_leaf2node_m2l(), platform="CUDA")

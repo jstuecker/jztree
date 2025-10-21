@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from custom_jax_cuda import nb_tree as ffi_tree
+from custom_jax_cuda import ffi_tree as ffi_tree
 from .common import conditional_callback
 
 jax.ffi.register_ffi_target("PosZorderSort", ffi_tree.PosZorderSort(), platform="CUDA")

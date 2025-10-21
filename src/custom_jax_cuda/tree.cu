@@ -509,7 +509,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
-NB_MODULE(nb_tree, m) {
+NB_MODULE(ffi_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
     m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });

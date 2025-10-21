@@ -1,7 +1,7 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from custom_jax_cuda import nb_knn as ffi_knn
+from custom_jax_cuda import ffi_knn as ffi_knn
 from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort, search_sorted_z
 from .common import conditional_callback
 

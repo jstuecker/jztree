@@ -572,7 +572,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 
 
-NB_MODULE(nb_multipoles, m) {
+NB_MODULE(ffi_multipoles, m) {
     m.def("ilist_m2l", []() { return EncapsulateFfiCall(IlistM2L); });
     m.def("ilist_leaf2node_m2l", []() { return EncapsulateFfiCall(IlistLeaf2NodeM2L); });
     m.def("multipoles_from_particles", []() { return EncapsulateFfiCall(MultipolesFromParticles); });

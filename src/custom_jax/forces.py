@@ -5,7 +5,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from custom_jax_cuda import nb_forces as ffi_forces
+from custom_jax_cuda import ffi_forces as ffi_forces
 
 jax.ffi.register_ffi_target("potential", ffi_forces.potential(), platform="CUDA")
 jax.ffi.register_ffi_target("force", ffi_forces.force(), platform="CUDA")

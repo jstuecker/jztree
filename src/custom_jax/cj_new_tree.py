@@ -5,9 +5,9 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-import custom_jax_cuda.nb_multipoles as nb_multipoles
+import custom_jax_cuda.ffi_multipoles as ffi_multipoles
 
-jax.ffi.register_ffi_target("multipoles_from_particles", nb_multipoles.multipoles_from_particles(), platform="CUDA")
+jax.ffi.register_ffi_target("multipoles_from_particles", ffi_multipoles.multipoles_from_particles(), platform="CUDA")
 # jax.ffi.register_ffi_target("coarsen_multipoles", nb_multipoles.coarsen_multipoles(), platform="CUDA")
 
 from fmdj.new_tree import TreePlane, Multipoles, Particles
