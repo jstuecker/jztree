@@ -23,4 +23,9 @@ void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, 
 void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
     const int *isplit, const PosMass *part_posm, float *mp_out, float3 *xcom_out);
 
+// Launcher for coarsening multipoles: reduces child multipoles (mp_center, mp_values)
+// into coarser-level outputs (out_mp, out_xcent). Implemented in multipoles.cu.
+void launch_CoarsenMultipolesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
+    const int *isplit, const float *mp_values, const float3 *mp_center, float *out_mp, float3 *out_xcent);
+
 #endif // CUSTOM_JAX_MULTIPOLES_H

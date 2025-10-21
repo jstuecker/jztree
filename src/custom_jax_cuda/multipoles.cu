@@ -398,3 +398,134 @@ void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_
     const int *isplit, const PosMass *part_posm, float *mp_out, float3 *xcom_out) {
     LAUNCH_KERNEL_SWITCH(p, MultipolesFromParticlesKernel, grid_size, block_size, stream, isplit, part_posm, mp_out, xcom_out);
 }
+
+template<int p>
+__global__ void CoarsenMultipolesKernel(
+    const int* __restrict__ isplit,
+    const float* __restrict__ mp_values,
+    const float3* __restrict__ mp_center,
+    float* __restrict__ out_mp,
+    float3* __restrict__ out_xcent
+) {
+    constexpr int ncomb = NCOMB(p);
+
+    int parent = blockIdx.x;
+    int start = isplit[parent];
+    int end = isplit[parent + 1];
+
+    // If there are no children, write zeros and NaN center
+    // if (start >= end) {
+    if (true) {
+        for (int i = threadIdx.x; i < ncomb; i += blockDim.x)
+            out_mp[parent * ncomb + i] = 0.f;
+        if (threadIdx.x == 0)
+            out_xcent[parent] = make_float3(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
+        return;
+    }
+
+    // // Shared accumulators for mass and first moments (to compute center-of-mass)
+    // __shared__ float accum[4];
+    // for (int i = threadIdx.x; i < 4; i += blockDim.x) accum[i] = 0.f;
+    // __syncthreads();
+
+    // // First pass: compute mass and mass*pos sums
+    // for (int idx = start + threadIdx.x; idx < end; idx += blockDim.x) {
+    //     float mass = mp_values[idx * ncomb + 0];
+    //     float mx = mass * mp_center[idx].x;
+    //     float my = mass * mp_center[idx].y;
+    //     float mz = mass * mp_center[idx].z;
+
+    //     // warp reduce and atomic add to shared accumulators (similar pattern as other kernels)
+    //     float msum = warp_reduce_sum(mass);
+    //     float mxsum = warp_reduce_sum(mx);
+    //     float mysum = warp_reduce_sum(my);
+    //     float mzsum = warp_reduce_sum(mz);
+
+    //     if ((threadIdx.x & 31) == 0) {
+    //         atomicAdd(&accum[0], msum);
+    //         atomicAdd(&accum[1], mxsum);
+    //         atomicAdd(&accum[2], mysum);
+    //         atomicAdd(&accum[3], mzsum);
+    //     }
+    // }
+    // __syncthreads();
+
+    // float3 com;
+    // if (threadIdx.x == 0) {
+    //     float m = accum[0];
+    //     if (m == 0.f) {
+    //         com = make_float3(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
+    //     } else {
+    //         com.x = accum[1] / m;
+    //         com.y = accum[2] / m;
+    //         com.z = accum[3] / m;
+    //     }
+    //     // store temporary in shared memory
+    //     accum[0] = com.x;
+    //     accum[1] = com.y;
+    //     accum[2] = com.z;
+    // }
+    // __syncthreads();
+
+    // com.x = accum[0]; com.y = accum[1]; com.z = accum[2];
+
+    // // Second pass: for each child shift its multipoles to the parent center and accumulate
+    // for (int idx = start + threadIdx.x; idx < end; idx += blockDim.x) {
+    //     // compute displacement from child center to parent com
+    //     float dx = mp_center[idx].x - com.x;
+    //     float dy = mp_center[idx].y - com.y;
+    //     float dz = mp_center[idx].z - com.z;
+
+    //     // load source multipoles
+    //     // compute shifted multipoles into a small stack array
+    //     float src[NCOMB(p)];
+    //     #pragma unroll
+    //     for (int i = 0; i < ncomb; ++i) src[i] = mp_values[idx * ncomb + i];
+
+    //     // Precompute powers of -dx, -dy, -dz up to p
+    //     float px[7]; float py[7]; float pz[7];
+    //     px[0] = py[0] = pz[0] = 1.f;
+    //     float ndx = -dx, ndy = -dy, ndz = -dz;
+    //     for (int t = 1; t <= p; ++t) {
+    //         px[t] = px[t-1] * ndx;
+    //         py[t] = py[t-1] * ndy;
+    //         pz[t] = pz[t-1] * ndz;
+    //     }
+
+    //     // For each target multi-index compute shifted value
+    //     int dst_idx = 0;
+    //     for (int a = 0; a <= p; ++a) {
+    //         for (int b = 0; b <= p - a; ++b) {
+    //             for (int c = 0; c <= p - a - b; ++c) {
+    //                 float acc = 0.f;
+    //                 for (int i = 0; i <= a; ++i) {
+    //                     for (int j = 0; j <= b; ++j) {
+    //                         for (int k = 0; k <= c; ++k) {
+    //                             int src_idx = multi_to_flat(i, j, k);
+    //                             // binomial coefficients via factorial helper
+    //                             float bin = fact_upto6f(a) / (fact_upto6f(i) * fact_upto6f(a - i));
+    //                             bin *= fact_upto6f(b) / (fact_upto6f(j) * fact_upto6f(b - j));
+    //                             bin *= fact_upto6f(c) / (fact_upto6f(k) * fact_upto6f(c - k));
+
+    //                             acc += bin * px[a - i] * py[b - j] * pz[c - k] * src[src_idx];
+    //                         }
+    //                     }
+    //                 }
+    //                 // accumulate into global output
+    //                 atomicAdd(&out_mp[parent * ncomb + dst_idx], acc);
+    //                 dst_idx += 1;
+    //             }
+    //         }
+    //     }
+    // }
+
+    // write parent center
+    // if (threadIdx.x == 0) {
+    //     out_xcent[parent] = com;
+    // }
+}
+
+void launch_CoarsenMultipolesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
+    const int *isplit, const float *mp_values, const float3 *mp_center, float *out_mp, float3 *out_xcent) {
+    LAUNCH_KERNEL_SWITCH(p, CoarsenMultipolesKernel, grid_size, block_size, stream, isplit, mp_values, mp_center, out_mp, out_xcent);
+}
