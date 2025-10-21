@@ -1,11 +1,13 @@
 from fmdj.variants import Variant, V, VariantManager, vm, has_gpu
 from fmdj import config
-import custom_jax as cj
 import jax.numpy as jnp
 
 TAG = "cuda"
 
 variants = VariantManager()
+
+import custom_jax as cj
+import custom_jax.cj_new_tree as cnt
 
 # This decorator helps to convert config parameters to keyword arguments for the functions,
 # reducing boilerplate code when connecting the variants as below.
@@ -40,6 +42,8 @@ def register():
         variants[V.ilist_leaf_to_node][TAG] = Variant(cfg_to_kwargs(cj.multipoles.ilist_leaf_to_node, ("p", "softening")))
         variants[V.ilist_leaf_to_leaf][TAG] = Variant(_ilist_leaf_to_leaf_cj)
         variants[V.direct_summation_force][TAG] = Variant(direct_summation_force_cj)
+        variants[V.multipoles_from_particles][TAG] = Variant(cnt.multipoles_from_particles)
+        variants[V.coarsen_multipoles][TAG] = Variant(cnt.coarsen_multipoles)
 
         vm.register_variants(variants)
         print("Custom Jax Plugin registered!")
