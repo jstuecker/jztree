@@ -47,7 +47,7 @@ def cj_coarsen_multipoles(mp : Multipoles, tp : TreePlane) -> Multipoles:
     out_xcent = jax.ShapeDtypeStruct((tp.size(), 3), dtype)
 
     mpnew, xcent = jax.ffi.ffi_call("coarsen_multipoles", (out_mp, out_xcent))(
-        tp.ispl, mp.center(), mp.values, p=np.uint64(mp.p), block_size=np.uint64(32)
+        tp.ispl, mp.values, mp.center(), p=np.uint64(mp.p), block_size=np.uint64(32)
     )
     return Multipoles(xcent=xcent, values=mpnew, p=mp.p, around_com=mp.around_com)
 cj_coarsen_multipoles.jit = jax.jit(cj_coarsen_multipoles)

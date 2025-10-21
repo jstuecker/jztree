@@ -293,6 +293,25 @@ __inline__ __device__ float warp_reduce_sum(float v) {
     return v;
 }
 
+__inline__ __device__ void accumulate_m_and_mpos(float* smem, const PosMass& posm) {
+    float m = posm.mass;
+    float mx = posm.mass * posm.x;
+    float my = posm.mass * posm.y;
+    float mz = posm.mass * posm.z;
+
+    float msum = warp_reduce_sum(m);
+    float mxsum = warp_reduce_sum(mx);
+    float mysum = warp_reduce_sum(my);
+    float mzsum = warp_reduce_sum(mz);
+
+    if ((threadIdx.x & 31) == 0) {
+        atomicAdd(&smem[0], msum);
+        atomicAdd(&smem[1], mxsum);
+        atomicAdd(&smem[2], mysum);
+        atomicAdd(&smem[3], mzsum);
+    }
+}
+
 template<int p>
 __global__ void MultipolesFromParticlesKernel(
     const int* __restrict__ isplit,
@@ -330,18 +349,8 @@ __global__ void MultipolesFromParticlesKernel(
             posm = part_posm[ioff + threadIdx.x];
         else
             posm = PosMass{0.f, 0.f, 0.f, 0.f};
-
-        float m = warp_reduce_sum(posm.mass);
-        float mx = warp_reduce_sum(posm.mass * posm.x);
-        float my = warp_reduce_sum(posm.mass * posm.y);
-        float mz = warp_reduce_sum(posm.mass * posm.z);
-
-        if ((threadIdx.x & 31) == 0) {
-            atomicAdd(&mp[0], m);
-            atomicAdd(&mp[1], mx);
-            atomicAdd(&mp[2], my);
-            atomicAdd(&mp[3], mz);
-        }
+        
+        accumulate_m_and_mpos(&mp[0], posm);
     }
     __syncthreads();
     float3 com = { mp[1] / mp[0], mp[2] / mp[0], mp[3] / mp[0] };
@@ -403,25 +412,53 @@ template<int p>
 __global__ void CoarsenMultipolesKernel(
     const int* __restrict__ isplit,
     const float* __restrict__ mp_values,
-    const float3* __restrict__ mp_center,
-    float* __restrict__ out_mp,
-    float3* __restrict__ out_xcent
+    const float3* __restrict__ xcent,
+    float* __restrict__ mp_out,
+    float3* __restrict__ xcent_out
 ) {
     constexpr int ncomb = NCOMB(p);
 
-    int parent = blockIdx.x;
-    int start = isplit[parent];
-    int end = isplit[parent + 1];
+    int inode = blockIdx.x;
+    int istart = isplit[inode];
+    int iend = isplit[inode + 1];
 
     // If there are no children, write zeros and NaN center
-    // if (start >= end) {
-    if (true) {
+    if (istart >= iend) {
         for (int i = threadIdx.x; i < ncomb; i += blockDim.x)
-            out_mp[parent * ncomb + i] = 0.f;
+            mp_out[inode * ncomb + i] = 0.f;
         if (threadIdx.x == 0)
-            out_xcent[parent] = make_float3(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
+            xcent_out[inode] = make_float3(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
         return;
     }
+
+    __shared__ float mp[ncomb];
+    #pragma unroll
+    for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
+        mp[iM] = 0.0f;
+    }
+    __syncthreads();
+
+    // First pass: compute total mass and center of mass
+    for (int ioff = istart; ioff < iend; ioff += blockDim.x) {
+        int index = ioff + threadIdx.x;
+        PosMass posm;
+        if (ioff + threadIdx.x < iend)
+            posm = PosMass{
+                xcent[index].x, xcent[index].y, xcent[index].z,
+                mp_values[index * ncomb + 0]
+            };
+        else
+            posm = PosMass{0.f, 0.f, 0.f, 0.f};
+        
+        accumulate_m_and_mpos(&mp[0], posm);
+    }
+    __syncthreads();
+    float3 com = { mp[1] / mp[0], mp[2] / mp[0], mp[3] / mp[0] };
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        mp[1] = 0.f; mp[2] = 0.f; mp[3] = 0.f;
+    }
+    __syncthreads();
 
     // // Shared accumulators for mass and first moments (to compute center-of-mass)
     // __shared__ float accum[4];
@@ -431,9 +468,9 @@ __global__ void CoarsenMultipolesKernel(
     // // First pass: compute mass and mass*pos sums
     // for (int idx = start + threadIdx.x; idx < end; idx += blockDim.x) {
     //     float mass = mp_values[idx * ncomb + 0];
-    //     float mx = mass * mp_center[idx].x;
-    //     float my = mass * mp_center[idx].y;
-    //     float mz = mass * mp_center[idx].z;
+    //     float mx = mass * xcent[idx].x;
+    //     float my = mass * xcent[idx].y;
+    //     float mz = mass * xcent[idx].z;
 
     //     // warp reduce and atomic add to shared accumulators (similar pattern as other kernels)
     //     float msum = warp_reduce_sum(mass);
@@ -469,12 +506,12 @@ __global__ void CoarsenMultipolesKernel(
 
     // com.x = accum[0]; com.y = accum[1]; com.z = accum[2];
 
-    // // Second pass: for each child shift its multipoles to the parent center and accumulate
+    // // Second pass: for each child shift its multipoles to the inode center and accumulate
     // for (int idx = start + threadIdx.x; idx < end; idx += blockDim.x) {
-    //     // compute displacement from child center to parent com
-    //     float dx = mp_center[idx].x - com.x;
-    //     float dy = mp_center[idx].y - com.y;
-    //     float dz = mp_center[idx].z - com.z;
+    //     // compute displacement from child center to inode com
+    //     float dx = xcent[idx].x - com.x;
+    //     float dy = xcent[idx].y - com.y;
+    //     float dz = xcent[idx].z - com.z;
 
     //     // load source multipoles
     //     // compute shifted multipoles into a small stack array
@@ -512,20 +549,24 @@ __global__ void CoarsenMultipolesKernel(
     //                     }
     //                 }
     //                 // accumulate into global output
-    //                 atomicAdd(&out_mp[parent * ncomb + dst_idx], acc);
+    //                 atomicAdd(&mp_out[inode * ncomb + dst_idx], acc);
     //                 dst_idx += 1;
     //             }
     //         }
     //     }
     // }
 
-    // write parent center
-    // if (threadIdx.x == 0) {
-    //     out_xcent[parent] = com;
-    // }
+    // write inode center
+    if (threadIdx.x == 0) {
+        xcent_out[inode] = com;
+    }
+
+    for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
+        mp_out[inode * ncomb + iM] = mp[iM];
+    }
 }
 
 void launch_CoarsenMultipolesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
-    const int *isplit, const float *mp_values, const float3 *mp_center, float *out_mp, float3 *out_xcent) {
-    LAUNCH_KERNEL_SWITCH(p, CoarsenMultipolesKernel, grid_size, block_size, stream, isplit, mp_values, mp_center, out_mp, out_xcent);
+    const int *isplit, const float *mp_values, const float3 *xcent, float *mp_out, float3 *xcent_out) {
+    LAUNCH_KERNEL_SWITCH(p, CoarsenMultipolesKernel, grid_size, block_size, stream, isplit, mp_values, xcent, mp_out, xcent_out);
 }
