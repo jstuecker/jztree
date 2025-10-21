@@ -1,4 +1,5 @@
 #include <type_traits>
+#include <stdexcept>
 #include "multipoles.h"
 #include <math_constants.h> // CUDART_NAN_F, CUDART_NAN
 
@@ -7,6 +8,19 @@
 // =============================================================
 
 #define MAXP 6
+
+// Helper macro to dispatch a templated kernel on runtime integer p (1..6).
+// Usage: LAUNCH_KERNEL_SWITCH(p, KernelName, grid_size, block_size, stream, arg1, arg2, ...)
+#define LAUNCH_KERNEL_SWITCH(P, KERNEL, GRID, BLOCK, STREAM, ...) \
+    switch(P) { \
+        case 1: KERNEL<1><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        case 2: KERNEL<2><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        case 3: KERNEL<3><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        case 4: KERNEL<4><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        case 5: KERNEL<5><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        case 6: KERNEL<6><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        default: break; \
+    }
 
 template<int p>
 __device__ void setupGn(float r2, float eps2, float* __restrict__ G)
@@ -181,21 +195,7 @@ __global__ void IlistM2LKernel(const float3* __restrict__ x, const float* __rest
 void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
         const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, 
         size_t interactions_per_block, float epsilon) {
-    switch(p) {
-        case 1: IlistM2LKernel<1><<<grid_size, block_size, 0, stream>>>(
-            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 2: IlistM2LKernel<2><<<grid_size, block_size, 0, stream>>>(
-            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 3: IlistM2LKernel<3><<<grid_size, block_size, 0, stream>>>(
-            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 4: IlistM2LKernel<4><<<grid_size, block_size, 0, stream>>>(
-            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 5: IlistM2LKernel<5><<<grid_size, block_size, 0, stream>>>(
-            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 6: IlistM2LKernel<6><<<grid_size, block_size, 0, stream>>>(
-            x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        default: break;
-    }
+    LAUNCH_KERNEL_SWITCH(p, IlistM2LKernel, grid_size, block_size, stream, x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon);
 }
 
 
@@ -281,22 +281,7 @@ __global__ void IlistLeaf2NodeM2LKernel(const float3* __restrict__  xnodes,
 void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
     const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, 
     float *Lout, size_t interactions_per_block, float epsilon) {
-    switch(p) {
-        case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
-            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 2: IlistLeaf2NodeM2LKernel<2><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
-            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 3: IlistLeaf2NodeM2LKernel<3><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
-            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 4: IlistLeaf2NodeM2LKernel<4><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
-            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 5: IlistLeaf2NodeM2LKernel<5><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
-            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
-            isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-
-        default: break;
-    }
+    LAUNCH_KERNEL_SWITCH(p, IlistLeaf2NodeM2LKernel, grid_size, block_size, stream, xnodes, xm, isplit, interactions, iminmax, Lout, interactions_per_block, epsilon);
 }
 
 // PosMass is declared in multipoles.h
@@ -408,20 +393,5 @@ __global__ void MultipolesFromParticlesKernel(
 
 void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
     const int *isplit, const PosMass *part_posm, float *mp_out, float3 *xcom_out) {
-    switch(p) {
-        case 1: MultipolesFromParticlesKernel<1><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out, xcom_out); break;
-        case 2: MultipolesFromParticlesKernel<2><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out, xcom_out); break;
-        case 3: MultipolesFromParticlesKernel<3><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out, xcom_out); break;
-        case 4: MultipolesFromParticlesKernel<4><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out, xcom_out); break;
-        case 5: MultipolesFromParticlesKernel<5><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out, xcom_out); break;
-        case 6: MultipolesFromParticlesKernel<6><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out, xcom_out); break;
-
-        default: break;
-    }
+    LAUNCH_KERNEL_SWITCH(p, MultipolesFromParticlesKernel, grid_size, block_size, stream, isplit, part_posm, mp_out, xcom_out);
 }
