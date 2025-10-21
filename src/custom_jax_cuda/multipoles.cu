@@ -44,11 +44,6 @@ __device__ __forceinline__ float get_xk(const float3& x, int k) {
 
 __host__ __device__ __forceinline__
 float powi_upto6(float x, int n) {
-    if (n < 0) {               // optional: handle negatives
-        int m = -n;
-        float y = powi_upto6(x, m);
-        return 1.0f / y;
-    }
 
     switch (n) {
         case 0: return 1.0f;
@@ -323,11 +318,11 @@ __inline__ __device__ float warp_reduce_sum(float v) {
     return v;
 }
 
-__inline__ __device__ void accumulate_m_and_mpos(float* smem, const PosMass& posm) {
+__inline__ __device__ void accumulate_m_and_mpos(float* smem, const PosMass& posm, float3 x0) {
     float m = posm.mass;
-    float mx = posm.mass * posm.x;
-    float my = posm.mass * posm.y;
-    float mz = posm.mass * posm.z;
+    float mx = posm.mass * (posm.x - x0.x);
+    float my = posm.mass * (posm.y - x0.y);
+    float mz = posm.mass * (posm.z - x0.z);
 
     float msum = warp_reduce_sum(m);
     float mxsum = warp_reduce_sum(mx);
@@ -365,6 +360,9 @@ __global__ void MultipolesFromParticlesKernel(
         return;
     }
 
+    PosMass p0 = part_posm[ipart_start];
+    float3 x0 = {p0.x, p0.y, p0.z};
+
     __shared__ float mp[ncomb];
     #pragma unroll
     for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
@@ -380,10 +378,10 @@ __global__ void MultipolesFromParticlesKernel(
         else
             posm = PosMass{0.f, 0.f, 0.f, 0.f};
         
-        accumulate_m_and_mpos(&mp[0], posm);
+        accumulate_m_and_mpos(&mp[0], posm, x0);
     }
     __syncthreads();
-    float3 com = { mp[1] / mp[0], mp[2] / mp[0], mp[3] / mp[0] };
+    float3 com = { mp[1] / mp[0] + x0.x, mp[2] / mp[0] + x0.y, mp[3] / mp[0] + x0.z};
     __syncthreads();
     if (threadIdx.x == 0) {
         mp[1] = 0.f; mp[2] = 0.f; mp[3] = 0.f;
@@ -533,6 +531,8 @@ __global__ void CoarsenMultipolesKernel(
         return;
     }
 
+    float3 x0 = xcent[istart];
+
     __shared__ float mp[ncomb];
     #pragma unroll
     for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
@@ -544,7 +544,7 @@ __global__ void CoarsenMultipolesKernel(
     for (int ioff = istart; ioff < iend; ioff += blockDim.x) {
         int index = ioff + threadIdx.x;
         PosMass posm;
-        if (ioff + threadIdx.x < iend)
+        if (index < iend)
             posm = PosMass{
                 xcent[index].x, xcent[index].y, xcent[index].z,
                 mp_values[index * ncomb + 0]
@@ -552,10 +552,10 @@ __global__ void CoarsenMultipolesKernel(
         else
             posm = PosMass{0.f, 0.f, 0.f, 0.f};
         
-        accumulate_m_and_mpos(&mp[0], posm);
+        accumulate_m_and_mpos(&mp[0], posm, x0);
     }
     __syncthreads();
-    float3 com = { mp[1] / mp[0], mp[2] / mp[0], mp[3] / mp[0] };
+    float3 com = { mp[1] / mp[0] + x0.x, mp[2] / mp[0] + x0.y, mp[3] / mp[0] + x0.z };
     __syncthreads();
     if (threadIdx.x == 0) {
         mp[1] = 0.f; mp[2] = 0.f; mp[3] = 0.f;
@@ -575,7 +575,7 @@ __global__ void CoarsenMultipolesKernel(
         float src[NCOMB(p)];
         #pragma unroll
         for (int i = 0; i < ncomb; i++) {
-            if(ioff + threadIdx.x < iend)
+            if(index < iend)
                 src[i] = mp_values[index * ncomb + i];
             else
                 src[i] = 0.f;
@@ -585,8 +585,8 @@ __global__ void CoarsenMultipolesKernel(
         
         shift_multipoles<p>(src, moved, dpos);
 
-        for(int iM=4; iM < ncomb; iM++) {
-            float val = moved[iM];
+        for(int iM=1; iM < ncomb; iM++) {
+            float val = index < iend ? moved[iM] : 0.f;
             float sum = warp_reduce_sum(val);
             if ((threadIdx.x & 31) == 0) {
                 atomicAdd(&mp[iM], sum);
