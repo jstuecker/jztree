@@ -414,7 +414,8 @@ template<int p>
 __global__ void MultipolesFromParticlesKernel(
     const int* __restrict__ isplit,
     const PosMass* __restrict__ part_posm,
-    float* __restrict__ mp_out
+    float* __restrict__ mp_out,
+    float3* __restrict__ xcom_out
 ) {
     constexpr int ncomb = NCOMB(p);
 
@@ -458,10 +459,10 @@ __global__ void MultipolesFromParticlesKernel(
     }
     __syncthreads();
     float3 com = { mp[1] / mp[0], mp[2] / mp[0], mp[3] / mp[0] };
-    if (threadIdx.x == 0) {
-        mp[1] = com.x; mp[2] = com.y; mp[3] = com.z;
-    }
     __syncthreads();
+    if (threadIdx.x == 0) {
+        mp[1] = 0.f; mp[2] = 0.f; mp[3] = 0.f;
+    }
 
     // Second pass: compute multipoles around center of mass
     for (int ioff = ipart_start; ioff < ipart_end; ioff += blockDim.x) {
@@ -501,26 +502,29 @@ __global__ void MultipolesFromParticlesKernel(
     for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
         mp_out[inode * ncomb + iM] = mp[iM];
     }
+    if (threadIdx.x == 0) {
+        xcom_out[inode] = com;
+    }
 }
 
 
 void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
-    const int *isplit, const PosMass *part_posm, float *mp_out) {
+    const int *isplit, const PosMass *part_posm, float *mp_out, float3 *xcom_out) {
     // This launch mechanic is needed so that p can be treated as a compile time constant
     // I wish there was a simpler way...
     switch(p) {
         case 1: MultipolesFromParticlesKernel<1><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out); break;
+            isplit, part_posm, mp_out, xcom_out); break;
         case 2: MultipolesFromParticlesKernel<2><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out); break;
+            isplit, part_posm, mp_out, xcom_out); break;
         case 3: MultipolesFromParticlesKernel<3><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out); break;
+            isplit, part_posm, mp_out, xcom_out); break;
         case 4: MultipolesFromParticlesKernel<4><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out); break;
+            isplit, part_posm, mp_out, xcom_out); break;
         case 5: MultipolesFromParticlesKernel<5><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out); break;
+            isplit, part_posm, mp_out, xcom_out); break;
         case 6: MultipolesFromParticlesKernel<6><<<grid_size, block_size, 0, stream>>>(
-            isplit, part_posm, mp_out); break;
+            isplit, part_posm, mp_out, xcom_out); break;
 
         default: throw std::runtime_error("Unsupported p value for MultipolesFromParticlesKernel"); break;
     }
@@ -531,18 +535,20 @@ ffi::Error MultipolesFromParticlesHost(
     cudaStream_t stream,
     ffi::Buffer<ffi::S32> isplit,
     ffi::Buffer<ffi::F32> part_posm,
-    ffi::ResultBuffer<ffi::F32> mp_out, 
+    ffi::ResultBuffer<ffi::F32> mp_out,
+    ffi::ResultBuffer<ffi::F32> xcom_out,
     size_t p,
     size_t block_size
 )  {
     size_t grid_size = isplit.element_count() - 1;
 
     PosMass* pposm = reinterpret_cast<PosMass*>(part_posm.typed_data());
+    float3* xcom = reinterpret_cast<float3*>(xcom_out->typed_data());
 
 
     launch_MultipolesFromParticlesKernel(p, grid_size, block_size, stream, 
         isplit.typed_data(), pposm, 
-        mp_out->typed_data());
+        mp_out->typed_data(), xcom);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -558,6 +564,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::Buffer<ffi::S32>>()     // isplit
         .Arg<ffi::Buffer<ffi::F32>>()     // part.posm
         .Ret<ffi::Buffer<ffi::F32>>()     // mp output
+        .Ret<ffi::Buffer<ffi::F32>>()     // xcom output
         .Attr<size_t>("p")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});

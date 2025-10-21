@@ -21,14 +21,12 @@ def multipoles_from_particles(tp : TreePlane, part : Particles, p : int = 2, aro
 
     ncomb = np.array([1, 4, 10, 20, 35, 56, 84, 120, 165])
     
-    out_type = jax.ShapeDtypeStruct((tp.size(), ncomb[p]), posm.dtype)
-    mp = jax.ffi.ffi_call("multipoles_from_particles", (out_type,))(
+    out_mp = jax.ShapeDtypeStruct((tp.size(), ncomb[p]), posm.dtype)
+    out_xcent = jax.ShapeDtypeStruct((tp.size(), 3), posm.dtype)
+
+    mp, xcent = jax.ffi.ffi_call("multipoles_from_particles", (out_mp, out_xcent))(
         tp.ispl, posm, p=np.uint64(p), block_size=np.uint64(32)
-    )[0]
-
-    xcent = mp[:,1:4]
-
-    mp = mp.at[:,1:4].set(0.0)
+    )
     
     return Multipoles(xcent=xcent, values=mp, p=p, around_com=True)
 multipoles_from_particles.jit = jax.jit(multipoles_from_particles, static_argnames=['p', 'around_com'])
