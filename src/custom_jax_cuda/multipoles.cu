@@ -16,9 +16,9 @@
         case 1: KERNEL<1><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
         case 2: KERNEL<2><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
         case 3: KERNEL<3><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
-        case 4: KERNEL<4><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        /*case 4: KERNEL<4><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
         case 5: KERNEL<5><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
-        case 6: KERNEL<6><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
+        case 6: KERNEL<6><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break;*/ \
         default: break; \
     }
 
@@ -308,7 +308,10 @@ __global__ void MultipolesFromParticlesKernel(
 
     if (ipart_start >= ipart_end) {
         for (int iM=threadIdx.x; iM < ncomb; iM += blockDim.x) {
-            mp_out[inode * ncomb + iM] = (iM >= 1) && (iM <= 3) ?  CUDART_NAN_F : 0.f;
+            mp_out[inode * ncomb + iM] = 0.f;
+        }
+        if (threadIdx.x == 0) {
+            xcom_out[inode] = make_float3(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
         }
         return;
     }
