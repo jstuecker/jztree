@@ -402,6 +402,32 @@ __global__ void MultipolesFromParticlesKernel(
     }
 }
 
+template<int p>
+__inline__ __device__ void shift_multipoles(float *mp, float *mp_tmp, float3 dpos) {
+    // int kflat = 0;
+    // int iflat = 0;
+    // #pragma unroll
+    // for(int ksum = 0; ksum <= p; ksum++) {
+    //     #pragma unroll
+    //     for(int kz = 0; kz <= ksum; kz++) {
+    //         #pragma unroll
+    //         for(int ky = 0; ky <= ksum - kz; ky++) {
+    //             const int kx = ksum - ky - kz;
+    //             #pragma unroll
+    //             for(int i = 0; i <= kx; i++) {
+    //                 float coeff = 1.f; //
+    //                 mp_tmp[iflat] = 0.f;
+    //                 iflat += 1;
+    //             }
+    //         }
+    //     }
+    // }
+
+    for(int i=0; i < NCOMB(p); i++) {
+        mp_tmp[i] = mp[i];
+    }
+}
+
 
 void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
     const int *isplit, const PosMass *part_posm, float *mp_out, float3 *xcom_out) {
@@ -460,101 +486,75 @@ __global__ void CoarsenMultipolesKernel(
     }
     __syncthreads();
 
-    // // Shared accumulators for mass and first moments (to compute center-of-mass)
-    // __shared__ float accum[4];
-    // for (int i = threadIdx.x; i < 4; i += blockDim.x) accum[i] = 0.f;
-    // __syncthreads();
+    // Second pass: for each child shift its multipoles to the inode center and accumulate
+    for (int ioff = istart; ioff < iend; ioff += blockDim.x) {
+        int index = ioff + threadIdx.x;
+        // compute displacement from child center to inode com
+        float dx = xcent[index].x - com.x;
+        float dy = xcent[index].y - com.y;
+        float dz = xcent[index].z - com.z;
 
-    // // First pass: compute mass and mass*pos sums
-    // for (int idx = start + threadIdx.x; idx < end; idx += blockDim.x) {
-    //     float mass = mp_values[idx * ncomb + 0];
-    //     float mx = mass * xcent[idx].x;
-    //     float my = mass * xcent[idx].y;
-    //     float mz = mass * xcent[idx].z;
+        // load source multipoles
+        // compute shifted multipoles into a small stack array
+        float src[NCOMB(p)];
+        #pragma unroll
+        for (int i = 0; i < ncomb; i++) {
+            if(ioff + threadIdx.x < iend)
+                src[i] = mp_values[index * ncomb + i];
+            else
+                src[i] = 0.f;
+        }
+            
 
-    //     // warp reduce and atomic add to shared accumulators (similar pattern as other kernels)
-    //     float msum = warp_reduce_sum(mass);
-    //     float mxsum = warp_reduce_sum(mx);
-    //     float mysum = warp_reduce_sum(my);
-    //     float mzsum = warp_reduce_sum(mz);
+        float moved[NCOMB(p)];
+        
+        shift_multipoles<p>(src, moved, make_float3(dx, dy, dz));
 
-    //     if ((threadIdx.x & 31) == 0) {
-    //         atomicAdd(&accum[0], msum);
-    //         atomicAdd(&accum[1], mxsum);
-    //         atomicAdd(&accum[2], mysum);
-    //         atomicAdd(&accum[3], mzsum);
-    //     }
-    // }
-    // __syncthreads();
+        for(int iM=4; iM < ncomb; iM++) {
+            float val = moved[iM];
+            float sum = warp_reduce_sum(val);
+            if ((threadIdx.x & 31) == 0) {
+                atomicAdd(&mp[iM], sum);
+            }
+        }
 
-    // float3 com;
-    // if (threadIdx.x == 0) {
-    //     float m = accum[0];
-    //     if (m == 0.f) {
-    //         com = make_float3(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
-    //     } else {
-    //         com.x = accum[1] / m;
-    //         com.y = accum[2] / m;
-    //         com.z = accum[3] / m;
-    //     }
-    //     // store temporary in shared memory
-    //     accum[0] = com.x;
-    //     accum[1] = com.y;
-    //     accum[2] = com.z;
-    // }
-    // __syncthreads();
+        // Precompute powers of -dx, -dy, -dz up to p
+        // float px[7]; float py[7]; float pz[7];
+        // px[0] = py[0] = pz[0] = 1.f;
+        // float ndx = -dx, ndy = -dy, ndz = -dz;
+        // for (int t = 1; t <= p; ++t) {
+        //     px[t] = px[t-1] * ndx;
+        //     py[t] = py[t-1] * ndy;
+        //     pz[t] = pz[t-1] * ndz;
+        // }
 
-    // com.x = accum[0]; com.y = accum[1]; com.z = accum[2];
+        // // For each target multi-index compute shifted value
+        // int dst_idx = 0;
+        // for (int a = 0; a <= p; ++a) {
+        //     for (int b = 0; b <= p - a; ++b) {
+        //         for (int c = 0; c <= p - a - b; ++c) {
+        //             float acc = 0.f;
+        //             for (int i = 0; i <= a; ++i) {
+        //                 for (int j = 0; j <= b; ++j) {
+        //                     for (int k = 0; k <= c; ++k) {
+        //                         int src_idx = multi_to_flat(i, j, k);
+        //                         // binomial coefficients via factorial helper
+        //                         float bin = fact_upto6f(a) / (fact_upto6f(i) * fact_upto6f(a - i));
+        //                         bin *= fact_upto6f(b) / (fact_upto6f(j) * fact_upto6f(b - j));
+        //                         bin *= fact_upto6f(c) / (fact_upto6f(k) * fact_upto6f(c - k));
 
-    // // Second pass: for each child shift its multipoles to the inode center and accumulate
-    // for (int idx = start + threadIdx.x; idx < end; idx += blockDim.x) {
-    //     // compute displacement from child center to inode com
-    //     float dx = xcent[idx].x - com.x;
-    //     float dy = xcent[idx].y - com.y;
-    //     float dz = xcent[idx].z - com.z;
-
-    //     // load source multipoles
-    //     // compute shifted multipoles into a small stack array
-    //     float src[NCOMB(p)];
-    //     #pragma unroll
-    //     for (int i = 0; i < ncomb; ++i) src[i] = mp_values[idx * ncomb + i];
-
-    //     // Precompute powers of -dx, -dy, -dz up to p
-    //     float px[7]; float py[7]; float pz[7];
-    //     px[0] = py[0] = pz[0] = 1.f;
-    //     float ndx = -dx, ndy = -dy, ndz = -dz;
-    //     for (int t = 1; t <= p; ++t) {
-    //         px[t] = px[t-1] * ndx;
-    //         py[t] = py[t-1] * ndy;
-    //         pz[t] = pz[t-1] * ndz;
-    //     }
-
-    //     // For each target multi-index compute shifted value
-    //     int dst_idx = 0;
-    //     for (int a = 0; a <= p; ++a) {
-    //         for (int b = 0; b <= p - a; ++b) {
-    //             for (int c = 0; c <= p - a - b; ++c) {
-    //                 float acc = 0.f;
-    //                 for (int i = 0; i <= a; ++i) {
-    //                     for (int j = 0; j <= b; ++j) {
-    //                         for (int k = 0; k <= c; ++k) {
-    //                             int src_idx = multi_to_flat(i, j, k);
-    //                             // binomial coefficients via factorial helper
-    //                             float bin = fact_upto6f(a) / (fact_upto6f(i) * fact_upto6f(a - i));
-    //                             bin *= fact_upto6f(b) / (fact_upto6f(j) * fact_upto6f(b - j));
-    //                             bin *= fact_upto6f(c) / (fact_upto6f(k) * fact_upto6f(c - k));
-
-    //                             acc += bin * px[a - i] * py[b - j] * pz[c - k] * src[src_idx];
-    //                         }
-    //                     }
-    //                 }
-    //                 // accumulate into global output
-    //                 atomicAdd(&mp_out[inode * ncomb + dst_idx], acc);
-    //                 dst_idx += 1;
-    //             }
-    //         }
-    //     }
-    // }
+        //                         acc += bin * px[a - i] * py[b - j] * pz[c - k] * src[src_idx];
+        //                     }
+        //                 }
+        //             }
+        //             // accumulate into global output
+        //             atomicAdd(&mp_out[inode * ncomb + dst_idx], acc);
+        //             dst_idx += 1;
+        //         }
+        //     }
+        // }
+    }
+    __syncthreads();
 
     // write inode center
     if (threadIdx.x == 0) {
