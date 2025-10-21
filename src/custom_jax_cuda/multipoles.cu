@@ -1,14 +1,9 @@
 #include <type_traits>
+#include "multipoles.h"
 #include <math_constants.h> // CUDART_NAN_F, CUDART_NAN
-#include "nanobind/nanobind.h"
-#include "xla/ffi/api/ffi.h"
-#include "shared_utils.cuh"
-
-namespace nb = nanobind;
-namespace ffi = xla::ffi;
 
 // =============================================================
-// Multipole Translators
+// Multipole Translators (CUDA-only)
 // =============================================================
 
 #define MAXP 6
@@ -30,10 +25,6 @@ __device__ void setupGn(float r2, float eps2, float* __restrict__ G)
 #define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
 
 __device__ __forceinline__ float get_xk(const float3& x, int k) {
-    // Get's the k-th component of a float3 vector
-    // Note that we need to do it this way (rather than with an array type vector),
-    // because it is not possible to dynamically index register arrays (and if you do
-    // they will end up in local memory (=very slow))
     return (k == 0) ? x.x : (k == 1 ? x.y : x.z);
 }
 
@@ -84,12 +75,6 @@ __device__ __forceinline__ constexpr  int3 flat_to_multi(const int kflat) {
 
 template<int p>
 __device__ void setupDnG(float3 dx, float eps2, float* __restrict__ Dn) {
-    // Set's up the cartesian derivatives of the Green's function
-    // Using the method described in Tausch (2003):
-    // "The fast multipole method for arbitrary Green’s functions"
-    // This works by using a recurrence between the derivatives of the Green's function
-    // We start at D0 G(q), go to D1 G(q+1), D2 G(q+2) ...
-
     float r2 = dx.x * dx.x + dx.y * dx.y + dx.z * dx.z;
 
     float G[p+1];
@@ -196,8 +181,6 @@ __global__ void IlistM2LKernel(const float3* __restrict__ x, const float* __rest
 void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
         const float3 *x, const float *mp, int2 *interactions, int *iminmax, float *Lout, 
         size_t interactions_per_block, float epsilon) {
-    // This launch mechanic is needed so that p can be treated as a compile time constant
-    // I wish there was a simpler way...
     switch(p) {
         case 1: IlistM2LKernel<1><<<grid_size, block_size, 0, stream>>>(
             x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
@@ -211,46 +194,10 @@ void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStrea
             x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
         case 6: IlistM2LKernel<6><<<grid_size, block_size, 0, stream>>>(
             x, mp, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
-        default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
+        default: break;
     }
 }
 
-ffi::Error IlistM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> x, ffi::Buffer<ffi::F32> mp, 
-        ffi::Buffer<ffi::S32> interactions, ffi::Buffer<ffi::S32> iminmax,  
-        ffi::ResultBuffer<ffi::F32> loc, int p, size_t block_size, size_t interactions_per_block, 
-        float epsilon) {
-    size_t ninteractions = interactions.element_count() / 2;
-    const size_t grid_size = div_ceil(ninteractions, block_size*interactions_per_block);
-
-    auto* xfloat3 = reinterpret_cast<const float3*>(x.typed_data());
-    auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
-
-    cudaMemsetAsync(loc->typed_data(), 0, mp.element_count() * sizeof(float), stream);
-
-    launch_IlistM2LKernel(p, grid_size, block_size, stream, xfloat3, mp.typed_data(), 
-        interactions_i2, iminmax.typed_data(), loc->typed_data(), interactions_per_block, epsilon);
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    IlistM2L, IlistM2LHost,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()
-        .Arg<ffi::Buffer<ffi::F32>>()
-        .Arg<ffi::Buffer<ffi::S32>>()     // interactions
-        .Arg<ffi::Buffer<ffi::S32>>()     // iminmax
-        .Ret<ffi::Buffer<ffi::F32>>()
-        .Attr<int>("p")
-        .Attr<size_t>("block_size")
-        .Attr<size_t>("interactions_per_block")
-        .Attr<float>("epsilon"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
 
 __device__ __forceinline__  __device__ float warp_sum(float v) {
     #pragma unroll
@@ -334,8 +281,6 @@ __global__ void IlistLeaf2NodeM2LKernel(const float3* __restrict__  xnodes,
 void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
     const float3 *xnodes, const float4 *xm, int32_t *isplit, int2 *interactions, int *iminmax, 
     float *Lout, size_t interactions_per_block, float epsilon) {
-    // This launch mechanic is needed so that p can be treated as a compile time constant
-    // I wish there was a simpler way...
     switch(p) {
         case 1: IlistLeaf2NodeM2LKernel<1><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
             isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
@@ -350,58 +295,11 @@ void launch_IlistLeaf2NodeM2LKernel(int p, size_t grid_size, size_t block_size, 
         case 6: IlistLeaf2NodeM2LKernel<6><<<grid_size, block_size, 0, stream>>>(xnodes, xm, 
             isplit, interactions, iminmax, Lout, interactions_per_block, epsilon); break;
 
-        default: throw std::runtime_error("Unsupported p value for IlistM2LKernel"); break;
+        default: break;
     }
 }
 
-ffi::Error IlistLeaf2NodeM2LHost(cudaStream_t stream, ffi::Buffer<ffi::F32> xnodes, 
-        ffi::Buffer<ffi::F32> xm, ffi::Buffer<ffi::S32> isplit, ffi::Buffer<ffi::S32> interactions, 
-        ffi::Buffer<ffi::S32> iminmax, ffi::ResultBuffer<ffi::F32> loc, int p, 
-        size_t interactions_per_block, float epsilon) {
-    size_t ninteractions = interactions.element_count() / 2;
-    // Since our kernel uses a lot of registers, we cannot reach full occupancy in general.
-    // Therefore it is fine to use block_size = 32 (which usually should be avoided, since it
-    // limits maximum occupancy to 50%.) The benefit of this is that leafs that have <= 32 particles
-    // can be handled at a smaller cost. I have tested this and found it to be the fastest choice
-    size_t block_size = 32;
-
-    size_t grid_size = div_ceil(ninteractions, interactions_per_block);
-
-    auto* xnodes_float3 = reinterpret_cast<const float3*>(xnodes.typed_data());
-    auto* xm_float4 = reinterpret_cast<const float4*>(xm.typed_data());
-    auto* interactions_i2 = reinterpret_cast<int2*>(interactions.typed_data());
-    
-    cudaMemsetAsync(loc->typed_data(), 0, loc->element_count() * sizeof(float), stream);
-
-    launch_IlistLeaf2NodeM2LKernel(p, grid_size, block_size, stream, xnodes_float3, xm_float4, 
-        isplit.typed_data(), interactions_i2, iminmax.typed_data(), loc->typed_data(), 
-        interactions_per_block, epsilon);
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    IlistLeaf2NodeM2L, IlistLeaf2NodeM2LHost,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()     // xnodes
-        .Arg<ffi::Buffer<ffi::F32>>()     // xm
-        .Arg<ffi::Buffer<ffi::S32>>()     // isplit
-        .Arg<ffi::Buffer<ffi::S32>>()     // interactions
-        .Arg<ffi::Buffer<ffi::S32>>()     // iminmax
-        .Ret<ffi::Buffer<ffi::F32>>()     // Lk output
-        .Attr<int>("p")
-        .Attr<size_t>("interactions_per_block")
-        .Attr<float>("epsilon"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
-
-struct PosMass {
-    float x, y, z, mass;
-};
+// PosMass is declared in multipoles.h
 
 __inline__ __device__ float warp_reduce_sum(float v) {
     unsigned m = 0xffffffff;
@@ -510,8 +408,6 @@ __global__ void MultipolesFromParticlesKernel(
 
 void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream, 
     const int *isplit, const PosMass *part_posm, float *mp_out, float3 *xcom_out) {
-    // This launch mechanic is needed so that p can be treated as a compile time constant
-    // I wish there was a simpler way...
     switch(p) {
         case 1: MultipolesFromParticlesKernel<1><<<grid_size, block_size, 0, stream>>>(
             isplit, part_posm, mp_out, xcom_out); break;
@@ -526,54 +422,6 @@ void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_
         case 6: MultipolesFromParticlesKernel<6><<<grid_size, block_size, 0, stream>>>(
             isplit, part_posm, mp_out, xcom_out); break;
 
-        default: throw std::runtime_error("Unsupported p value for MultipolesFromParticlesKernel"); break;
+        default: break;
     }
-}
-
-
-ffi::Error MultipolesFromParticlesHost(
-    cudaStream_t stream,
-    ffi::Buffer<ffi::S32> isplit,
-    ffi::Buffer<ffi::F32> part_posm,
-    ffi::ResultBuffer<ffi::F32> mp_out,
-    ffi::ResultBuffer<ffi::F32> xcom_out,
-    size_t p,
-    size_t block_size
-)  {
-    size_t grid_size = isplit.element_count() - 1;
-
-    PosMass* pposm = reinterpret_cast<PosMass*>(part_posm.typed_data());
-    float3* xcom = reinterpret_cast<float3*>(xcom_out->typed_data());
-
-
-    launch_MultipolesFromParticlesKernel(p, grid_size, block_size, stream, 
-        isplit.typed_data(), pposm, 
-        mp_out->typed_data(), xcom);
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    MultipolesFromParticles, MultipolesFromParticlesHost,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::S32>>()     // isplit
-        .Arg<ffi::Buffer<ffi::F32>>()     // part.posm
-        .Ret<ffi::Buffer<ffi::F32>>()     // mp output
-        .Ret<ffi::Buffer<ffi::F32>>()     // xcom output
-        .Attr<size_t>("p")
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
-
-
-
-
-NB_MODULE(ffi_multipoles, m) {
-    m.def("ilist_m2l", []() { return EncapsulateFfiCall(IlistM2L); });
-    m.def("ilist_leaf2node_m2l", []() { return EncapsulateFfiCall(IlistLeaf2NodeM2L); });
-    m.def("multipoles_from_particles", []() { return EncapsulateFfiCall(MultipolesFromParticles); });
 }
