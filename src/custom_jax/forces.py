@@ -5,12 +5,12 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-import custom_jax.nb_forces as nb_forces
+from custom_jax_cuda import nb_forces as ffi_forces
 
-jax.ffi.register_ffi_target("potential", nb_forces.potential(), platform="CUDA")
-jax.ffi.register_ffi_target("force", nb_forces.force(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_fphi", nb_forces.ilist_fphi(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_fphi_bwd", nb_forces.ilist_fphi_bwd(), platform="CUDA")
+jax.ffi.register_ffi_target("potential", ffi_forces.potential(), platform="CUDA")
+jax.ffi.register_ffi_target("force", ffi_forces.force(), platform="CUDA")
+jax.ffi.register_ffi_target("ilist_fphi", ffi_forces.ilist_fphi(), platform="CUDA")
+jax.ffi.register_ffi_target("ilist_fphi_bwd", ffi_forces.ilist_fphi_bwd(), platform="CUDA")
 
 # ======= Interfaces from CUDA code to Python =======
 

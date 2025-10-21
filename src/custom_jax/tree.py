@@ -2,13 +2,13 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-import custom_jax.nb_tree as nb_tree
+from custom_jax_cuda import nb_tree as ffi_tree
 from .common import conditional_callback
 
-jax.ffi.register_ffi_target("PosZorderSort", nb_tree.PosZorderSort(), platform="CUDA")
-jax.ffi.register_ffi_target("BuildZTree", nb_tree.BuildZTree(), platform="CUDA")
-jax.ffi.register_ffi_target("SummarizeLeaves", nb_tree.SummarizeLeaves(), platform="CUDA")
-jax.ffi.register_ffi_target("SearchSortedZ", nb_tree.SearchSortedZ(), platform="CUDA")
+jax.ffi.register_ffi_target("PosZorderSort", ffi_tree.PosZorderSort(), platform="CUDA")
+jax.ffi.register_ffi_target("BuildZTree", ffi_tree.BuildZTree(), platform="CUDA")
+jax.ffi.register_ffi_target("SummarizeLeaves", ffi_tree.SummarizeLeaves(), platform="CUDA")
+jax.ffi.register_ffi_target("SearchSortedZ", ffi_tree.SearchSortedZ(), platform="CUDA")
 
 def lvl_to_ext(level_binary):
     olvl, omod = level_binary//3, level_binary % 3
@@ -213,12 +213,12 @@ search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "l
 # ================================= Deprecated functions   ======================================= #
 # They will be deleted later, for now we keep them for comparison purposes
 
-if hasattr(nb_tree, "OldArgsort"):
-    jax.ffi.register_ffi_target("OldArgsort", nb_tree.OldArgsort(), platform="CUDA")
-    jax.ffi.register_ffi_target("OldI3zsort", nb_tree.OldI3zsort(), platform="CUDA")
-    jax.ffi.register_ffi_target("OldF3zsort", nb_tree.OldF3zsort(), platform="CUDA")
-    jax.ffi.register_ffi_target("OldI3Argsort", nb_tree.OldI3Argsort(), platform="CUDA")
-    jax.ffi.register_ffi_target("OldI3zMergesort", nb_tree.OldI3zMergesort(), platform="CUDA")
+if hasattr(ffi_tree, "OldArgsort"):
+    jax.ffi.register_ffi_target("OldArgsort", ffi_tree.OldArgsort(), platform="CUDA")
+    jax.ffi.register_ffi_target("OldI3zsort", ffi_tree.OldI3zsort(), platform="CUDA")
+    jax.ffi.register_ffi_target("OldF3zsort", ffi_tree.OldF3zsort(), platform="CUDA")
+    jax.ffi.register_ffi_target("OldI3Argsort", ffi_tree.OldI3Argsort(), platform="CUDA")
+    jax.ffi.register_ffi_target("OldI3zMergesort", ffi_tree.OldI3zMergesort(), platform="CUDA")
 
     def old_argsort_cubradix(key, block_size=64):
         assert key.dtype == jnp.int32

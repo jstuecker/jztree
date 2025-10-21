@@ -1,13 +1,13 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-import custom_jax.nb_knn as nb_knn
+from custom_jax_cuda import nb_knn as ffi_knn
 from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort, search_sorted_z
 from .common import conditional_callback
 
-jax.ffi.register_ffi_target("IlistKNNSearch", nb_knn.IlistKNNSearch(), platform="CUDA")
-jax.ffi.register_ffi_target("ConstructIlist", nb_knn.ConstructIlist(), platform="CUDA")
-jax.ffi.register_ffi_target("SegmentSort", nb_knn.SegmentSort(), platform="CUDA")
+jax.ffi.register_ffi_target("IlistKNNSearch", ffi_knn.IlistKNNSearch(), platform="CUDA")
+jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
+jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")
 
 def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort

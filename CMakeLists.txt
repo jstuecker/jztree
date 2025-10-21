@@ -111,10 +111,10 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 
 # Define a list of modules and their source files
 set(MODULES nb_forces nb_tree nb_multipoles nb_knn)
-set(MODULE_PATHS src/custom_jax/forces.cu
-    src/custom_jax/tree.cu
-    src/custom_jax/multipoles.cu
-    src/custom_jax/knn.cu
+set(MODULE_PATHS src/custom_jax_cuda/forces.cu
+    src/custom_jax_cuda/tree.cu
+    src/custom_jax_cuda/multipoles.cu
+    src/custom_jax_cuda/knn.cu
 )
 
 include_directories(SYSTEM ${XLA_DIR})
@@ -128,5 +128,5 @@ foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
     target_compile_options(${MODULE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
     target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
 
-    install(TARGETS ${MODULE_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME})
+    install(TARGETS ${MODULE_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME}_cuda)
 endforeach()
