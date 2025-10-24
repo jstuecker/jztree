@@ -116,6 +116,45 @@ ffi::Error CoarsenMultipolesHost(
     return ffi::Error::Success();
 }
 
+// FFI Host wrapper for evaluate_tree_plane
+ffi::Error EvaluateTreePlaneHost(
+    cudaStream_t stream,
+    ffi::Buffer<ffi::S32> node_range,
+    ffi::Buffer<ffi::S32> spl_nodes,
+    ffi::Buffer<ffi::S32> spl_ilist,
+    ffi::Buffer<ffi::S32> ilist_nodes,
+    ffi::Buffer<ffi::F32> xchild,
+    ffi::Buffer<ffi::F32> mp_values,
+    ffi::ResultBuffer<ffi::F32> loc_out,
+    ffi::ResultBuffer<ffi::S32> spl_child_ilist_out,
+    ffi::ResultBuffer<ffi::S32> child_ilist_out,
+    size_t p,
+    size_t block_size,
+    float epsilon
+) {
+    // TODO: Determine appropriate grid_size based on inputs
+    size_t grid_size = spl_nodes.element_count() - 1;
+
+    const int2 *node_range_ptr = reinterpret_cast<const int2*>(node_range.typed_data());
+    const float3 *xchild_ptr = reinterpret_cast<const float3*>(xchild.typed_data());
+
+    // Initialize output buffers
+    cudaMemsetAsync(loc_out->typed_data(), 0, loc_out->element_count() * sizeof(float), stream);
+    cudaMemsetAsync(spl_child_ilist_out->typed_data(), 0, spl_child_ilist_out->element_count() * sizeof(int), stream);
+    cudaMemsetAsync(child_ilist_out->typed_data(), 0, child_ilist_out->element_count() * sizeof(int), stream);
+
+    launch_EvaluateTreePlaneKernel(static_cast<int>(p), grid_size, block_size, stream,
+        node_range_ptr, spl_nodes.typed_data(), spl_ilist.typed_data(), ilist_nodes.typed_data(),
+        xchild_ptr, mp_values.typed_data(), loc_out->typed_data(), 
+        spl_child_ilist_out->typed_data(), child_ilist_out->typed_data(), epsilon);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
 // The actual FFI handler symbols
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
     IlistM2L, IlistM2LHost,
@@ -173,9 +212,28 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible});
 
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    EvaluateTreePlane, EvaluateTreePlaneHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::Buffer<ffi::S32>>()     // node_range
+        .Arg<ffi::Buffer<ffi::S32>>()     // spl_nodes
+        .Arg<ffi::Buffer<ffi::S32>>()     // spl_ilist
+        .Arg<ffi::Buffer<ffi::S32>>()     // ilist_nodes
+        .Arg<ffi::Buffer<ffi::F32>>()     // xchild
+        .Arg<ffi::Buffer<ffi::F32>>()     // mp_values
+        .Ret<ffi::Buffer<ffi::F32>>()     // loc_out
+        .Ret<ffi::Buffer<ffi::S32>>()     // spl_child_ilist_out
+        .Ret<ffi::Buffer<ffi::S32>>()     // child_ilist_out
+        .Attr<size_t>("p")
+        .Attr<size_t>("block_size")
+        .Attr<float>("epsilon"),
+    {xla::ffi::Traits::kCmdBufferCompatible});
+
 NB_MODULE(ffi_multipoles, m) {
     m.def("ilist_m2l", []() { return EncapsulateFfiCall(IlistM2L); });
     m.def("ilist_leaf2node_m2l", []() { return EncapsulateFfiCall(IlistLeaf2NodeM2L); });
     m.def("multipoles_from_particles", []() { return EncapsulateFfiCall(MultipolesFromParticles); });
     m.def("coarsen_multipoles", []() { return EncapsulateFfiCall(CoarsenMultipoles); });
+    m.def("evaluate_tree_plane", []() { return EncapsulateFfiCall(EvaluateTreePlane); });
 }
