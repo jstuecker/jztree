@@ -135,26 +135,33 @@ ffi::Error EvaluateTreePlaneHost(
     // TODO: Determine appropriate grid_size based on inputs
     size_t grid_size = spl_nodes.element_count() - 1;
 
-    // Build device view struct
-    EvaluateTreePlaneView view{
-        reinterpret_cast<const int2*>(node_range.typed_data()),
-        spl_nodes.typed_data(),
-        spl_ilist.typed_data(),
-        ilist_nodes.typed_data(),
-        reinterpret_cast<const float3*>(xchild.typed_data()),
-        mp_values.typed_data(),
-        loc_out->typed_data(),
-        spl_child_ilist_out->typed_data(),
-        child_ilist_out->typed_data(),
-        epsilon
-    };
-
     // Initialize output buffers
     cudaMemsetAsync(loc_out->typed_data(), 0, loc_out->element_count() * sizeof(float), stream);
     cudaMemsetAsync(spl_child_ilist_out->typed_data(), 0, spl_child_ilist_out->element_count() * sizeof(int), stream);
     cudaMemsetAsync(child_ilist_out->typed_data(), 0, child_ilist_out->element_count() * sizeof(int), stream);
 
-    launch_EvaluateTreePlaneKernel(static_cast<int>(p), grid_size, block_size, stream, view);
+    // Build device view structs
+    EvaluateTreePlaneInputs inputs{
+        reinterpret_cast<const int2*>(node_range.typed_data()),
+        spl_nodes.typed_data(),
+        spl_ilist.typed_data(),
+        ilist_nodes.typed_data(),
+        reinterpret_cast<const float3*>(xchild.typed_data()),
+        mp_values.typed_data()
+    };
+
+    EvaluateTreePlaneOutputs outputs{
+        loc_out->typed_data(),
+        spl_child_ilist_out->typed_data(),
+        child_ilist_out->typed_data()
+    };
+
+    EvaluateTreePlaneAttrs attrs{
+        epsilon
+    };
+
+    launch_EvaluateTreePlaneKernel(static_cast<int>(p), grid_size, block_size, stream, 
+        inputs, outputs, attrs);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
