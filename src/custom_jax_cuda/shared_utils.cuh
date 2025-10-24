@@ -17,7 +17,7 @@ inline int div_ceil(int a, int b) {
 }
 
 template <int NLOAD, bool SINGLE = false>
-__device__ struct SegmentManager {
+struct SegmentManager {
     // Manages a pointer based segment list so that it can be traversed with threads
     // almost as if it was a linear structure
     // each segment goes from isplits[i] to isplits[i+1]
@@ -103,7 +103,7 @@ __device__ struct SegmentManager {
 };
 
 template <typename T>
-__device__ struct PrefetchList {
+struct PrefetchList {
     T const* __restrict__ data;
     T local;
     int icur, iend;
@@ -149,7 +149,7 @@ struct Pair { A first; B second; };
 
 // ---- 2-array specialization ----
 template <typename T0, typename T1>
-__device__ struct PrefetchList2 {
+struct PrefetchList2 {
     T0 const* __restrict__ data0;
     T1 const* __restrict__ data1;
     T0 local0;
@@ -238,7 +238,7 @@ __device__ inline T warp_broadcast(const T& x, int src_lane, unsigned mask = __a
 }
 
 template <typename T>
-__device__ struct PointedPrefetchList {
+struct PointedPrefetchList {
     const T* __restrict__ data;
     const int* __restrict__ ptrs;
 
