@@ -7,21 +7,6 @@
 // Multipole Translators (CUDA-only)
 // =============================================================
 
-#define MAXP 6
-
-// Helper macro to dispatch a templated kernel on runtime integer p (1..6).
-// Usage: LAUNCH_KERNEL_SWITCH(p, KernelName, grid_size, block_size, stream, arg1, arg2, ...)
-#define LAUNCH_KERNEL_SWITCH(P, KERNEL, GRID, BLOCK, STREAM, ...) \
-    switch(P) { \
-        case 1: KERNEL<1><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
-        case 2: KERNEL<2><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
-        case 3: KERNEL<3><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
-        /*case 4: KERNEL<4><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
-        case 5: KERNEL<5><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break; \
-        case 6: KERNEL<6><<<GRID, BLOCK, 0, STREAM>>>(__VA_ARGS__); break;*/ \
-        default: break; \
-    }
-
 template<int p>
 __device__ void setupGn(float r2, float eps2, float* __restrict__ G)
 {
@@ -608,40 +593,4 @@ __global__ void CoarsenMultipolesKernel(
 void launch_CoarsenMultipolesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
     const int *isplit, const float *mp_values, const float3 *xcent, float *mp_out, float3 *xcent_out) {
     LAUNCH_KERNEL_SWITCH(p, CoarsenMultipolesKernel, grid_size, block_size, stream, isplit, mp_values, xcent, mp_out, xcent_out);
-}
-
-
-// =============================================================
-// Evaluate Tree Plane Kernel
-// =============================================================
-
-
-template<int p>
-__global__ void EvaluateTreePlaneKernel(
-    const EvaluateTreePlaneInputs inputs,
-    const EvaluateTreePlaneOutputs outputs,
-    const EvaluateTreePlaneAttrs attrs
-) {
-    int2 nrange = inputs.node_range[0];
-    int nodeid = nrange.x + blockIdx.x;
-    if (nodeid >= nrange.y) {
-        return;
-    }
-
-    int2 prange = {inputs.spl_nodes[nodeid], inputs.spl_nodes[nodeid + 1]};
-
-    int ipart = prange.x + threadIdx.x;
-    bool valid = ipart < prange.y;
-
-    if(valid) {
-        outputs.loc_out[ipart] = threadIdx.x; // placeholder write
-    }
-}
-
-void launch_EvaluateTreePlaneKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
-    const EvaluateTreePlaneInputs inputs,
-    const EvaluateTreePlaneOutputs outputs,
-    const EvaluateTreePlaneAttrs attrs) {
-    LAUNCH_KERNEL_SWITCH(p, EvaluateTreePlaneKernel, grid_size, block_size, stream, 
-        inputs, outputs, attrs);
 }

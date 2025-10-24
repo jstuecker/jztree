@@ -3,6 +3,7 @@
 #include <string>
 #include "shared_utils.cuh"
 #include "multipoles.h"
+#include "fmm.cuh"
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;

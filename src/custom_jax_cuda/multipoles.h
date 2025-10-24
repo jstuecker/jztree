@@ -5,32 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 
-// Simple POD for particle position+mass used by the multipoles kernels
-struct PosMass {
-    float x, y, z, mass;
-};
-
-// EvaluateTreePlane interface structures
-struct EvaluateTreePlaneInputs {
-    const int2* node_range;
-    const int* spl_nodes;
-    const int* spl_ilist;
-    const int* ilist_nodes;
-    const float3* xchild;
-    const float* mp_values;
-};
-
-struct EvaluateTreePlaneOutputs {
-    float* loc_out;
-    int* spl_child_ilist_out;
-    int* child_ilist_out;
-};
-
-struct EvaluateTreePlaneAttrs {
-    float epsilon;
-};
-
-
+#include "common.cuh"
 
 // Launchers compiled in multipoles.cu (defined there). These are used by the FFI
 // wrappers in ffi_multipoles.cu. Keep signatures stable.
@@ -49,11 +24,5 @@ void launch_MultipolesFromParticlesKernel(int p, size_t grid_size, size_t block_
 // into coarser-level outputs (out_mp, out_xcent). Implemented in multipoles.cu.
 void launch_CoarsenMultipolesKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
     const int *isplit, const float *mp_values, const float3 *mp_center, float *out_mp, float3 *out_xcent);
-
-// Launcher for evaluate_tree_plane: evaluates M2L for a tree plane and generates child interaction list
-void launch_EvaluateTreePlaneKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
-    const EvaluateTreePlaneInputs inputs,
-    const EvaluateTreePlaneOutputs outputs,
-    const EvaluateTreePlaneAttrs attrs);
 
 #endif // CUSTOM_JAX_MULTIPOLES_H
