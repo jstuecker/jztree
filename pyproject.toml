@@ -28,6 +28,11 @@ build.requires = ["jax"]
 editable.rebuild = true
 editable.verbose = true
 
+[project.optional-dependencies]
+cuda13 = [
+    "jax[cuda13]",
+]
+
 [dependency-groups]
 dev = [
     "ipykernel>=6.30.1",
