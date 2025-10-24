@@ -25,6 +25,9 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 message(STATUS "Using a python installed cuda directory: ${CUDA_PATH}")
+
+# set(CUDAToolkit_ROOT "${CUDA_PATH}")
+
 if(NOT CUDA_PATH_RESULT EQUAL 0)
   message(WARNING "Could not find python cuda directory - I will assume a system or conda/miniforge" 
           "-managed installation ") # ${CUDA_PATH_ERR}
@@ -36,7 +39,7 @@ else()
 
   
   # set(_cuda_bin   "${_cuda_root}/bin")
-  # set(_cuda_lib   "${_cuda_root}/lib")
+  set(_cuda_lib   "${_cuda_root}/lib")
   # set(_cuda_inc   "${_cuda_root}/include")
 
   # message(STATUS "Using CUDA bin path: ${_cuda_bin}")
@@ -50,18 +53,18 @@ else()
   # endif()
 
   # Make sure the linker & runtime see the wheel libs during compiler detection
-  # if(DEFINED ENV{LIBRARY_PATH})
-  #   set(ENV{LIBRARY_PATH} "${_cuda_lib}:$ENV{LIBRARY_PATH}")
-  # else()
-  #   set(ENV{LIBRARY_PATH} "${_cuda_lib}")
-  # endif()
+  if(DEFINED ENV{LIBRARY_PATH})
+    set(ENV{LIBRARY_PATH} "${_cuda_lib}:$ENV{LIBRARY_PATH}")
+  else()
+    set(ENV{LIBRARY_PATH} "${_cuda_lib}")
+  endif()
 
   set(CMAKE_CUDA_RUNTIME_LIBRARY Static)
   set(CUDA_USE_STATIC_CUDA_RUNTIME ON)
 
   # include_directories(SYSTEM "${_cuda_root}/include" "${_cuda_root}/include/cccl")
   # Need to define the link directory explicitly here so that ninja finds it
-  # add_link_options(-L${_cuda_root}/lib)
+  add_link_options(-L${_cuda_root}/lib)
   # add_link_options(-L${_cuda_root}/lib64)
 endif()
 
@@ -79,8 +82,8 @@ endforeach()
 set(CMAKE_CUDA_COMPILER "${_cuda_root}/bin/nvcc")
 
 # Now let Cmake detect CUDA
-# find_package(CUDAToolkit CONFIG REQUIRED)
 project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX CUDA)
+# find_package(CUDAToolkit CONFIG REQUIRED)
 
 message(STATUS "Using")
 
