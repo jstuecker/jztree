@@ -616,40 +616,24 @@ void launch_CoarsenMultipolesKernel(int p, size_t grid_size, size_t block_size, 
 // =============================================================
 
 template<int p>
-__global__ void EvaluateTreePlaneKernel(
-    const int2* __restrict__ node_range,
-    const int* __restrict__ spl_nodes,
-    const int* __restrict__ spl_ilist,
-    const int* __restrict__ ilist_nodes,
-    const float3* __restrict__ xchild,
-    const float* __restrict__ mp_values,
-    float* __restrict__ loc_out,
-    int* __restrict__ spl_child_ilist_out,
-    int* __restrict__ child_ilist_out,
-    float epsilon
-) {
-    int2 nrange = node_range[0];
+__global__ void EvaluateTreePlaneKernel(const EvaluateTreePlaneView v) {
+    int2 nrange = v.node_range[0];
     int nodeid = nrange.x + blockIdx.x;
     if (nodeid >= nrange.y) {
         return;
     }
 
-    loc_out[threadIdx.x] = threadIdx.x;
-
-    int2 prange = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
+    int2 prange = {v.spl_nodes[nodeid], v.spl_nodes[nodeid + 1]};
 
     int ipart = prange.x + threadIdx.x;
     bool valid = ipart < prange.y;
 
     if(valid) {
-        loc_out[ipart] = threadIdx.x;
+        v.loc_out[ipart] = threadIdx.x; // placeholder write
     }
 }
 
 void launch_EvaluateTreePlaneKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
-    const int2 *node_range, const int *spl_nodes, const int *spl_ilist, const int *ilist_nodes,
-    const float3 *xchild, const float *mp_values, float *loc_out, int *spl_child_ilist_out,
-    int *child_ilist_out, float epsilon) {
-    LAUNCH_KERNEL_SWITCH(p, EvaluateTreePlaneKernel, grid_size, block_size, stream, node_range, spl_nodes, 
-        spl_ilist, ilist_nodes, xchild, mp_values, loc_out, spl_child_ilist_out, child_ilist_out, epsilon);
+    const EvaluateTreePlaneView view) {
+    LAUNCH_KERNEL_SWITCH(p, EvaluateTreePlaneKernel, grid_size, block_size, stream, view);
 }

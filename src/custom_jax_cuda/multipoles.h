@@ -10,6 +10,20 @@ struct PosMass {
     float x, y, z, mass;
 };
 
+// Bundle all device pointers and scalars into a single view to simplify signatures.
+struct EvaluateTreePlaneView {
+    const int2* node_range;
+    const int* spl_nodes;
+    const int* spl_ilist;
+    const int* ilist_nodes;
+    const float3* xchild;
+    const float* mp_values;
+    float* loc_out;
+    int* spl_child_ilist_out;
+    int* child_ilist_out;
+    float epsilon;
+};
+
 // Launchers compiled in multipoles.cu (defined there). These are used by the FFI
 // wrappers in ffi_multipoles.cu. Keep signatures stable.
 void launch_IlistM2LKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
@@ -30,8 +44,6 @@ void launch_CoarsenMultipolesKernel(int p, size_t grid_size, size_t block_size, 
 
 // Launcher for evaluate_tree_plane: evaluates M2L for a tree plane and generates child interaction list
 void launch_EvaluateTreePlaneKernel(int p, size_t grid_size, size_t block_size, cudaStream_t stream,
-    const int2 *node_range, const int *spl_nodes, const int *spl_ilist, const int *ilist_nodes,
-    const float3 *xchild, const float *mp_values, float *loc_out, int *spl_child_ilist_out,
-    int *child_ilist_out, float epsilon);
+    const EvaluateTreePlaneView view);
 
 #endif // CUSTOM_JAX_MULTIPOLES_H
