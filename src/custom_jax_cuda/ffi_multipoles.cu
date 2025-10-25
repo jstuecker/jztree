@@ -120,13 +120,13 @@ ffi::Error CoarsenMultipolesHost(
 // FFI Host wrapper for evaluate_tree_plane
 ffi::Error EvaluateTreePlaneHost(
     cudaStream_t stream,
-    ffi::Buffer<ffi::S32> node_range,
+    ffi::AnyBuffer node_range,
     ffi::Buffer<ffi::S32> spl_nodes,
     ffi::Buffer<ffi::S32> spl_ilist,
     ffi::Buffer<ffi::S32> ilist_nodes,
     ffi::Buffer<ffi::F32> xchild,
     ffi::Buffer<ffi::F32> mp_values,
-    ffi::ResultBuffer<ffi::F32> loc_out,
+    ffi::Result<ffi::AnyBuffer> loc_out,
     ffi::ResultBuffer<ffi::S32> spl_child_ilist_out,
     ffi::ResultBuffer<ffi::S32> child_ilist_out,
     size_t p,
@@ -137,13 +137,13 @@ ffi::Error EvaluateTreePlaneHost(
     size_t grid_size = spl_nodes.element_count() - 1;
 
     // Initialize output buffers
-    cudaMemsetAsync(loc_out->typed_data(), 0, loc_out->element_count() * sizeof(float), stream);
+    // cudaMemsetAsync(loc_out->typed_data(), 0, loc_out->element_count() * sizeof(float), stream);
     cudaMemsetAsync(spl_child_ilist_out->typed_data(), 0, spl_child_ilist_out->element_count() * sizeof(int), stream);
     cudaMemsetAsync(child_ilist_out->typed_data(), 0, child_ilist_out->element_count() * sizeof(int), stream);
 
     // Build device view structs
     EvaluateTreePlaneInputs inputs{
-        reinterpret_cast<const int2*>(node_range.typed_data()),
+        reinterpret_cast<const int2*>(node_range.untyped_data()),
         spl_nodes.typed_data(),
         spl_ilist.typed_data(),
         ilist_nodes.typed_data(),
@@ -152,7 +152,7 @@ ffi::Error EvaluateTreePlaneHost(
     };
 
     EvaluateTreePlaneOutputs outputs{
-        loc_out->typed_data(),
+        reinterpret_cast<float*>(loc_out->untyped_data()),
         spl_child_ilist_out->typed_data(),
         child_ilist_out->typed_data()
     };
@@ -161,8 +161,45 @@ ffi::Error EvaluateTreePlaneHost(
         epsilon
     };
 
-    launch_EvaluateTreePlaneKernel(static_cast<int>(p), grid_size, block_size, stream, 
-        inputs, outputs, attrs);
+    // launch_EvaluateTreePlaneKernel(static_cast<int>(p), grid_size, block_size, stream, 
+    //     inputs, outputs, attrs);
+
+    // static const void*  funcs[] = {
+    //     (const void*)EvaluateTreePlaneKernel<1>,
+    //     (const void*)EvaluateTreePlaneKernel<2>
+    // };
+
+    void* args[] = {
+        (void*)&inputs,
+        (void*)&outputs,
+        (void*)&attrs
+    };
+
+    static const void* func;
+
+    switch (p) {
+        case 1: func = (const void*)EvaluateTreePlaneKernel<1>; break;
+        case 2: func = (const void*)EvaluateTreePlaneKernel<2>; break;
+        default: return ffi::Error::Internal("Unsupported p value in EvaluateTreePlaneHost");
+    }
+
+    cudaLaunchKernel(func, dim3(grid_size), dim3(block_size), args, 0, stream);
+    // func<<<grid_size, block_size, 2, stream>>>(
+    //         inputs,
+    //         outputs,
+    //         attrs
+    //     );
+
+    // #pragma unroll
+    // for(int i = 1; i < MAXP; i++) {
+    //     if(p != i) continue;
+
+    //     EvaluateTreePlaneKernel<i><<<grid_size, block_size, 2, stream>>>(
+    //         inputs,
+    //         outputs,
+    //         attrs
+    //     );
+    // }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -232,13 +269,13 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     EvaluateTreePlane, EvaluateTreePlaneHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::S32>>()     // node_range
+        .Arg<ffi::AnyBuffer>()     // node_range
         .Arg<ffi::Buffer<ffi::S32>>()     // spl_nodes
         .Arg<ffi::Buffer<ffi::S32>>()     // spl_ilist
         .Arg<ffi::Buffer<ffi::S32>>()     // ilist_nodes
         .Arg<ffi::Buffer<ffi::F32>>()     // xchild
         .Arg<ffi::Buffer<ffi::F32>>()     // mp_values
-        .Ret<ffi::Buffer<ffi::F32>>()     // loc_out
+        .Ret<ffi::AnyBuffer>()     // loc_out
         .Ret<ffi::Buffer<ffi::S32>>()     // spl_child_ilist_out
         .Ret<ffi::Buffer<ffi::S32>>()     // child_ilist_out
         .Attr<size_t>("p")
