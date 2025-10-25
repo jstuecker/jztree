@@ -1,6 +1,6 @@
 try:
     import tree_sitter_cuda
-    from tree_sitter import Language, Parser, Query, QueryCursor, Node
+    from tree_sitter import Language, Parser, Query, QueryCursor, Node, Tree
 except ImportError as e:
     raise ImportError("Please install tree-sitter and tree-sitter-cuda packages to use this module.") from e
 
@@ -83,25 +83,19 @@ def interprete_template_list(node_param: Node, txt: str) -> list[TemplateParamIn
 
     return res
 
-def get_functions(node: Node, txt: str, name: str | None = None) -> dict[str, FunctionInfo]:
-    if name is not None:
-        name_match = f'(#eq? @fname "{name}")'
-    else:
-        name_match=""
-
+def get_functions(node: Node, txt: str) -> dict[str, FunctionInfo]:
     query_func = f"""
         (function_definition
             ("__global__")? @fglobal
             type: (_) @ftype
             declarator: (function_declarator
-                declarator: (identifier) @fname {name_match}
+                declarator: (identifier) @fname
                 parameters: (parameter_list) @fparam
             )
         ) @node
     """
 
     cursor = QueryCursor(Query(CUDA, query_func))
-    # res = {}
     res = {}
     for i,match in cursor.matches(node):
         if (not "ftemp" in match) and () :
@@ -120,3 +114,25 @@ def get_functions(node: Node, txt: str, name: str | None = None) -> dict[str, Fu
         res[new_func.name] = new_func
         
     return res
+
+def build_tree_sitter(file_path: str) -> tuple[Tree, str]:
+    with open(file_path, 'r') as f:
+        txt = f.read()
+    tree = parser.parse(txt.encode())
+    return tree, txt
+
+def get_functions_from_file(file_path: str, only_kernels: bool = True, names: tuple[str] = None
+                            ) -> dict[str, FunctionInfo]:
+    tree, txt = build_tree_sitter(file_path)
+    funcs = get_functions(tree.root_node, txt)
+    
+    if only_kernels:
+        funcs = {k:v for k,v in funcs.items() if v.is_kernel}
+
+    if names is not None:
+        funcs = {k:v for k,v in funcs.items() if k in names}
+        for name in names:
+            if name not in funcs:
+                raise ValueError(f"Function {name} not found in file {file_path}")
+
+    return funcs
