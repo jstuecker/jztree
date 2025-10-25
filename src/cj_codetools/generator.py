@@ -29,15 +29,16 @@ def create_ffi_module_code(funcs: list[FunctionInfo], includes: tuple[str] = ())
     template = env.get_template("template_ffi_module.j2")
     return template.render(functions=funcs, includes=includes)
 
-def generate_ffi_module_file(output_path: str, funcs: list[FunctionInfo],
-                             includes: tuple[str] = ()):
-    code = create_ffi_module_code(funcs, includes)
+def generate_ffi_module_file(output_file: str, 
+                             functions: list[FunctionInfo],
+                             includes: tuple[str] = ()) -> None:
+    code = create_ffi_module_code(functions, includes)
 
-    with open(output_path, 'r') as f:
+    with open(output_file, 'r') as f:
         txt = f.read()
     if txt != code:
-        print(f"Updated generated file at {output_path}")
-        with open(output_path, 'w') as f:
+        print(f"Updated generated file at {output_file}")
+        with open(output_file, 'w') as f:
             f.write(code)
     else:
-        print(f"No changes to generated file at {output_path}")
+        print(f"No changes to generated file at {output_file}")
