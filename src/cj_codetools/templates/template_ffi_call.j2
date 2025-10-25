@@ -1,0 +1,90 @@
+ffi::Error {{ f.name }}FFIHost (
+    cudaStream_t stream,
+{%- for p in f.par %}
+        {%- if p.is_ptr %}
+            {%- if p.is_const %}
+    ffi::AnyBuffer {{ p.name }}
+            {%- else %}
+    ffi::Result<ffi::AnyBuffer> {{ p.name }}
+            {%- endif %}
+        {%- else %}
+    {{ p.type }} {{ p.name }}
+        {%- endif %},
+{%- endfor %}
+{%- for p in f.template_par %}
+    {%-if p.type=="int" %}
+    {{ p.type }} {{ p.name }},
+    {%- endif %}
+{%- endfor %}
+    size_t grid_size,
+    size_t block_size
+) {
+    // Build a bundled argument list for cudaLaunchKernel
+    void* args[] = {
+        {%- for p in f.par %}
+            {%- if p.is_ptr %}
+                {%- if p.is_const %}
+        reinterpret_cast<{{p.type}}*>({{ p.name }}.untyped_data())
+                {%- else %}
+        reinterpret_cast<{{p.type}}*>({{ p.name }}->untyped_data())
+                {%- endif %}
+            {%- else %}
+        &{{ p.name }}
+            {%- endif %}
+        {{- "," if not loop.last else "" }}
+        {%- endfor %}
+    };
+
+    {%- if f.template_par %}
+    
+    // We have template parameters, so we need to instantiate all valid templates
+    // For this we select a function pointer through switch statements
+    const void* kernel;
+    
+    {%- for p in f.template_par %}
+        {%-if p.type=="int" %}
+    switch({{ p.name }}) {
+            {%- for pi in p.instances %}
+        case {{pi}}: kernel = (const void*) {{f.name}}<{{ pi }}>; break;
+            {%- endfor %}
+        default: return ffi::Error::Internal("Unsupported {{p.name}} value in {{f.name}}FFIHost");
+    };
+        {%- endif %}
+    {%- endfor %}
+    
+    cudaLaunchKernel(kernel, dim3(grid_size), dim3(block_size), args, 0, stream);
+    {%- else %}
+    cudaLaunchKernel({{f.name}}, dim3(grid_size), dim3(block_size), args, 0, stream);
+    {%- endif %}
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    {{ f.name }}FFI, {{ f.name }}FFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+{%- for p in f.par %}
+        {%- if p.is_ptr %}
+            {%- if p.is_const %}
+        .Arg<ffi::AnyBuffer>() // {{ p.name }}
+            {%- else %}
+        .Ret<ffi::AnyBuffer>() // {{ p.name }}
+            {%- endif %}
+        {%- else %}
+        .Attr<{{p.type}}>("{{ p.name }}")
+        {%- endif %}
+{%- endfor %}
+{%- for p in f.template_par %}
+    {%-if p.type=="int" %}
+        .Attr<{{p.type}}>("{{ p.name }}")
+    {%- endif %}
+{%- endfor %}
+        .Attr<size_t>("grid_size")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
