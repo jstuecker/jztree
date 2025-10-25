@@ -23,9 +23,11 @@ ffi::Error TestPositionsFFIHost (
     int num,
     float boxsize,
     int p,
-    size_t grid_size,
-    size_t block_size
+    size_t grid_size
 ) {
+    dim3 blockDim(64);
+    dim3 gridDim(grid_size);
+    
     // Build a bundled argument list for cudaLaunchKernel
     void* args[] = {
         reinterpret_cast<int*>(indices.untyped_data()),
@@ -45,7 +47,7 @@ ffi::Error TestPositionsFFIHost (
         default: return ffi::Error::Internal("Unsupported p value in TestPositionsFFIHost");
     };
     
-    cudaLaunchKernel(kernel, dim3(grid_size), dim3(block_size), args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -63,8 +65,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int>("num")
         .Attr<float>("boxsize")
         .Attr<int>("p")
-        .Attr<size_t>("grid_size")
-        .Attr<size_t>("block_size"),
+        .Attr<size_t>("grid_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
@@ -76,15 +77,17 @@ ffi::Error SimpleArangeFFIHost (
     cudaStream_t stream,
     ffi::Result<ffi::AnyBuffer> output,
     int size,
-    size_t grid_size,
     size_t block_size
 ) {
+    dim3 blockDim(block_size);
+    dim3 gridDim(div_ceil(output->dimensions()[0], block_size));
+    
     // Build a bundled argument list for cudaLaunchKernel
     void* args[] = {
         reinterpret_cast<int*>(output->untyped_data()),
         &size
     };
-    cudaLaunchKernel(SimpleArange, dim3(grid_size), dim3(block_size), args, 0, stream);
+    cudaLaunchKernel(SimpleArange, gridDim, blockDim, args, 0, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -99,7 +102,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Ret<ffi::AnyBuffer>() // output
         .Attr<int>("size")
-        .Attr<size_t>("grid_size")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

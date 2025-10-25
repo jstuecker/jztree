@@ -1,24 +1,40 @@
+{%- set sep = joiner(",\n") -%}
 ffi::Error {{ f.name }}FFIHost (
-    cudaStream_t stream,
-{%- for p in f.par %}
-        {%- if p.is_ptr %}
-            {%- if p.is_const %}
-    ffi::AnyBuffer {{ p.name }}
-            {%- else %}
-    ffi::Result<ffi::AnyBuffer> {{ p.name }}
-            {%- endif %}
-        {%- else %}
-    {{ p.type }} {{ p.name }}
-        {%- endif %},
-{%- endfor %}
-{%- for p in f.template_par %}
-    {%-if p.type=="int" %}
-    {{ p.type }} {{ p.name }},
-    {%- endif %}
-{%- endfor %}
-    size_t grid_size,
-    size_t block_size
+{{ sep() }}    cudaStream_t stream
+{%- for p in f.par -%}
+        {%- if p.is_ptr -%}
+            {%- if p.is_const -%}
+{{ sep() }}    ffi::AnyBuffer {{ p.name -}}
+            {%- else -%}
+{{ sep() }}    ffi::Result<ffi::AnyBuffer> {{ p.name -}}
+            {%- endif -%}
+        {%- else -%}
+{{ sep() }}    {{ p.type }} {{ p.name -}}
+        {%- endif -%}
+{%- endfor -%}
+{%- for p in f.template_par -%}
+    {%-if p.type=="int" -%}
+{{ sep() }}    {{ p.type }} {{ p.name }}
+    {%- endif -%}
+{%- endfor -%}
+{%- if not f.grid_size_expression -%}
+{{ sep() }}    size_t grid_size
+{%- endif -%}
+{%- if not f.block_size_expression -%}
+{{ sep() }}    size_t block_size
+{%- endif %}
 ) {
+{%- if f.block_size_expression%}
+    dim3 blockDim({{ f.block_size_expression }});
+{%- else %}
+    dim3 blockDim(block_size);
+{%- endif %}
+{%- if f.grid_size_expression %}
+    dim3 gridDim({{ f.grid_size_expression }});
+{%- else %}
+    dim3 gridDim(grid_size);    
+{%- endif %}
+    
     // Build a bundled argument list for cudaLaunchKernel
     void* args[] = {
         {%- for p in f.par %}
@@ -52,9 +68,9 @@ ffi::Error {{ f.name }}FFIHost (
         {%- endif %}
     {%- endfor %}
     
-    cudaLaunchKernel(kernel, dim3(grid_size), dim3(block_size), args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
     {%- else %}
-    cudaLaunchKernel({{f.name}}, dim3(grid_size), dim3(block_size), args, 0, stream);
+    cudaLaunchKernel({{f.name}}, gridDim, blockDim, args, 0, stream);
     {%- endif %}
 
     cudaError_t last_error = cudaGetLastError();
@@ -84,7 +100,11 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<{{p.type}}>("{{ p.name }}")
     {%- endif %}
 {%- endfor %}
+{%- if not f.grid_size_expression %}
         .Attr<size_t>("grid_size")
-        .Attr<size_t>("block_size"),
+{%- endif %}
+{%- if not f.block_size_expression %}
+        .Attr<size_t>("block_size")
+{%- endif %},
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

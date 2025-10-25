@@ -26,6 +26,8 @@ class FunctionInfo():
     type : str = "void"
     is_kernel : bool = False
     template_par : list[ParamInfo] = ()
+    block_size_expression : str = ""
+    grid_size_expression : str = ""
 
 CUDA = Language(tree_sitter_cuda.language())
 parser = Parser(CUDA)
