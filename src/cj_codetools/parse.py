@@ -4,7 +4,7 @@ try:
 except ImportError as e:
     raise ImportError("Please install tree-sitter and tree-sitter-cuda packages to use this module.") from e
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 @dataclass
 class ParamInfo():
@@ -12,6 +12,7 @@ class ParamInfo():
     name : str = ""
     is_ptr : bool = False
     is_const : bool = False
+    expression : str = ""
 
 @dataclass
 class TemplateParamInfo():
@@ -22,10 +23,10 @@ class TemplateParamInfo():
 @dataclass
 class FunctionInfo():
     name : str
-    par : list[ParamInfo]
+    par : dict[str, ParamInfo]
     type : str = "void"
     is_kernel : bool = False
-    template_par : list[ParamInfo] = ()
+    template_par : dict[str, ParamInfo] = field(default_factory=dict)
     block_size_expression : str = ""
     grid_size_expression : str = ""
 
@@ -41,10 +42,10 @@ def query(node: Node, query_src: str) -> dict:
 
     return caps
 
-def interprete_parameter_list(node_param: Node, txt: str) -> list[ParamInfo]:
+def interprete_parameter_list(node_param: Node, txt: str) -> dict[str, ParamInfo]:
     assert node_param.type == "parameter_list"
 
-    res = []
+    res = {}
     for c in node_param.named_children:
         if c.type == "comment": continue
 
@@ -65,14 +66,14 @@ def interprete_parameter_list(node_param: Node, txt: str) -> list[ParamInfo]:
         else:
             raise ValueError("Unknown type %s" % decl.type)
         
-        res.append(pinfo)
+        res[pinfo.name] = pinfo
 
     return res
 
-def interprete_template_list(node_param: Node, txt: str) -> list[TemplateParamInfo]:
+def interprete_template_list(node_param: Node, txt: str) -> dict[str, TemplateParamInfo]:
     assert node_param.type == "template_parameter_list"
 
-    res = []
+    res = {}
     for c in node_param.named_children:
         assert c.type == "parameter_declaration"
 
@@ -81,7 +82,7 @@ def interprete_template_list(node_param: Node, txt: str) -> list[TemplateParamIn
         pinfo.name = node_text(c.child_by_field_name("declarator"), txt)
         pinfo.instances = []
         
-        res.append(pinfo)
+        res[pinfo.name] = pinfo
 
     return res
 

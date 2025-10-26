@@ -124,6 +124,6 @@ cj_evaluate_tree_plane.jit = jax.jit(cj_evaluate_tree_plane, static_argnames=['c
 def simple_arange(n: int) -> jnp.ndarray:
     out_type = jax.ShapeDtypeStruct((n,), jnp.int32)
     arr = jax.ffi.ffi_call("SimpleArange", (out_type,))(
-        size=np.int32(n), block_size=np.uint64(64)
+        block_size=np.uint64(64)
     )[0]
     return arr

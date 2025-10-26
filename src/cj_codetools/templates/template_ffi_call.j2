@@ -8,7 +8,7 @@ ffi::Error {{ f.name }}FFIHost (
             {%- else -%}
 {{ sep() }}    ffi::Result<ffi::AnyBuffer> {{ p.name -}}
             {%- endif -%}
-        {%- else -%}
+        {%- elif not p.expression -%}
 {{ sep() }}    {{ p.type }} {{ p.name -}}
         {%- endif -%}
 {%- endfor -%}
@@ -24,6 +24,12 @@ ffi::Error {{ f.name }}FFIHost (
 {{ sep() }}    size_t block_size
 {%- endif %}
 ) {
+{%- for p in f.par -%}
+    {%- if not p.is_ptr and p.expression %}
+    {{ p.type }} {{ p.name }} = {{ p.expression -}};
+    {%- endif -%}
+{%- endfor %}
+
 {%- if f.block_size_expression%}
     dim3 blockDim({{ f.block_size_expression }});
 {%- else %}
@@ -99,7 +105,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
             {%- else %}
         .Ret<ffi::AnyBuffer>() // {{ p.name }}
             {%- endif %}
-        {%- else %}
+        {%- elif not p.expression %}
         .Attr<{{p.type}}>("{{ p.name }}")
         {%- endif %}
 {%- endfor %}

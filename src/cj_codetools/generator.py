@@ -1,20 +1,29 @@
 from .parse import FunctionInfo
 from jinja2 import Environment, PackageLoader, select_autoescape
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 env = Environment(
     loader=PackageLoader("cj_codetools", "templates"),
     autoescape=select_autoescape()
 )
 
-def validate_function_info(func: FunctionInfo):
+def simplify_and_validate(func: FunctionInfo) -> FunctionInfo:
+    # convert dicts to lists for easier templating
+    func = replace(
+        func, 
+        par = list(func.par.values()),
+        template_par = list(func.template_par.values())
+    )
+
     for p in func.template_par:
         if len(p.instances) == 0:
             raise ValueError(f"Please define instances for template parameter {p.name} "
                              f"in function {func.name}.")
 
+    return func
+
 def create_ffi_call(func: FunctionInfo) -> str:
-    validate_function_info(func)
+    func = simplify_and_validate(func)
 
     template = env.get_template("template_ffi_call.j2")
     return template.render(f=func)
@@ -25,11 +34,12 @@ def create_ffi_module_code(funcs: list[FunctionInfo],
     if type(funcs) is dict:
         funcs = list(funcs.values())
 
+    new_funcs = []
     for f in funcs:
-        validate_function_info(f)
+        new_funcs.append(simplify_and_validate(f))
 
     template = env.get_template("template_ffi_module.j2")
-    return template.render(functions=funcs, includes=includes, module_name=module_name)
+    return template.render(functions=new_funcs, includes=includes, module_name=module_name)
 
 def generate_ffi_module_file(output_file: str, 
                              functions: list[FunctionInfo],

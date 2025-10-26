@@ -80,11 +80,11 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 ffi::Error SimpleArangeFFIHost (
     cudaStream_t stream,
     ffi::Result<ffi::AnyBuffer> output,
-    int size,
     size_t block_size
 ) {
+    int size = output->element_count();
     dim3 blockDim(block_size);
-    dim3 gridDim(div_ceil(output->dimensions()[0], block_size));
+    dim3 gridDim(div_ceil(output->element_count(), block_size));
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
@@ -108,7 +108,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Ret<ffi::AnyBuffer>() // output
-        .Attr<int>("size")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
