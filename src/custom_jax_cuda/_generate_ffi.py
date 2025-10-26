@@ -83,7 +83,7 @@ gen.generate_ffi_module_file(
 
 
 functions = parse.get_functions_from_file(
-    str(HERE / "tree_new.cuh"),
+    str(HERE / "tree.cuh"),
     names=["PosZorderSort", "BuildZTree", "SummarizeLeaves", "SearchSortedZ"],
     only_kernels=False
 )
@@ -106,5 +106,5 @@ functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tree.cu"), 
     functions = functions, 
-    includes = ["../tree_new.cuh"]
+    includes = ["../tree.cuh"]
 )
