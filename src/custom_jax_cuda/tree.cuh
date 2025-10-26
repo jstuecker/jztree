@@ -1,15 +1,7 @@
 #ifndef CUSTOM_JAX_TREE_H
 #define CUSTOM_JAX_TREE_H
-#include <type_traits>
 
-// #include "xla/ffi/api/ffi.h"
-
-// #include "shared_utils.cuh"
 #include <cub/cub.cuh>
-#include <thrust/sort.h>
-#include <thrust/execution_policy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/device_vector.h>
 #include <math_constants.h>
 
 #if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2

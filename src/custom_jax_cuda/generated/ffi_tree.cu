@@ -7,7 +7,7 @@
 #include "xla/ffi/api/ffi.h"
 
 #include "../shared_utils.cuh"
-#include "../tree_new.cuh"
+#include "../tree.cuh"
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
