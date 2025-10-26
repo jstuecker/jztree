@@ -158,12 +158,26 @@ endforeach()
 # Auto-add all modules from src/custom_jax_cuda/generated
 # ----------------------------------------------------------------------------------------------- #
 
-# Optionally run the generator so files exist at configure time
-# execute_process(
-#   COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/src/custom_jax_cuda/_generate_ffi.py"
-#   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-#   COMMAND_ERROR_IS_FATAL ANY
-# )
+# Build-time toggle: only generate sources when explicitly requested
+option(CJ_GENERATE "Generate FFI source files at configure time" OFF)
+# Allow enabling via environment variable too: CJ_GENERATE=1/ON/TRUE
+if(DEFINED ENV{CJ_GENERATE})
+  if("$ENV{CJ_GENERATE}" STREQUAL "1" OR "$ENV{CJ_GENERATE}" STREQUAL "ON" OR "$ENV{CJ_GENERATE}" STREQUAL "TRUE")
+    set(CJ_GENERATE ON CACHE BOOL "Generate FFI source files at configure time" FORCE)
+  endif()
+endif()
+
+# Optionally run the generator so files exist at configure time (opt-in)
+if(CJ_GENERATE)
+  message(STATUS "CJ_GENERATE=ON: Running CUDA FFI generator script")
+  execute_process(
+    COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/src/custom_jax_cuda/_generate_ffi.py"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMAND_ERROR_IS_FATAL ANY
+  )
+else()
+  message(STATUS "CJ_GENERATE=OFF: Skipping CUDA FFI generation (enable with -DCJ_GENERATE=ON or CJ_GENERATE=1)")
+endif()
 
 # Pick up all generated .cu files; re-scan on re-configure
 file(GLOB GEN_FFI_CU CONFIGURE_DEPENDS
