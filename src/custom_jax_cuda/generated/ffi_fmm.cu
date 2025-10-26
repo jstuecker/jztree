@@ -16,7 +16,7 @@ namespace ffi = xla::ffi;
 /*                             FFI call to CUDA kernel: TestPositions                             */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error TestPositionsFFIHost (
+ffi::Error TestPositionsFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer indices,
     ffi::Result<ffi::AnyBuffer> positions,
@@ -77,7 +77,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: SimpleArange                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error SimpleArangeFFIHost (
+ffi::Error SimpleArangeFFIHost(
     cudaStream_t stream,
     ffi::Result<ffi::AnyBuffer> output,
     size_t block_size

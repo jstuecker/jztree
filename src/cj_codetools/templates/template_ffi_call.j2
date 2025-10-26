@@ -1,27 +1,25 @@
-{%- set sep = joiner(",\n") -%}
-ffi::Error {{ f.name }}FFIHost (
-{{ sep() }}    cudaStream_t stream
+{%- set sep = joiner(",") -%}
+ffi::Error {{ f.name }}FFIHost({{ sep() }}
+    cudaStream_t stream
 {%- for p in f.par -%}
         {%- if p.is_ptr -%}
-            {%- if p.is_const -%}
-{{ sep() }}    ffi::AnyBuffer {{ p.name -}}
-            {%- else -%}
-{{ sep() }}    ffi::Result<ffi::AnyBuffer> {{ p.name -}}
+            {%- if p.is_const -%}{{ sep() }}
+    ffi::AnyBuffer {{ p.name -}}
+            {%- else %}{{ sep() }}
+    ffi::Result<ffi::AnyBuffer> {{ p.name -}}
             {%- endif -%}
-        {%- elif not p.expression -%}
-{{ sep() }}    {{ p.type }} {{ p.name -}}
+        {%- elif not p.expression -%}{{ sep() }}
+    {{ p.type }} {{ p.name -}}
         {%- endif -%}
 {%- endfor -%}
-{%- for p in f.template_par -%}
-    {%-if p.type=="int" -%}
-{{ sep() }}    {{ p.type }} {{ p.name }}
-    {%- endif -%}
+{%- for p in f.template_par if p.type=="int" -%}{{ sep() }}
+    {{ p.type }} {{ p.name }}
 {%- endfor -%}
-{%- if not f.grid_size_expression -%}
-{{ sep() }}    size_t grid_size
+{%- if not f.grid_size_expression -%}{{ sep() }}
+    size_t grid_size
 {%- endif -%}
-{%- if not f.block_size_expression -%}
-{{ sep() }}    size_t block_size
+{%- if not f.block_size_expression -%}{{ sep() }}
+    size_t block_size
 {%- endif %}
 ) {
 {%- for p in f.par -%}
@@ -55,14 +53,14 @@ ffi::Error {{ f.name }}FFIHost (
     {%- endfor %}
 
     void* args[] = {
-        {%- for p in f.par %}
+    {%- for p in f.par %}
         {%-if p.is_ptr %}
         &{{p.name}}_val
         {%- else %}
         &{{ p.name }}
         {%- endif %}
         {{- "," if not loop.last else "" }}
-        {%- endfor %}
+    {%- endfor %}
     };
 
     {%- if f.template_par %}
@@ -109,10 +107,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<{{p.type}}>("{{ p.name }}")
         {%- endif %}
 {%- endfor %}
-{%- for p in f.template_par %}
-    {%-if p.type=="int" %}
+{%- for p in f.template_par if p.type=="int" %}
         .Attr<{{p.type}}>("{{ p.name }}")
-    {%- endif %}
 {%- endfor %}
 {%- if not f.grid_size_expression %}
         .Attr<size_t>("grid_size")
