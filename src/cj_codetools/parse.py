@@ -13,6 +13,7 @@ class ParamInfo():
     is_ptr : bool = False
     is_const : bool = False
     expression : str = ""
+    init_zero : bool = False
 
 @dataclass
 class TemplateParamInfo():
@@ -29,6 +30,7 @@ class FunctionInfo():
     template_par : dict[str, ParamInfo] = field(default_factory=dict)
     block_size_expression : str = ""
     grid_size_expression : str = ""
+    init_outputs_zero : bool = False
 
 CUDA = Language(tree_sitter_cuda.language())
 parser = Parser(CUDA)

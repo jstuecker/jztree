@@ -12,7 +12,7 @@ from typing import Tuple
 
 jax.ffi.register_ffi_target("multipoles_from_particles", ffi_multipoles.multipoles_from_particles(), platform="CUDA")
 jax.ffi.register_ffi_target("coarsen_multipoles", ffi_multipoles.coarsen_multipoles(), platform="CUDA")
-jax.ffi.register_ffi_target("evaluate_tree_plane", ffi_multipoles.evaluate_tree_plane(), platform="CUDA")
+jax.ffi.register_ffi_target("EvaluateTreePlane", ffi_fmm.EvaluateTreePlane(), platform="CUDA")
 # jax.ffi.register_ffi_target("TestPositionsCall", ffi_fmm.TestPositions(), platform="CUDA")
 jax.ffi.register_ffi_target("SimpleArange", ffi_fmm.SimpleArange(), platform="CUDA")
 
@@ -106,11 +106,11 @@ def cj_evaluate_tree_plane(
     
     # Make FFI call
     loc, spl_child_ilist, child_ilist = jax.ffi.ffi_call(
-        "evaluate_tree_plane",
+        "EvaluateTreePlane",
         (out_loc, out_spl_child_ilist, out_child_ilist)
     )(
         node_range, spl_nodes, spl_ilist, ilist_nodes, xchild, mp_values,
-        p=np.uint64(cfg_tree.p), 
+        p=np.int32(cfg_tree.p), 
         block_size=np.uint64(32),
         epsilon=np.float32(cfg.softening)
     )
