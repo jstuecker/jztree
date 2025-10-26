@@ -38,13 +38,13 @@ gen.generate_ffi_module_file(
 
 kernels = parse.get_functions_from_file(
     str(HERE / "fmm.cuh"), 
-    only_kernels=True, 
-    names=["EvaluateTreePlane"]
+    only_kernels=True
 )
 
-kernels["EvaluateTreePlane"].template_par["p"].instances = p_instance_values
-kernels["EvaluateTreePlane"].grid_size_expression = "spl_nodes.element_count() - 1"
-kernels["EvaluateTreePlane"].init_outputs_zero = True
+# kernels["CountInteractions"].template_par["p"].instances = p_instance_values
+kernels["CountInteractions"].grid_size_expression = "spl_nodes.element_count() - 1"
+kernels["CountInteractions"].init_outputs_zero = True
+kernels["CountInteractions"].block_size_expression = 32
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_fmm.cu"), 

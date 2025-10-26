@@ -12,7 +12,7 @@ from typing import Tuple
 
 jax.ffi.register_ffi_target("MultipolesFromParticles", ffi_multipoles.MultipolesFromParticles(), platform="CUDA")
 jax.ffi.register_ffi_target("CoarsenMultipoles", ffi_multipoles.CoarsenMultipoles(), platform="CUDA")
-jax.ffi.register_ffi_target("EvaluateTreePlane", ffi_fmm.EvaluateTreePlane(), platform="CUDA")
+jax.ffi.register_ffi_target("CountInteractions", ffi_fmm.CountInteractions(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
 from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList
@@ -93,25 +93,29 @@ def cj_evaluate_tree_plane(
     ilist_nodes = ilist_lr.iother
     
     nchild = plane.nnodes
-    xchild = plane.mp.center()
+
+    children = jnp.concatenate((plane.mp.center(), plane.lvl.view(jnp.float32)[...,None]), axis=-1)
     
-    mp_values = plane.mp.values
+    # mp_values = plane.mp.values
     
     # Determine output shapes
     out_loc = jax.ShapeDtypeStruct(plane.mp.values.shape, jnp.float32)
-    out_spl_child_ilist = jax.ShapeDtypeStruct((nchild + 1,), jnp.int32)
+    out_interaction_count = jax.ShapeDtypeStruct((nchild + 1,), jnp.int32)
     out_child_ilist = jax.ShapeDtypeStruct((nint_out,), jnp.int32)
     
     # Make FFI call
-    loc, spl_child_ilist, child_ilist = jax.ffi.ffi_call(
-        "EvaluateTreePlane",
-        (out_loc, out_spl_child_ilist, out_child_ilist)
+    spl_child_ilist = jax.ffi.ffi_call(
+        "CountInteractions",
+        (out_interaction_count, )
     )(
-        node_range, spl_nodes, spl_ilist, ilist_nodes, xchild, mp_values,
-        p=np.int32(cfg_tree.p), 
-        block_size=np.uint64(32),
+        node_range, spl_nodes, spl_ilist, ilist_nodes, children, #mp_values,
+        # p=np.int32(cfg_tree.p), 
+        # block_size=np.uint64(32),
         epsilon=np.float32(cfg.softening)
-    )
+    )[0]
+
+    loc = jnp.zeros(out_loc.shape, dtype=out_loc.dtype)  # Placeholder for local expansions
+    child_ilist = jnp.zeros(out_child_ilist.shape, dtype=out_child_ilist.dtype)  # Placeholder for child interaction list
     
     # Create interaction list from outputs
     new_ilist = InteractionList(ispl=spl_child_ilist, iother=child_ilist, nfilled=spl_child_ilist[-1])

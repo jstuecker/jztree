@@ -5,19 +5,26 @@
 /*                                   Evaluate Tree Plane Kernel                                   */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<int p>
-__global__ void EvaluateTreePlane(
+#define BLOCKSIZE 32
+
+struct NodeInfo {
+    float3 center;
+    int level;
+};
+
+// template<int p>
+__global__ void CountInteractions(
     // inputs:
     const int2* node_range,
     const int* spl_nodes,
     const int* spl_ilist,
     const int* ilist_nodes,
-    const float3* xchild,
-    const float* mp_values,
+    const NodeInfo* children,
+    // const float* mp_values,
     // outputs:
-    float* loc_out,
-    int* spl_child_ilist_out,
-    int* child_ilist_out,
+    // float* loc_out,
+    int* child_count_out,
+    // int* child_ilist_out,
     // attributes:
     float epsilon
 ) {
@@ -27,13 +34,23 @@ __global__ void EvaluateTreePlane(
         return;
     }
 
-    int2 prange = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
+    int2 child_range = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
 
-    int ipart = prange.x + threadIdx.x;
-    bool valid = ipart < prange.y;
+    __shared__ NodeInfo childA[BLOCKSIZE];
+    
+    if(threadIdx.x < (child_range.y - child_range.x))
+        childA[threadIdx.x] = children[child_range.x + threadIdx.x];
+    else
+        childA[threadIdx.x] = {0.f, 0.f, 0.f, 0};
+    
+    // int ipart = prange.x + threadIdx.x;
+    // bool valid = ipart < prange.y;
 
-    if(valid) {
-        loc_out[ipart] = threadIdx.x; // placeholder write
+    // if(valid) {
+    //     loc_out[ipart] = threadIdx.x; // placeholder write
+    // }
+    if(threadIdx.x < (child_range.y - child_range.x)) {
+        child_count_out[child_range.x + threadIdx.x] = child_range.x + threadIdx.x;
     }
 }
 
