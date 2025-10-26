@@ -10,8 +10,8 @@ import custom_jax_cuda.ffi_fmm as ffi_fmm
 
 from typing import Tuple
 
-jax.ffi.register_ffi_target("multipoles_from_particles", ffi_multipoles.multipoles_from_particles(), platform="CUDA")
-jax.ffi.register_ffi_target("coarsen_multipoles", ffi_multipoles.coarsen_multipoles(), platform="CUDA")
+jax.ffi.register_ffi_target("MultipolesFromParticles", ffi_multipoles.MultipolesFromParticles(), platform="CUDA")
+jax.ffi.register_ffi_target("CoarsenMultipoles", ffi_multipoles.CoarsenMultipoles(), platform="CUDA")
 jax.ffi.register_ffi_target("EvaluateTreePlane", ffi_fmm.EvaluateTreePlane(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
@@ -33,8 +33,8 @@ def multipoles_from_particles(tp: TreePlane, part: Particles, *, cfg: Config) ->
     out_mp = jax.ShapeDtypeStruct((tp.size(), ncomb[cfg_tree.p]), posm.dtype)
     out_xcent = jax.ShapeDtypeStruct((tp.size(), 3), posm.dtype)
 
-    mp, xcent = jax.ffi.ffi_call("multipoles_from_particles", (out_mp, out_xcent))(
-        tp.ispl, posm, p=np.uint64(cfg_tree.p), block_size=np.uint64(32)
+    mp, xcent = jax.ffi.ffi_call("MultipolesFromParticles", (out_mp, out_xcent))(
+        tp.ispl, posm, p=np.int32(cfg_tree.p), block_size=np.uint64(32)
     )
     
     return Multipoles(xcent=xcent, values=mp, p=cfg_tree.p, around_com=True)
@@ -54,8 +54,8 @@ def coarsen_multipoles(mp: Multipoles, tp: TreePlane, *, cfg: Config) -> Multipo
     out_mp = jax.ShapeDtypeStruct((tp.size(), ncomb[mp.p]), dtype)
     out_xcent = jax.ShapeDtypeStruct((tp.size(), 3), dtype)
 
-    mpnew, xcent = jax.ffi.ffi_call("coarsen_multipoles", (out_mp, out_xcent))(
-        tp.ispl, mp.values, mp.center(), p=np.uint64(mp.p), block_size=np.uint64(32)
+    mpnew, xcent = jax.ffi.ffi_call("CoarsenMultipoles", (out_mp, out_xcent))(
+        tp.ispl, mp.values, mp.center(), p=np.int32(mp.p), block_size=np.uint64(32)
     )
     return Multipoles(xcent=xcent, values=mpnew, p=mp.p, around_com=mp.around_com)
 coarsen_multipoles.jit = jax.jit(coarsen_multipoles, static_argnames=['cfg'])

@@ -30,7 +30,7 @@ ffi::Error SimpleArangeFFIHost(
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
     int* add_val = reinterpret_cast<int*>(add.untyped_data());
-    int* output_val = reinterpret_cast<int*>(output->untyped_data());;
+    int* output_val = reinterpret_cast<int*>(output->untyped_data());
 
     void* args[] = {
         &add_val,
@@ -42,7 +42,6 @@ ffi::Error SimpleArangeFFIHost(
     // For this we select a function pointer through switch statements
     const void* kernel;
     switch(p) {
-        case 0: kernel = (const void*) SimpleArange<0>; break;
         case 1: kernel = (const void*) SimpleArange<1>; break;
         case 2: kernel = (const void*) SimpleArange<2>; break;
         case 3: kernel = (const void*) SimpleArange<3>; break;

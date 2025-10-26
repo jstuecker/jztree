@@ -55,7 +55,8 @@ def interprete_parameter_list(node_param: Node, txt: str) -> dict[str, ParamInfo
 
         pinfo = ParamInfo()
 
-        pinfo.is_const = len(query(c, '(type_qualifier)? @tq (#eq? @tq "const")')) > 0
+        tq = query(c, '(type_qualifier)? @tq')
+        pinfo.is_const = any(node_text(cap, txt) == "const" for cap in tq.get("tq", []))
 
         pinfo.type = node_text(c.child_by_field_name("type"), txt)
 
@@ -88,9 +89,10 @@ def interprete_template_list(node_param: Node, txt: str) -> dict[str, TemplatePa
 
     return res
 
-def get_functions(node: Node, txt: str) -> dict[str, FunctionInfo]:
+def get_functions(node: Node, txt: str, skip_device=True) -> dict[str, FunctionInfo]:
     query_func = f"""
         (function_definition
+            ("__device__")? @fdevice
             ("__global__")? @fglobal
             type: (_) @ftype
             declarator: (function_declarator
@@ -103,6 +105,9 @@ def get_functions(node: Node, txt: str) -> dict[str, FunctionInfo]:
     cursor = QueryCursor(Query(CUDA, query_func))
     res = {}
     for i,match in cursor.matches(node):
+        if skip_device and (match.get("fdevice") is not None):
+            continue
+
         if (not "ftemp" in match) and () :
             print("template function")
         new_func = FunctionInfo(

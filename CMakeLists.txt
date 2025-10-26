@@ -120,11 +120,10 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -L${_cuda_lib} -Xlinker -rpath,${_cuda_lib}")
 
 # Define a list of modules and their source files
-set(MODULES ffi_forces ffi_tree ffi_multipoles ffi_knn)
+set(MODULES ffi_forces ffi_tree ffi_knn)
 set(MODULE_PATHS 
   src/custom_jax_cuda/forces.cu
   src/custom_jax_cuda/tree.cu
-  src/custom_jax_cuda/ffi_multipoles.cu
   src/custom_jax_cuda/knn.cu
 )
 
@@ -132,9 +131,9 @@ include_directories(SYSTEM ${XLA_DIR})
 
 # Build multipoles CUDA implementation separately as an object library so it can be
 # compiled once and linked into the ffi module. This speeds up iterative builds.
-add_library(multipoles_cuda OBJECT src/custom_jax_cuda/multipoles.cu)
-target_compile_options(multipoles_cuda PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
-target_compile_features(multipoles_cuda PRIVATE cxx_std_17)
+# add_library(multipoles_cuda OBJECT src/custom_jax_cuda/multipoles.cu)
+# target_compile_options(multipoles_cuda PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
+# target_compile_features(multipoles_cuda PRIVATE cxx_std_17)
 
 foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
     set(MODULE_NAME ${var_0})
@@ -146,9 +145,9 @@ foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
     target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
 
   # If this is the multipoles FFI module, link in the separately compiled CUDA object
-  if (${MODULE_NAME} STREQUAL "ffi_multipoles")
-    target_link_libraries(${MODULE_NAME} PRIVATE $<TARGET_OBJECTS:multipoles_cuda>)
-  endif()
+  # if (${MODULE_NAME} STREQUAL "ffi_multipoles")
+  #   target_link_libraries(${MODULE_NAME} PRIVATE $<TARGET_OBJECTS:multipoles_cuda>)
+  # endif()
 
   install(TARGETS ${MODULE_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME}_cuda)
 endforeach()

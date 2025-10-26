@@ -49,7 +49,7 @@ ffi::Error EvaluateTreePlaneFFIHost(
     float* mp_values_val = reinterpret_cast<float*>(mp_values.untyped_data());
     float* loc_out_val = reinterpret_cast<float*>(loc_out->untyped_data());
     int* spl_child_ilist_out_val = reinterpret_cast<int*>(spl_child_ilist_out->untyped_data());
-    int* child_ilist_out_val = reinterpret_cast<int*>(child_ilist_out->untyped_data());;
+    int* child_ilist_out_val = reinterpret_cast<int*>(child_ilist_out->untyped_data());
 
     void* args[] = {
         &node_range_val,

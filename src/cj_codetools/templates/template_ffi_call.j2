@@ -52,11 +52,11 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
         {%-if p.is_ptr %}
     {{p.type}}* {{p.name}}_val = {{""}}
             {%- if p.is_const -%}
-            reinterpret_cast<{{p.type}}*>({{ p.name }}.untyped_data())
+            reinterpret_cast<{{p.type}}*>({{ p.name }}.untyped_data());
             {%- else -%}
-            reinterpret_cast<{{p.type}}*>({{ p.name }}->untyped_data())
+            reinterpret_cast<{{p.type}}*>({{ p.name }}->untyped_data());
             {%- endif -%}
-        {%- endif %};
+        {%- endif %}
     {%- endfor %}
 
     void* args[] = {

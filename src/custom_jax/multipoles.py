@@ -7,8 +7,8 @@ import jax.numpy as jnp
 
 from custom_jax_cuda import ffi_multipoles as ffi_multipoles
 
-jax.ffi.register_ffi_target("ilist_m2l", ffi_multipoles.ilist_m2l(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_leaf2node_m2l", ffi_multipoles.ilist_leaf2node_m2l(), platform="CUDA")
+jax.ffi.register_ffi_target("IlistM2L", ffi_multipoles.IlistM2L(), platform="CUDA")
+jax.ffi.register_ffi_target("IlistLeaf2NodeM2L", ffi_multipoles.IlistLeaf2NodeM2L(), platform="CUDA")
 
 # ======= Multipole Translators =======
 
@@ -28,7 +28,7 @@ def ilist_node_to_node(xnodes, multipoles, interactions, irange=None, p=1, block
         interactions_per_block = np.clip(len(interactions) // (8096*block_size), 1, 256)
 
     out_type = jax.ShapeDtypeStruct(multipoles.shape, multipoles.dtype)
-    loc = jax.ffi.ffi_call("ilist_m2l", (out_type,))(xnodes, multipoles, interactions, irange, p=np.int32(p), block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
+    loc = jax.ffi.ffi_call("IlistM2L", (out_type,))(xnodes, multipoles, interactions, irange, p=np.int32(p), block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
     
     return loc
 ilist_node_to_node.jit = jax.jit(ilist_node_to_node, static_argnames=("p", "block_size", "softening"))
@@ -53,10 +53,10 @@ def ilist_leaf_to_node(xnodes, xpart, mpart, isplit,  interactions, irange=None,
         interactions_per_block = np.clip(len(interactions) // (4096), 2, 32)
 
     out_type = jax.ShapeDtypeStruct(xnodes.shape[:-1] + (ncomb,), xnodes.dtype)
-    loc = jax.ffi.ffi_call("ilist_leaf2node_m2l", (out_type,))(
+    loc = jax.ffi.ffi_call("IlistLeaf2NodeM2L", (out_type,))(
         xnodes, xm, isplit, jnp.abs(interactions), irange, p=np.int32(p), 
         interactions_per_block=np.uint64(interactions_per_block), 
-        epsilon=np.float32(softening))[0]
+        epsilon=np.float32(softening), block_size=np.uint64(32))[0]
     
     return loc
 ilist_leaf_to_node.jit = jax.jit(ilist_leaf_to_node, static_argnames=("p", "softening", "interactions_per_block"))
