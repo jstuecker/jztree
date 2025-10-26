@@ -376,7 +376,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 NB_MODULE(ffi_tree, m) {
     // m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
     // m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
-    m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
+    // m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
     // A bunch of deprecated functions
     // m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });
     // m.def("OldI3zsort", []() { return EncapsulateFfiCall(OldI3zsort); });

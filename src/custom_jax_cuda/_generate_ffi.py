@@ -84,7 +84,7 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "tree_new.cuh"),
-    names=["PosZorderSort", "BuildZTree", "SummarizeLeaves"],
+    names=["PosZorderSort", "BuildZTree", "SummarizeLeaves", "SearchSortedZ"],
     only_kernels=False
 )
 
@@ -99,7 +99,9 @@ functions["SummarizeLeaves"].par["n_leaves"].expression = "xnleaf.element_count(
 functions["SummarizeLeaves"].grid_size_expression = "div_ceil(n_leaves+1, block_size)"
 functions["SummarizeLeaves"].smem_size_expression = "(block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t))"
 
-print(functions["PosZorderSort"].type)
+functions["SearchSortedZ"].par["n_have"].expression = "posz_have.element_count()/3"
+functions["SearchSortedZ"].par["n_query"].expression = "posz_query.element_count()/3"
+functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tree_new.cu"), 

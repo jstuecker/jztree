@@ -8,7 +8,7 @@ from .common import conditional_callback
 jax.ffi.register_ffi_target("PosZorderSort", ffi_tree_new.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", ffi_tree_new.BuildZTree(), platform="CUDA")
 jax.ffi.register_ffi_target("SummarizeLeaves", ffi_tree_new.SummarizeLeaves(), platform="CUDA")
-jax.ffi.register_ffi_target("SearchSortedZ", ffi_tree.SearchSortedZ(), platform="CUDA")
+jax.ffi.register_ffi_target("SearchSortedZ", ffi_tree_new.SearchSortedZ(), platform="CUDA")
 
 def lvl_to_ext(level_binary):
     olvl, omod = level_binary//3, level_binary % 3

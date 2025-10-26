@@ -390,12 +390,12 @@ __global__ void SummarizeLeaves(
 /*                                         Search Sorted Z                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-__global__ void KernelSearchSortedZ(
+__global__ void SearchSortedZ(
     const float3* posz_have,
-    size_t n_have,
     const float3* posz_query,
-    size_t n_query,
     int32_t* indices,
+    size_t n_have,
+    size_t n_query,
     bool leaf_search
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;

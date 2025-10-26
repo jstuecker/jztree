@@ -152,6 +152,59 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: SearchSortedZ                             */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error SearchSortedZFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer posz_have,
+    ffi::AnyBuffer posz_query,
+    ffi::Result<ffi::AnyBuffer> indices,
+    bool leaf_search,
+    size_t block_size
+) {
+    size_t n_have = posz_have.element_count()/3;
+    size_t n_query = posz_query.element_count()/3;
+    dim3 blockDim(block_size);
+    dim3 gridDim(div_ceil(n_query, block_size));
+    size_t smem = 0;
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    float3* posz_have_val = reinterpret_cast<float3*>(posz_have.untyped_data());
+    float3* posz_query_val = reinterpret_cast<float3*>(posz_query.untyped_data());
+    int32_t* indices_val = reinterpret_cast<int32_t*>(indices->untyped_data());
+
+    void* args[] = {
+        &posz_have_val,
+        &posz_query_val,
+        &indices_val,
+        &n_have,
+        &n_query,
+        &leaf_search
+    };
+    cudaLaunchKernel((const void*)SearchSortedZ, gridDim, blockDim, args, smem, stream);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SearchSortedZFFI, SearchSortedZFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // posz_have
+        .Arg<ffi::AnyBuffer>() // posz_query
+        .Ret<ffi::AnyBuffer>() // indices
+        .Attr<bool>("leaf_search")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -159,4 +212,5 @@ NB_MODULE(ffi_tree_new, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(&PosZorderSortFFI); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(&BuildZTreeFFI); });
     m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(&SummarizeLeavesFFI); });
+    m.def("SearchSortedZ", []() { return EncapsulateFfiCall(&SearchSortedZFFI); });
 }
