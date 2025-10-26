@@ -13,8 +13,6 @@ from typing import Tuple
 jax.ffi.register_ffi_target("multipoles_from_particles", ffi_multipoles.multipoles_from_particles(), platform="CUDA")
 jax.ffi.register_ffi_target("coarsen_multipoles", ffi_multipoles.coarsen_multipoles(), platform="CUDA")
 jax.ffi.register_ffi_target("EvaluateTreePlane", ffi_fmm.EvaluateTreePlane(), platform="CUDA")
-# jax.ffi.register_ffi_target("TestPositionsCall", ffi_fmm.TestPositions(), platform="CUDA")
-jax.ffi.register_ffi_target("SimpleArange", ffi_fmm.SimpleArange(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
 from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList

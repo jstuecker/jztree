@@ -120,12 +120,11 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -L${_cuda_lib} -Xlinker -rpath,${_cuda_lib}")
 
 # Define a list of modules and their source files
-set(MODULES ffi_forces ffi_tree ffi_multipoles ffi_fmm ffi_knn)
+set(MODULES ffi_forces ffi_tree ffi_multipoles ffi_knn)
 set(MODULE_PATHS 
   src/custom_jax_cuda/forces.cu
   src/custom_jax_cuda/tree.cu
   src/custom_jax_cuda/ffi_multipoles.cu
-  src/custom_jax_cuda/generated/ffi_fmm.cu
   src/custom_jax_cuda/knn.cu
 )
 
@@ -136,7 +135,6 @@ include_directories(SYSTEM ${XLA_DIR})
 add_library(multipoles_cuda OBJECT src/custom_jax_cuda/multipoles.cu)
 target_compile_options(multipoles_cuda PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
 target_compile_features(multipoles_cuda PRIVATE cxx_std_17)
-
 
 foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
     set(MODULE_NAME ${var_0})
@@ -153,4 +151,32 @@ foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
   endif()
 
   install(TARGETS ${MODULE_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME}_cuda)
+endforeach()
+
+
+# ----------------------------------------------------------------------------------------------- #
+# Auto-add all modules from src/custom_jax_cuda/generated
+# ----------------------------------------------------------------------------------------------- #
+
+# Optionally run the generator so files exist at configure time
+# execute_process(
+#   COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/src/custom_jax_cuda/_generate_ffi.py"
+#   WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+#   COMMAND_ERROR_IS_FATAL ANY
+# )
+
+# Pick up all generated .cu files; re-scan on re-configure
+file(GLOB GEN_FFI_CU CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/custom_jax_cuda/generated/*.cu"
+)
+
+foreach(GEN_SRC IN LISTS GEN_FFI_CU)
+  message(STATUS "Compiling generated FFI module from source: ${GEN_SRC}")
+  get_filename_component(MOD_NAME "${GEN_SRC}" NAME_WE)  # e.g. ffi_fmm.cu -> ffi_fmm
+
+  nanobind_add_module(${MOD_NAME} "${GEN_SRC}")
+  target_compile_options(${MOD_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
+  target_compile_features(${MOD_NAME} PRIVATE cxx_std_17)
+
+  install(TARGETS ${MOD_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME}_cuda)
 endforeach()

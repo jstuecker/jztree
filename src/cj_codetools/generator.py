@@ -1,6 +1,7 @@
 from .parse import FunctionInfo
 from jinja2 import Environment, PackageLoader, select_autoescape
 from dataclasses import dataclass, replace
+import os
 
 env = Environment(
     loader=PackageLoader("cj_codetools", "templates"),
@@ -50,11 +51,16 @@ def generate_ffi_module_file(output_file: str,
 
     code = create_ffi_module_code(functions, includes, module_name)
 
-    with open(output_file, 'r') as f:
-        txt = f.read()
-    if txt != code:
-        print(f"Updated generated file at {output_file}")
-        with open(output_file, 'w') as f:
-            f.write(code)
-    else:
-        print(f"No changes to generated file at {output_file}")
+    if os.path.exists(output_file):
+        with open(output_file, 'r') as f:
+            txt = f.read()
+        if txt == code:
+            print(f"No changes to generated file at {output_file}")
+            return
+        else:
+            print(f"Updating generated file at {output_file}")
+    else: 
+        print(f"Generating new file file at {output_file}")
+    
+    with open(output_file, 'w') as f:
+        f.write(code)

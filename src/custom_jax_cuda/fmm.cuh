@@ -39,27 +39,4 @@ __global__ void EvaluateTreePlane(
     }
 }
 
-template<int p>
-__global__ void TestPositions(
-    const int* indices,
-    float3* positions,
-    int num,
-    float boxsize
-) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < num; i += blockDim.x * gridDim.x) {
-        int idx = indices[i];
-        positions[i] = make_float3(idx * boxsize, idx * boxsize, idx * boxsize);
-    }
-}
-
-__global__ void SimpleArange(
-    int* output,
-    int size
-) {
-    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < size; i += blockDim.x * gridDim.x) {
-        if( i < size )
-            output[i] = i;
-    }
-}
-
 #endif
