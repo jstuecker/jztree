@@ -5,7 +5,7 @@
 
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
-#include <string>
+
 #include "../shared_utils.cuh"
 #include "../fmm.cuh"
 
@@ -29,9 +29,13 @@ ffi::Error TestPositionsFFIHost (
     dim3 gridDim(grid_size);
     
     // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    int* indices_val = reinterpret_cast<int*>(indices.untyped_data());
+    float3* positions_val = reinterpret_cast<float3*>(positions->untyped_data());;;
+
     void* args[] = {
-        reinterpret_cast<int*>(indices.untyped_data()),
-        reinterpret_cast<float3*>(positions->untyped_data()),
+        &indices_val,
+        &positions_val,
         &num,
         &boxsize
     };
@@ -83,11 +87,14 @@ ffi::Error SimpleArangeFFIHost (
     dim3 gridDim(div_ceil(output->dimensions()[0], block_size));
     
     // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    int* output_val = reinterpret_cast<int*>(output->untyped_data());;
+
     void* args[] = {
-        reinterpret_cast<int*>(output->untyped_data()),
+        &output_val,
         &size
     };
-    cudaLaunchKernel(SimpleArange, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel((const void*)SimpleArange, gridDim, blockDim, args, 0, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

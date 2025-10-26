@@ -5,7 +5,7 @@
 
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
-#include <string>
+
 #include "../shared_utils.cuh"
 {%- for inc in includes %}
 #include "{{ inc }}"
@@ -27,7 +27,7 @@ namespace ffi = xla::ffi;
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-NB_MODULE(ffi_fmm, m) {
+NB_MODULE({{ module_name }}, m) {
 {%- for f in functions %}
     m.def("{{ f.name }}", []() { return EncapsulateFfiCall(&{{ f.name }}FFI); });
 {%- endfor %}

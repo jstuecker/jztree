@@ -36,17 +36,25 @@ ffi::Error {{ f.name }}FFIHost (
 {%- endif %}
     
     // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    {%- for p in f.par %}
+        {%-if p.is_ptr %}
+    {{p.type}}* {{p.name}}_val = {{""}}
+            {%- if p.is_const -%}
+            reinterpret_cast<{{p.type}}*>({{ p.name }}.untyped_data())
+            {%- else -%}
+            reinterpret_cast<{{p.type}}*>({{ p.name }}->untyped_data())
+            {%- endif -%}
+        {%- endif %};
+    {%- endfor %}
+
     void* args[] = {
         {%- for p in f.par %}
-            {%- if p.is_ptr %}
-                {%- if p.is_const %}
-        reinterpret_cast<{{p.type}}*>({{ p.name }}.untyped_data())
-                {%- else %}
-        reinterpret_cast<{{p.type}}*>({{ p.name }}->untyped_data())
-                {%- endif %}
-            {%- else %}
+        {%-if p.is_ptr %}
+        &{{p.name}}_val
+        {%- else %}
         &{{ p.name }}
-            {%- endif %}
+        {%- endif %}
         {{- "," if not loop.last else "" }}
         {%- endfor %}
     };
@@ -70,7 +78,7 @@ ffi::Error {{ f.name }}FFIHost (
     
     cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
     {%- else %}
-    cudaLaunchKernel({{f.name}}, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel((const void*){{f.name}}, gridDim, blockDim, args, 0, stream);
     {%- endif %}
 
     cudaError_t last_error = cudaGetLastError();

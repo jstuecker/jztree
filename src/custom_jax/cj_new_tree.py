@@ -6,12 +6,15 @@ import jax.numpy as jnp
 from fmdj.config import Config, TreeConfig
 
 import custom_jax_cuda.ffi_multipoles as ffi_multipoles
+import custom_jax_cuda.ffi_fmm as ffi_fmm
 
 from typing import Tuple
 
 jax.ffi.register_ffi_target("multipoles_from_particles", ffi_multipoles.multipoles_from_particles(), platform="CUDA")
 jax.ffi.register_ffi_target("coarsen_multipoles", ffi_multipoles.coarsen_multipoles(), platform="CUDA")
 jax.ffi.register_ffi_target("evaluate_tree_plane", ffi_multipoles.evaluate_tree_plane(), platform="CUDA")
+# jax.ffi.register_ffi_target("TestPositionsCall", ffi_fmm.TestPositions(), platform="CUDA")
+jax.ffi.register_ffi_target("SimpleArange", ffi_fmm.SimpleArange(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
 from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList
@@ -117,3 +120,10 @@ def cj_evaluate_tree_plane(
     
     return loc, new_ilist
 cj_evaluate_tree_plane.jit = jax.jit(cj_evaluate_tree_plane, static_argnames=['cfg'])
+
+def simple_arange(n: int) -> jnp.ndarray:
+    out_type = jax.ShapeDtypeStruct((n,), jnp.int32)
+    arr = jax.ffi.ffi_call("SimpleArange", (out_type,))(
+        size=np.int32(n), block_size=np.uint64(64)
+    )[0]
+    return arr

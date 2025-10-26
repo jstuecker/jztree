@@ -19,7 +19,9 @@ def create_ffi_call(func: FunctionInfo) -> str:
     template = env.get_template("template_ffi_call.j2")
     return template.render(f=func)
 
-def create_ffi_module_code(funcs: list[FunctionInfo], includes: tuple[str] = ()) -> str:
+def create_ffi_module_code(funcs: list[FunctionInfo], 
+                           includes: tuple[str] = (), 
+                           module_name: str = "ffi_module") -> str:
     if type(funcs) is dict:
         funcs = list(funcs.values())
 
@@ -27,12 +29,16 @@ def create_ffi_module_code(funcs: list[FunctionInfo], includes: tuple[str] = ())
         validate_function_info(f)
 
     template = env.get_template("template_ffi_module.j2")
-    return template.render(functions=funcs, includes=includes)
+    return template.render(functions=funcs, includes=includes, module_name=module_name)
 
 def generate_ffi_module_file(output_file: str, 
                              functions: list[FunctionInfo],
-                             includes: tuple[str] = ()) -> None:
-    code = create_ffi_module_code(functions, includes)
+                             includes: tuple[str] = (),
+                             module_name: str | None = None) -> None:
+    if module_name is None:
+        module_name = output_file.split("/")[-1].split(".")[0]
+
+    code = create_ffi_module_code(functions, includes, module_name)
 
     with open(output_file, 'r') as f:
         txt = f.read()
