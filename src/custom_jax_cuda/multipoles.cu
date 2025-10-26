@@ -1,6 +1,6 @@
 #include <type_traits>
 #include <stdexcept>
-#include "multipoles.h"
+#include "multipoles.cuh"
 #include <math_constants.h> // CUDART_NAN_F, CUDART_NAN
 
 // =============================================================

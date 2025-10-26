@@ -2,7 +2,7 @@
 #include "xla/ffi/api/ffi.h"
 #include <string>
 #include "shared_utils.cuh"
-#include "multipoles.h"
+#include "multipoles.cuh"
 #include "fmm.cuh"
 
 namespace nb = nanobind;
