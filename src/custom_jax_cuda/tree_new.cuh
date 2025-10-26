@@ -1,8 +1,10 @@
+#ifndef CUSTOM_JAX_TREE_H
+#define CUSTOM_JAX_TREE_H
 #include <type_traits>
 
-#include "nanobind/nanobind.h"
-#include "xla/ffi/api/ffi.h"
-#include "shared_utils.cuh"
+// #include "xla/ffi/api/ffi.h"
+
+// #include "shared_utils.cuh"
 #include <cub/cub.cuh>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
@@ -13,9 +15,6 @@
 #if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2
 #error "CUB version 2.0.0 or higher required"
 #endif
-
-namespace nb = nanobind;
-namespace ffi = xla::ffi;
 
 __device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
     // Finds the most significant bit that differs between x and y
@@ -77,53 +76,53 @@ __global__ void PosKeyArangeKernel(const float3* pos_in, PosId *keyid_out, size_
     }
 }
 
-ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> tmp_buffer, size_t block_size) {
-    size_t n = pos_in.element_count()/3;
+// ffi::Error HostPosZorderSort(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> id_out, ffi::ResultBuffer<ffi::S32> tmp_buffer, size_t block_size) {
+//     size_t n = pos_in.element_count()/3;
 
-    float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
-    PosId* keyids = reinterpret_cast<PosId*>(id_out->typed_data());
+//     float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
+//     PosId* keyids = reinterpret_cast<PosId*>(id_out->typed_data());
     
-    // Initialize indices 0, 1, 2, ..., n-1
-    PosKeyArangeKernel<<< div_ceil(n, block_size), block_size, 0, stream>>>(keys_in, keyids, n);
+//     // Initialize indices 0, 1, 2, ..., n-1
+//     PosKeyArangeKernel<<< div_ceil(n, block_size), block_size, 0, stream>>>(keys_in, keyids, n);
 
-    // We have an annoying problem here:
-    // CUB requires a temporary storage buffer and it will usually tell us dynamically what the
-    // size of it is (On first call with zero pointer).
-    // Unfortunately, we may not allocate storage dynamically in an FFI call
-    // Therefore, we have to estimate the storage requirements in advance in python/jax and pass
-    // a sufficiently large buffer to the function (via "tmp_buffer").
-    // Empirically I have found that the storage tends to be a bit larger than n * sizeof(PosId)
-    // that is why we will pre-allocate something that is a few percent larger than that.
-    // However, below we throw an error if our assumption ever turns out wrong.
+//     // We have an annoying problem here:
+//     // CUB requires a temporary storage buffer and it will usually tell us dynamically what the
+//     // size of it is (On first call with zero pointer).
+//     // Unfortunately, we may not allocate storage dynamically in an FFI call
+//     // Therefore, we have to estimate the storage requirements in advance in python/jax and pass
+//     // a sufficiently large buffer to the function (via "tmp_buffer").
+//     // Empirically I have found that the storage tends to be a bit larger than n * sizeof(PosId)
+//     // that is why we will pre-allocate something that is a few percent larger than that.
+//     // However, below we throw an error if our assumption ever turns out wrong.
 
-    // find out the required storage size
-    size_t required_storage_bytes;
-    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(nullptr, required_storage_bytes, keyids, n, PosIdLess());
+//     // find out the required storage size
+//     size_t required_storage_bytes;
+//     cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(nullptr, required_storage_bytes, keyids, n, PosIdLess());
     
-    // Check if the provided buffer is large enough
-    if (tmp_buffer->size_bytes() < required_storage_bytes) {
-        return ffi::Error::Internal(std::string(
-            "The buffer in ZorderSort is too small. Please contact me if this check fails.") +
-            std::string(" Have: ") + std::to_string(tmp_buffer->size_bytes()) +
-            std::string(". Required: ") + std::to_string(required_storage_bytes) +
-            std::string(". Diff: ") + std::to_string((long long)required_storage_bytes - (long long)tmp_buffer->size_bytes())
-        );
-    }
+//     // Check if the provided buffer is large enough
+//     if (tmp_buffer->size_bytes() < required_storage_bytes) {
+//         return ffi::Error::Internal(std::string(
+//             "The buffer in ZorderSort is too small. Please contact me if this check fails.") +
+//             std::string(" Have: ") + std::to_string(tmp_buffer->size_bytes()) +
+//             std::string(". Required: ") + std::to_string(required_storage_bytes) +
+//             std::string(". Diff: ") + std::to_string((long long)required_storage_bytes - (long long)tmp_buffer->size_bytes())
+//         );
+//     }
     
-    // This is how we would allocate if we could. (Note that doing this breaks jit in some cases!)
-    // cudaMallocAsync(&d_temp_storage, required_storage_bytes, stream); 
+//     // This is how we would allocate if we could. (Note that doing this breaks jit in some cases!)
+//     // cudaMallocAsync(&d_temp_storage, required_storage_bytes, stream); 
 
-    // Run the sort
-    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(tmp_buffer->untyped_data(), required_storage_bytes, keyids, n, PosIdLess(), stream);
+//     // Run the sort
+//     cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(tmp_buffer->untyped_data(), required_storage_bytes, keyids, n, PosIdLess(), stream);
     
-    // cudaFreeAsync(d_temp_storage, stream);
+//     // cudaFreeAsync(d_temp_storage, stream);
 
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
+//     cudaError_t last_error = cudaGetLastError();
+//     if (last_error != cudaSuccess) {
+//         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+//     }
+//     return ffi::Error::Success();
+// }
 
 __device__ __forceinline__ int32_t msb_diff_level(const float3 &p1, const float3 &p2) {
     int msb_x = float_xor_msb(p1.x, p2.x);
@@ -252,52 +251,32 @@ __global__ void KernelInitialize(NodePointers nodes, size_t n) {
     }
 }
 
-ffi::Error HostBuildZTree(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> outputs, size_t block_size) {
-    size_t n = pos_in.element_count()/3;
-    size_t Nnodes = n + 1;
+// ffi::Error HostBuildZTree(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> outputs, size_t block_size) {
+//     size_t n = pos_in.element_count()/3;
+//     size_t Nnodes = n + 1;
 
-    float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
+//     float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
 
-    // Output will be (5, Nnodes) array with different types of information in the first axis
-    // Create some easier readable pointers that start at offset locations in the output
-    int *out_ptr = outputs->typed_data();
-    NodePointers nodes;
-    nodes.levels = out_ptr;
-    nodes.lbound = out_ptr + Nnodes;
-    nodes.rbound = out_ptr + 2 * Nnodes;
-    nodes.lchild = out_ptr + 3 * Nnodes;
-    nodes.rchild = out_ptr + 4 * Nnodes;
+//     // Output will be (5, Nnodes) array with different types of information in the first axis
+//     // Create some easier readable pointers that start at offset locations in the output
+//     int *out_ptr = outputs->typed_data();
+//     NodePointers nodes;
+//     nodes.levels = out_ptr;
+//     nodes.lbound = out_ptr + Nnodes;
+//     nodes.rbound = out_ptr + 2 * Nnodes;
+//     nodes.lchild = out_ptr + 3 * Nnodes;
+//     nodes.rchild = out_ptr + 4 * Nnodes;
     
-    KernelInitialize<<< div_ceil(Nnodes, block_size), block_size, 0, stream>>>(nodes, n);
+//     KernelInitialize<<< div_ceil(Nnodes, block_size), block_size, 0, stream>>>(nodes, n);
 
-    KernelBinarySearchLeftParent<<< div_ceil(n-1, block_size), block_size, 0, stream>>>(keys_in, nodes, n);
+//     KernelBinarySearchLeftParent<<< div_ceil(n-1, block_size), block_size, 0, stream>>>(keys_in, nodes, n);
 
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    PosZorderSort, HostPosZorderSort,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()        // pos
-        .Ret<ffi::Buffer<ffi::S32>>()        // output ids / pos
-        .Ret<ffi::Buffer<ffi::S32>>()        // temporary buffer
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    BuildZTree, HostBuildZTree,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()        // pos
-        .Ret<ffi::Buffer<ffi::S32>>()        // output level
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
+//     cudaError_t last_error = cudaGetLastError();
+//     if (last_error != cudaSuccess) {
+//         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+//     }
+//     return ffi::Error::Success();
+// }
 
 // Include deprecated functions
 // This module includes a bunch of functions that we do not need anymore, but we keep
@@ -375,47 +354,34 @@ __global__ void KernelSummarizeLeaves(
     }
 }
 
-ffi::Error HostSummarizeLeaves(
-    cudaStream_t stream, 
-    ffi::Buffer<ffi::F32> xnleaf,
-    ffi::Buffer<ffi::S32> nleaves_filled,
-    ffi::ResultBuffer<ffi::S32> flags_split,
-    size_t max_size,
-    size_t block_size,
-    size_t scan_size
-) {
-    size_t n_leaves = xnleaf.element_count()/4;
+// ffi::Error HostSummarizeLeaves(
+//     cudaStream_t stream, 
+//     ffi::Buffer<ffi::F32> xnleaf,
+//     ffi::Buffer<ffi::S32> nleaves_filled,
+//     ffi::ResultBuffer<ffi::S32> flags_split,
+//     size_t max_size,
+//     size_t block_size,
+//     size_t scan_size
+// ) {
+//     size_t n_leaves = xnleaf.element_count()/4;
 
-    size_t alloc_bytes = (block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t));
+//     size_t alloc_bytes = (block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t));
 
-    KernelSummarizeLeaves<<< div_ceil(n_leaves+1, block_size), block_size, alloc_bytes, stream>>>(
-        reinterpret_cast<const PosN*>(xnleaf.typed_data()),
-        nleaves_filled.typed_data(),
-        flags_split->typed_data(),
-        max_size,
-        n_leaves,
-        scan_size
-    );
+//     KernelSummarizeLeaves<<< div_ceil(n_leaves+1, block_size), block_size, alloc_bytes, stream>>>(
+//         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
+//         nleaves_filled.typed_data(),
+//         flags_split->typed_data(),
+//         max_size,
+//         n_leaves,
+//         scan_size
+//     );
 
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    SummarizeLeaves, HostSummarizeLeaves,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()        // xleaf
-        .Arg<ffi::Buffer<ffi::S32>>()        // nleaves_filled
-        .Ret<ffi::Buffer<ffi::S32>>()        // flags_split
-        .Attr<size_t>("max_size")
-        .Attr<size_t>("block_size")
-        .Attr<size_t>("scan_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible}
-);
+//     cudaError_t last_error = cudaGetLastError();
+//     if (last_error != cudaSuccess) {
+//         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+//     }
+//     return ffi::Error::Success();
+// }
 
 __global__ void KernelSearchSortedZ(
     const float3* posz_have,
@@ -468,56 +434,40 @@ __global__ void KernelSearchSortedZ(
     indices[idx] = iout;
 }
 
-ffi::Error SearchSortedZHost(
-    cudaStream_t stream, 
-    ffi::Buffer<ffi::F32> posz_have,
-    ffi::Buffer<ffi::F32> posz_query,
-    ffi::ResultBuffer<ffi::S32> indices,
-    bool leaf_search,
-    size_t block_size
-) {
-    size_t n_have = posz_have.element_count()/3;
-    size_t n_query = posz_query.element_count()/3;
-    float3* posz_ptr = reinterpret_cast<float3*>(posz_have.typed_data());
-    float3* posz_query_ptr = reinterpret_cast<float3*>(posz_query.typed_data());
+// ffi::Error SearchSortedZHost(
+//     cudaStream_t stream, 
+//     ffi::Buffer<ffi::F32> posz_have,
+//     ffi::Buffer<ffi::F32> posz_query,
+//     ffi::ResultBuffer<ffi::S32> indices,
+//     bool leaf_search,
+//     size_t block_size
+// ) {
+//     size_t n_have = posz_have.element_count()/3;
+//     size_t n_query = posz_query.element_count()/3;
+//     float3* posz_ptr = reinterpret_cast<float3*>(posz_have.typed_data());
+//     float3* posz_query_ptr = reinterpret_cast<float3*>(posz_query.typed_data());
 
-    KernelSearchSortedZ<<< div_ceil(n_query, block_size), block_size, 0, stream>>>(
-        posz_ptr,
-        n_have,
-        posz_query_ptr,
-        n_query,
-        indices->typed_data(),
-        leaf_search
-    );
+//     KernelSearchSortedZ<<< div_ceil(n_query, block_size), block_size, 0, stream>>>(
+//         posz_ptr,
+//         n_have,
+//         posz_query_ptr,
+//         n_query,
+//         indices->typed_data(),
+//         leaf_search
+//     );
 
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
+//     cudaError_t last_error = cudaGetLastError();
+//     if (last_error != cudaSuccess) {
+//         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+//     }
+//     return ffi::Error::Success();
+// }
 
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    SearchSortedZ, SearchSortedZHost,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()        // posz_have
-        .Arg<ffi::Buffer<ffi::F32>>()        // posz_query
-        .Ret<ffi::Buffer<ffi::S32>>()        // indices
-        .Attr<bool>("leaf_search")
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible}
-);
 
 NB_MODULE(ffi_tree, m) {
-    m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
-    m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
-    m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
-    m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
-    // A bunch of deprecated functions
-    // m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });
-    // m.def("OldI3zsort", []() { return EncapsulateFfiCall(OldI3zsort); });
-    // m.def("OldF3zsort", []() { return EncapsulateFfiCall(OldF3zsort); });
-    // m.def("OldI3Argsort", []() { return EncapsulateFfiCall(OldI3Argsort); });
-    // m.def("OldI3zMergesort", []() { return EncapsulateFfiCall(OldI3zMergesort); });
+    // m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
+    // m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
+    // m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
+    // m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
 }
+#endif // CUSTOM_JAX_TREE_H
