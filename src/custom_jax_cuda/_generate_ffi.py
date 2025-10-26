@@ -84,7 +84,8 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "tree_new.cuh"),
-    names=[]
+    names=["PosZorderSort"],
+    only_kernels=False
 )
 
 print(list(functions.keys()))
@@ -96,6 +97,11 @@ print(list(functions.keys()))
 # kernels["IlistLeaf2NodeM2L"].grid_size_expression = "div_ceil(interactions.element_count() / 2, interactions_per_block)"
 # kernels["MultipolesFromParticles"].grid_size_expression = "isplit.element_count() - 1"
 # kernels["CoarsenMultipoles"].grid_size_expression = "isplit.element_count() - 1"
+
+functions["PosZorderSort"].par["size"].expression = "pos_in.element_count()/3"
+functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
+
+print(functions["PosZorderSort"].type)
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tree_new.cu"), 

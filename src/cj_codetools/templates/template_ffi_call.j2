@@ -123,10 +123,14 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
     {%- endif %}
 
     // Now call our function
+    {%- set return_type  %}
+    {%- if f.type != "void"%}{{ f.type }} result = {%endif-%}
+    {%- endset -%}
+
     {%- if f.template_par %}
-    fptr(
+    {{ return_type }}fptr(
     {%- else %}
-    {{ f.name }}(
+    {{ return_type }}{{ f.name }}(
     {%- endif %}
         stream,
     {%- for p in f.par %}
@@ -142,6 +146,13 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
         {{- "," if not loop.last else "" }}
     {%- endfor %}
     );
+
+    {%- if f.type == "std::string" %}
+    // Check if the function returned an error string
+    if (!result.empty()) {
+        return ffi::Error::Internal(result);
+    }
+    {%- endif %}
 {%- endif %}
 
     cudaError_t last_error = cudaGetLastError();
