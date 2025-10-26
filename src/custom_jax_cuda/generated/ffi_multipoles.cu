@@ -30,6 +30,7 @@ ffi::Error IlistM2LFFIHost(
 ) {
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(interactions.element_count() / 2, block_size*interactions_per_block));
+    size_t smem = 0;
     
     // Initialize output buffers
     cudaMemsetAsync(Lout->untyped_data(), 0, Lout->size_bytes(), stream);
@@ -65,7 +66,7 @@ ffi::Error IlistM2LFFIHost(
         );
     };
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -109,6 +110,7 @@ ffi::Error IlistLeaf2NodeM2LFFIHost(
 ) {
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(interactions.element_count() / 2, interactions_per_block));
+    size_t smem = 0;
     
     // Initialize output buffers
     cudaMemsetAsync(Lout->untyped_data(), 0, Lout->size_bytes(), stream);
@@ -146,7 +148,7 @@ ffi::Error IlistLeaf2NodeM2LFFIHost(
         );
     };
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -187,6 +189,7 @@ ffi::Error MultipolesFromParticlesFFIHost(
 ) {
     dim3 blockDim(block_size);
     dim3 gridDim(isplit.element_count() - 1);
+    size_t smem = 0;
     
     // Initialize output buffers
     cudaMemsetAsync(mp_out->untyped_data(), 0, mp_out->size_bytes(), stream);
@@ -219,7 +222,7 @@ ffi::Error MultipolesFromParticlesFFIHost(
         );
     };
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -257,6 +260,7 @@ ffi::Error CoarsenMultipolesFFIHost(
 ) {
     dim3 blockDim(block_size);
     dim3 gridDim(isplit.element_count() - 1);
+    size_t smem = 0;
     
     // Initialize output buffers
     cudaMemsetAsync(mp_out->untyped_data(), 0, mp_out->size_bytes(), stream);
@@ -291,7 +295,7 @@ ffi::Error CoarsenMultipolesFFIHost(
         );
     };
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

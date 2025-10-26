@@ -26,6 +26,7 @@ ffi::Error SimpleArangeFFIHost(
 ) {
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(output->element_count(), block_size));
+    size_t smem = 0;
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
@@ -51,7 +52,7 @@ ffi::Error SimpleArangeFFIHost(
         );
     };
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

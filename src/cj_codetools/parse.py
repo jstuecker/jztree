@@ -30,6 +30,7 @@ class FunctionInfo():
     template_par : dict[str, ParamInfo] = field(default_factory=dict)
     block_size_expression : str = ""
     grid_size_expression : str = ""
+    smem_size_expression : str = ""
     init_outputs_zero : bool = False
 
 CUDA = Language(tree_sitter_cuda.language())

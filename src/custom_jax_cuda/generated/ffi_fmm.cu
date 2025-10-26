@@ -33,6 +33,7 @@ ffi::Error EvaluateTreePlaneFFIHost(
 ) {
     dim3 blockDim(block_size);
     dim3 gridDim(spl_nodes.element_count() - 1);
+    size_t smem = 0;
     
     // Initialize output buffers
     cudaMemsetAsync(loc_out->untyped_data(), 0, loc_out->size_bytes(), stream);
@@ -77,7 +78,7 @@ ffi::Error EvaluateTreePlaneFFIHost(
         );
     };
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
