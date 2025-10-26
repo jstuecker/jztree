@@ -71,7 +71,10 @@ ffi::Error EvaluateTreePlaneFFIHost(
         case 1: kernel = (const void*) EvaluateTreePlane<1>; break;
         case 2: kernel = (const void*) EvaluateTreePlane<2>; break;
         case 3: kernel = (const void*) EvaluateTreePlane<3>; break;
-        default: return ffi::Error::Internal("Unsupported p value in EvaluateTreePlaneFFIHost");
+        default: return ffi::Error::Internal(
+            "Unsupported p=" + std::to_string(p) + " in EvaluateTreePlaneFFIHost"\
+            " -- Only supporting values: (1,2,3)"
+        );
     };
     
     cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);

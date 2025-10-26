@@ -36,5 +36,5 @@ if __name__ == "__main__":
     print("(2):", simple_arange(20, add=jnp.ones((20,), dtype=jnp.int32)))
     print("(3):", simple_arange(20, add=jnp.ones((20,), dtype=jnp.int32), p=3))
 
-    print("(4):", set_to_constant(10, value=5, tpar=15))
+    print("(4):", set_to_constant(10, value=5, tpar=16))
     print("(5):", set_to_constant(10, value=7, tpar=32))

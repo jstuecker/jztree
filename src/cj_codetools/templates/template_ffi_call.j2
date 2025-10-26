@@ -83,7 +83,13 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
             {%- for pi in p.instances %}
         case {{pi}}: kernel = (const void*) {{f.name}}<{{ pi }}>; break;
             {%- endfor %}
-        default: return ffi::Error::Internal("Unsupported {{p.name}} value in {{f.name}}FFIHost");
+        default: return ffi::Error::Internal(
+            "Unsupported {{p.name}}=" + std::to_string({{p.name}}) + " in {{f.name}}FFIHost"\
+            " -- Only supporting values: (
+            {%- for pi in p.instances -%}
+                {{ pi }}{{ "," if not loop.last else "" }}
+            {%- endfor %})"
+        );
     };
         {%- endif %}
     {%- endfor %}

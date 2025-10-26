@@ -59,7 +59,10 @@ ffi::Error IlistM2LFFIHost(
         case 1: kernel = (const void*) IlistM2L<1>; break;
         case 2: kernel = (const void*) IlistM2L<2>; break;
         case 3: kernel = (const void*) IlistM2L<3>; break;
-        default: return ffi::Error::Internal("Unsupported p value in IlistM2LFFIHost");
+        default: return ffi::Error::Internal(
+            "Unsupported p=" + std::to_string(p) + " in IlistM2LFFIHost"\
+            " -- Only supporting values: (1,2,3)"
+        );
     };
     
     cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
@@ -137,7 +140,10 @@ ffi::Error IlistLeaf2NodeM2LFFIHost(
         case 1: kernel = (const void*) IlistLeaf2NodeM2L<1>; break;
         case 2: kernel = (const void*) IlistLeaf2NodeM2L<2>; break;
         case 3: kernel = (const void*) IlistLeaf2NodeM2L<3>; break;
-        default: return ffi::Error::Internal("Unsupported p value in IlistLeaf2NodeM2LFFIHost");
+        default: return ffi::Error::Internal(
+            "Unsupported p=" + std::to_string(p) + " in IlistLeaf2NodeM2LFFIHost"\
+            " -- Only supporting values: (1,2,3)"
+        );
     };
     
     cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
@@ -207,7 +213,10 @@ ffi::Error MultipolesFromParticlesFFIHost(
         case 1: kernel = (const void*) MultipolesFromParticles<1>; break;
         case 2: kernel = (const void*) MultipolesFromParticles<2>; break;
         case 3: kernel = (const void*) MultipolesFromParticles<3>; break;
-        default: return ffi::Error::Internal("Unsupported p value in MultipolesFromParticlesFFIHost");
+        default: return ffi::Error::Internal(
+            "Unsupported p=" + std::to_string(p) + " in MultipolesFromParticlesFFIHost"\
+            " -- Only supporting values: (1,2,3)"
+        );
     };
     
     cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
@@ -276,7 +285,10 @@ ffi::Error CoarsenMultipolesFFIHost(
         case 1: kernel = (const void*) CoarsenMultipoles<1>; break;
         case 2: kernel = (const void*) CoarsenMultipoles<2>; break;
         case 3: kernel = (const void*) CoarsenMultipoles<3>; break;
-        default: return ffi::Error::Internal("Unsupported p value in CoarsenMultipolesFFIHost");
+        default: return ffi::Error::Internal(
+            "Unsupported p=" + std::to_string(p) + " in CoarsenMultipolesFFIHost"\
+            " -- Only supporting values: (1,2,3)"
+        );
     };
     
     cudaLaunchKernel(kernel, gridDim, blockDim, args, 0, stream);
