@@ -1,17 +1,15 @@
 #ifndef CUSTOM_JAX_MULTIPOLES_H
 #define CUSTOM_JAX_MULTIPOLES_H
 
-#include <cuda_runtime.h>
-#include <cstddef>
-#include <cstdint>
-
 #include <math_constants.h>
-
-#include "common.cuh"
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                     Helper device functions                                    */
 /* ---------------------------------------------------------------------------------------------- */
+
+struct PosMass {
+    float x, y, z, mass;
+};
 
 __device__ __forceinline__  __device__ float warp_sum(float v) {
     #pragma unroll
