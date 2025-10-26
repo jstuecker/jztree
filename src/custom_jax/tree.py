@@ -6,7 +6,7 @@ from custom_jax_cuda import ffi_tree, ffi_tree_new
 from .common import conditional_callback
 
 jax.ffi.register_ffi_target("PosZorderSort", ffi_tree_new.PosZorderSort(), platform="CUDA")
-jax.ffi.register_ffi_target("BuildZTree", ffi_tree.BuildZTree(), platform="CUDA")
+jax.ffi.register_ffi_target("BuildZTree", ffi_tree_new.BuildZTree(), platform="CUDA")
 jax.ffi.register_ffi_target("SummarizeLeaves", ffi_tree.SummarizeLeaves(), platform="CUDA")
 jax.ffi.register_ffi_target("SearchSortedZ", ffi_tree.SearchSortedZ(), platform="CUDA")
 

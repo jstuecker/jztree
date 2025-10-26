@@ -84,22 +84,16 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "tree_new.cuh"),
-    names=["PosZorderSort"],
+    names=["PosZorderSort", "BuildZTree"],
     only_kernels=False
 )
 
 print(list(functions.keys()))
-# for kernel in kernels.values():
-#     kernel.template_par["p"].instances = p_instance_values
-#     kernel.init_outputs_zero = True
-
-# kernels["IlistM2L"].grid_size_expression = "div_ceil(interactions.element_count() / 2, block_size*interactions_per_block)"
-# kernels["IlistLeaf2NodeM2L"].grid_size_expression = "div_ceil(interactions.element_count() / 2, interactions_per_block)"
-# kernels["MultipolesFromParticles"].grid_size_expression = "isplit.element_count() - 1"
-# kernels["CoarsenMultipoles"].grid_size_expression = "isplit.element_count() - 1"
 
 functions["PosZorderSort"].par["size"].expression = "pos_in.element_count()/3"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
+
+functions["BuildZTree"].par["size"].expression = "pos_in.element_count()/3"
 
 print(functions["PosZorderSort"].type)
 

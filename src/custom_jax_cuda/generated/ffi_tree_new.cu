@@ -60,9 +60,48 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: BuildZTree                                */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error BuildZTreeFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer pos_in,
+    ffi::Result<ffi::AnyBuffer> outputs,
+    size_t block_size
+) {
+    size_t size = pos_in.element_count()/3;
+
+    // Now call our function
+    BuildZTree(
+        stream,
+        reinterpret_cast<float3*>(pos_in.untyped_data()),
+        reinterpret_cast<int*>(outputs->untyped_data()),
+        size,
+        block_size
+    );
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    BuildZTreeFFI, BuildZTreeFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // pos_in
+        .Ret<ffi::AnyBuffer>() // outputs
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_tree_new, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(&PosZorderSortFFI); });
+    m.def("BuildZTree", []() { return EncapsulateFfiCall(&BuildZTreeFFI); });
 }

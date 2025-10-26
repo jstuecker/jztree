@@ -16,6 +16,10 @@
 #error "CUB version 2.0.0 or higher required"
 #endif
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                        Helper Functions                                        */
+/* ---------------------------------------------------------------------------------------------- */
+
 __device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
     // Finds the most significant bit that differs between x and y
     // For floating point numbers we need to treat the exponent and the mantissa differently:
@@ -67,6 +71,10 @@ struct PosIdLess {
         return z_pos_less(a.pos, b.pos);
     }
 };
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                           Zorder Sort                                          */
+/* ---------------------------------------------------------------------------------------------- */
 
 __global__ void PosKeyArangeKernel(const float3* pos_in, PosId *keyid_out, size_t n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -130,6 +138,9 @@ __device__ __forceinline__ int32_t msb_diff_level(const float3 &p1, const float3
     return max(3*msb_x+3, max(3*msb_y+2, 3*msb_z+1));
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                            Tree building (may be depreacated later)                            */
+/* ---------------------------------------------------------------------------------------------- */
 
 struct NodePointers {
     int32_t* levels;
@@ -247,42 +258,38 @@ __global__ void KernelInitialize(NodePointers nodes, size_t n) {
     }
 }
 
-// ffi::Error HostBuildZTree(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> outputs, size_t block_size) {
-//     size_t n = pos_in.element_count()/3;
-//     size_t Nnodes = n + 1;
+void BuildZTree(
+    cudaStream_t stream, 
+    const float3* pos_in,
+    int* outputs,
+    size_t size,
+    size_t block_size
+) {
+    // size_t n = pos_in.element_count()/3;
+    size_t Nnodes = size + 1;
 
-//     float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
-
-//     // Output will be (5, Nnodes) array with different types of information in the first axis
-//     // Create some easier readable pointers that start at offset locations in the output
-//     int *out_ptr = outputs->typed_data();
-//     NodePointers nodes;
-//     nodes.levels = out_ptr;
-//     nodes.lbound = out_ptr + Nnodes;
-//     nodes.rbound = out_ptr + 2 * Nnodes;
-//     nodes.lchild = out_ptr + 3 * Nnodes;
-//     nodes.rchild = out_ptr + 4 * Nnodes;
+    // Output will be (5, Nnodes) array with different types of information in the first axis
+    // Create some easier readable pointers that start at offset locations in the output
+    NodePointers nodes;
+    nodes.levels = outputs;
+    nodes.lbound = outputs + Nnodes;
+    nodes.rbound = outputs + 2 * Nnodes;
+    nodes.lchild = outputs + 3 * Nnodes;
+    nodes.rchild = outputs + 4 * Nnodes;
     
-//     KernelInitialize<<< div_ceil(Nnodes, block_size), block_size, 0, stream>>>(nodes, n);
+    KernelInitialize<<< div_ceil(Nnodes, block_size), block_size, 0, stream>>>(nodes, size);
 
-//     KernelBinarySearchLeftParent<<< div_ceil(n-1, block_size), block_size, 0, stream>>>(keys_in, nodes, n);
-
-//     cudaError_t last_error = cudaGetLastError();
-//     if (last_error != cudaSuccess) {
-//         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-//     }
-//     return ffi::Error::Success();
-// }
-
-// Include deprecated functions
-// This module includes a bunch of functions that we do not need anymore, but we keep
-// them temporarily for comparison and test purposes
-// #include "tree_deprecated.cu"
+    KernelBinarySearchLeftParent<<< div_ceil(size-1, block_size), block_size, 0, stream>>>(pos_in, nodes, size);
+}
 
 struct PosN {
     float3 pos;
     int32_t n;
 };
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                         SummarizeLeaves                                        */
+/* ---------------------------------------------------------------------------------------------- */
 
 __global__ void KernelSummarizeLeaves(
     const PosN* xnleaf,
@@ -459,11 +466,4 @@ __global__ void KernelSearchSortedZ(
 //     return ffi::Error::Success();
 // }
 
-
-NB_MODULE(ffi_tree, m) {
-    // m.def("PosZorderSort", []() { return EncapsulateFfiCall(PosZorderSort); });
-    // m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
-    // m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
-    // m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
-}
 #endif // CUSTOM_JAX_TREE_H

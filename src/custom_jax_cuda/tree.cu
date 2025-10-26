@@ -204,42 +204,6 @@ __global__ void KernelInitialize(NodePointers nodes, size_t n) {
     }
 }
 
-ffi::Error HostBuildZTree(cudaStream_t stream, ffi::Buffer<ffi::F32> pos_in, ffi::ResultBuffer<ffi::S32> outputs, size_t block_size) {
-    size_t n = pos_in.element_count()/3;
-    size_t Nnodes = n + 1;
-
-    float3* keys_in = reinterpret_cast<float3*>(pos_in.typed_data());
-
-    // Output will be (5, Nnodes) array with different types of information in the first axis
-    // Create some easier readable pointers that start at offset locations in the output
-    int *out_ptr = outputs->typed_data();
-    NodePointers nodes;
-    nodes.levels = out_ptr;
-    nodes.lbound = out_ptr + Nnodes;
-    nodes.rbound = out_ptr + 2 * Nnodes;
-    nodes.lchild = out_ptr + 3 * Nnodes;
-    nodes.rchild = out_ptr + 4 * Nnodes;
-    
-    KernelInitialize<<< div_ceil(Nnodes, block_size), block_size, 0, stream>>>(nodes, n);
-
-    KernelBinarySearchLeftParent<<< div_ceil(n-1, block_size), block_size, 0, stream>>>(keys_in, nodes, n);
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    BuildZTree, HostBuildZTree,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()        // pos
-        .Ret<ffi::Buffer<ffi::S32>>()        // output level
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible});
-
 // Include deprecated functions
 // This module includes a bunch of functions that we do not need anymore, but we keep
 // them temporarily for comparison and test purposes
@@ -451,7 +415,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 NB_MODULE(ffi_tree, m) {
-    m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
+    // m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
     m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
     m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
     // A bunch of deprecated functions
