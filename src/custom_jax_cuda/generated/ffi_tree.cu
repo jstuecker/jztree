@@ -208,7 +208,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-NB_MODULE(ffi_tree_new, m) {
+NB_MODULE(ffi_tree, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(&PosZorderSortFFI); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(&BuildZTreeFFI); });
     m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(&SummarizeLeavesFFI); });

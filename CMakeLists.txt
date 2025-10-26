@@ -120,10 +120,9 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -L${_cuda_lib} -Xlinker -rpath,${_cuda_lib}")
 
 # Define a list of modules and their source files
-set(MODULES ffi_forces ffi_tree ffi_knn)
+set(MODULES ffi_forces ffi_knn)
 set(MODULE_PATHS 
   src/custom_jax_cuda/forces.cu
-  src/custom_jax_cuda/tree.cu
   src/custom_jax_cuda/knn.cu
 )
 

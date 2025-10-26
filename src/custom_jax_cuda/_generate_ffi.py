@@ -104,7 +104,7 @@ functions["SearchSortedZ"].par["n_query"].expression = "posz_query.element_count
 functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"
 
 gen.generate_ffi_module_file(
-    output_file = str(HERE / "generated/ffi_tree_new.cu"), 
+    output_file = str(HERE / "generated/ffi_tree.cu"), 
     functions = functions, 
     includes = ["../tree_new.cuh"]
 )
