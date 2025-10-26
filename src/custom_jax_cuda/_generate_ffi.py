@@ -12,17 +12,23 @@ p_instance_values = (1, 2, 3)
 #                                            ffi_example                                           #
 # ------------------------------------------------------------------------------------------------ #
 
-kernels = parse.get_functions_from_file(
-    str(HERE / "ffi_example.cuh"), 
-    only_kernels=True
+funcs = parse.get_functions_from_file(
+    str(HERE / "ffi_example.cuh"),
+    only_kernels=False,
+    names=["SimpleArange", "SetToConstantCall"]
 )
 
-kernels["SimpleArange"].grid_size_expression = "div_ceil(output->element_count(), block_size)"
-kernels["SimpleArange"].template_par["p"].instances = p_instance_values
+funcs["SimpleArange"].grid_size_expression = "div_ceil(output->element_count(), block_size)"
+funcs["SimpleArange"].template_par["p"].instances = p_instance_values
+funcs["SetToConstantCall"].template_par["tpar"].instances = (16, 32, 64)
+funcs["SetToConstantCall"].par["size"].expression = "output->element_count()"
+
+for kernel in funcs.values():
+    print(kernel.name, kernel.is_kernel)
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_example.cu"), 
-    functions = kernels, 
+    functions = funcs, 
     includes = ["../ffi_example.cuh"]
 )
 

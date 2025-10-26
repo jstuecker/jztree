@@ -70,9 +70,63 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: SetToConstantCall                         */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error SetToConstantCallFFIHost(
+    cudaStream_t stream,
+    ffi::Result<ffi::AnyBuffer> output,
+    int value,
+    size_t block_size,
+    int tpar
+) {
+    int size = output->element_count();
+    
+    // We have template parameters, so we need to instantiate all valid templates
+    // For this we select a function pointer through switch statements
+    auto fptr = SetToConstantCall<16>;
+    switch(tpar) {
+        case 16: fptr = SetToConstantCall<16>; break;
+        case 32: fptr = SetToConstantCall<32>; break;
+        case 64: fptr = SetToConstantCall<64>; break;
+        default: return ffi::Error::Internal(
+            "Unsupported tpar=" + std::to_string(tpar) + " in SetToConstantCallFFIHost"\
+            " -- Only supporting values: (16,32,64)"
+        );
+    };
+
+    // Now call our function
+    fptr(
+        stream,
+        reinterpret_cast<int*>(output->untyped_data()),
+        value,
+        size,
+        block_size
+    );
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SetToConstantCallFFI, SetToConstantCallFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Ret<ffi::AnyBuffer>() // output
+        .Attr<int>("value")
+        .Attr<size_t>("block_size")
+        .Attr<int>("tpar"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_example, m) {
     m.def("SimpleArange", []() { return EncapsulateFfiCall(&SimpleArangeFFI); });
+    m.def("SetToConstantCall", []() { return EncapsulateFfiCall(&SetToConstantCallFFI); });
 }

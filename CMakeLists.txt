@@ -158,16 +158,18 @@ endforeach()
 # ----------------------------------------------------------------------------------------------- #
 
 # Build-time toggle: only generate sources when explicitly requested
-option(CJ_GENERATE "Generate FFI source files at configure time" OFF)
+# option(CJ_GENERATE "Generate FFI source files at configure time" OFF)
 # Allow enabling via environment variable too: CJ_GENERATE=1/ON/TRUE
-if(DEFINED ENV{CJ_GENERATE})
-  if("$ENV{CJ_GENERATE}" STREQUAL "1" OR "$ENV{CJ_GENERATE}" STREQUAL "ON" OR "$ENV{CJ_GENERATE}" STREQUAL "TRUE")
-    set(CJ_GENERATE ON CACHE BOOL "Generate FFI source files at configure time" FORCE)
-  endif()
-endif()
+# if(DEFINED ENV{CJ_GENERATE})
+#   if("$ENV{CJ_GENERATE}" STREQUAL "1" OR "$ENV{CJ_GENERATE}" STREQUAL "ON" OR "$ENV{CJ_GENERATE}" STREQUAL "TRUE")
+#     set(CJ_GENERATE ON CACHE BOOL "Generate FFI source files at configure time" FORCE)
+#   endif()
+# else()
+#   set(CJ_GENERATE OFF CACHE BOOL "Generate FFI source files at configure time" FORCE)
+# endif()
 
 # Optionally run the generator so files exist at configure time (opt-in)
-if(CJ_GENERATE)
+if(DEFINED ENV{CJ_GENERATE} AND ( "$ENV{CJ_GENERATE}" STREQUAL "1" OR "$ENV{CJ_GENERATE}" STREQUAL "ON" OR "$ENV{CJ_GENERATE}" STREQUAL "TRUE") )
   message(STATUS "CJ_GENERATE=ON: Running CUDA FFI generator script")
   execute_process(
     COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/src/custom_jax_cuda/_generate_ffi.py"

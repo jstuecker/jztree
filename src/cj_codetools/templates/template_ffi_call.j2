@@ -15,10 +15,10 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
 {%- for p in f.template_par if p.type=="int" -%}{{ sep() }}
     {{ p.type }} {{ p.name }}
 {%- endfor -%}
-{%- if not f.grid_size_expression -%}{{ sep() }}
+{%- if f.is_kernel and not f.grid_size_expression -%}{{ sep() }}
     size_t grid_size
 {%- endif -%}
-{%- if not f.block_size_expression -%}{{ sep() }}
+{%- if f.is_kernel and not f.block_size_expression -%}{{ sep() }}
     size_t block_size
 {%- endif %}
 ) {
@@ -28,16 +28,17 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
     {%- endif -%}
 {%- endfor %}
 
-{%- if f.block_size_expression%}
+{%- if f.is_kernel -%}
+    {%- if f.block_size_expression%}
     dim3 blockDim({{ f.block_size_expression }});
-{%- else %}
+    {%- else %}
     dim3 blockDim(block_size);
-{%- endif %}
-{%- if f.grid_size_expression %}
+    {%- endif %}
+    {%- if f.grid_size_expression %}
     dim3 gridDim({{ f.grid_size_expression }});
-{%- else %}
+    {%- else %}
     dim3 gridDim(grid_size);    
-{%- endif -%}
+    {%- endif -%}
 
     {% for p in f.par if (p.is_ptr and not p.is_const) and (p.init_zero or f.init_outputs_zero) %}
     {% if loop.index == 1 %}
@@ -91,6 +92,51 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
     {%- else %}
     cudaLaunchKernel((const void*){{f.name}}, gridDim, blockDim, args, 0, stream);
     {%- endif %}
+{%- else -%}
+    {%- if f.template_par %}
+    
+    // We have template parameters, so we need to instantiate all valid templates
+    // For this we select a function pointer through switch statements
+    {%- for p in f.template_par %}
+        {%-if p.type=="int" %}
+    auto fptr = {{f.name}}<{{ p.instances[0] }}>;
+    switch({{ p.name }}) {
+            {%- for pi in p.instances %}
+        case {{pi}}: fptr = {{f.name}}<{{ pi }}>; break;
+            {%- endfor %}
+        default: return ffi::Error::Internal(
+            "Unsupported {{p.name}}=" + std::to_string({{p.name}}) + " in {{f.name}}FFIHost"\
+            " -- Only supporting values: (
+            {%- for pi in p.instances -%}
+                {{ pi }}{{ "," if not loop.last else "" }}
+            {%- endfor %})"
+        );
+    };
+        {%- endif %}
+    {%- endfor %}
+    {%- endif %}
+
+    // Now call our function
+    {%- if f.template_par %}
+    fptr(
+    {%- else %}
+    {{ f.name }}(
+    {%- endif %}
+        stream,
+    {%- for p in f.par %}
+        {%if p.is_ptr -%}
+            {%- if p.is_const -%}
+        reinterpret_cast<{{p.type}}*>({{ p.name }}.untyped_data())
+            {%- else -%}
+        reinterpret_cast<{{p.type}}*>({{ p.name }}->untyped_data())
+            {%- endif -%}
+        {%- else -%}
+            {{ p.name }}
+        {%- endif -%}
+        {{- "," if not loop.last else "" }}
+    {%- endfor %}
+    );
+{%- endif %}
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -117,10 +163,10 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 {%- for p in f.template_par if p.type=="int" %}
         .Attr<{{p.type}}>("{{ p.name }}")
 {%- endfor %}
-{%- if not f.grid_size_expression %}
+{%- if f.is_kernel and not f.grid_size_expression %}
         .Attr<size_t>("grid_size")
 {%- endif %}
-{%- if not f.block_size_expression %}
+{%- if f.is_kernel and not f.block_size_expression %}
         .Attr<size_t>("block_size")
 {%- endif %},
     {xla::ffi::Traits::kCmdBufferCompatible}

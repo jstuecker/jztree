@@ -9,6 +9,10 @@ env = Environment(
 )
 
 def simplify_and_validate(func: FunctionInfo) -> FunctionInfo:
+    if not func.is_kernel:
+        assert tuple(func.par.keys())[0] == "stream", "All Host functions must use stream as first parameter"
+        del func.par["stream"] # will be added automatically
+
     # convert dicts to lists for easier templating
     func = replace(
         func, 
