@@ -357,35 +357,6 @@ __global__ void SummarizeLeaves(
     }
 }
 
-// ffi::Error HostSummarizeLeaves(
-//     cudaStream_t stream, 
-//     ffi::Buffer<ffi::F32> xnleaf,
-//     ffi::Buffer<ffi::S32> nleaves_filled,
-//     ffi::ResultBuffer<ffi::S32> flags_split,
-//     size_t max_size,
-//     size_t block_size,
-//     size_t scan_size
-// ) {
-//     size_t n_leaves = xnleaf.element_count()/4;
-
-//     size_t alloc_bytes = (block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t));
-
-//     KernelSummarizeLeaves<<< div_ceil(n_leaves+1, block_size), block_size, alloc_bytes, stream>>>(
-//         reinterpret_cast<const PosN*>(xnleaf.typed_data()),
-//         nleaves_filled.typed_data(),
-//         flags_split->typed_data(),
-//         max_size,
-//         n_leaves,
-//         scan_size
-//     );
-
-//     cudaError_t last_error = cudaGetLastError();
-//     if (last_error != cudaSuccess) {
-//         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-//     }
-//     return ffi::Error::Success();
-// }
-
 /* ---------------------------------------------------------------------------------------------- */
 /*                                         Search Sorted Z                                        */
 /* ---------------------------------------------------------------------------------------------- */
@@ -440,34 +411,5 @@ __global__ void SearchSortedZ(
 
     indices[idx] = iout;
 }
-
-// ffi::Error SearchSortedZHost(
-//     cudaStream_t stream, 
-//     ffi::Buffer<ffi::F32> posz_have,
-//     ffi::Buffer<ffi::F32> posz_query,
-//     ffi::ResultBuffer<ffi::S32> indices,
-//     bool leaf_search,
-//     size_t block_size
-// ) {
-//     size_t n_have = posz_have.element_count()/3;
-//     size_t n_query = posz_query.element_count()/3;
-//     float3* posz_ptr = reinterpret_cast<float3*>(posz_have.typed_data());
-//     float3* posz_query_ptr = reinterpret_cast<float3*>(posz_query.typed_data());
-
-//     KernelSearchSortedZ<<< div_ceil(n_query, block_size), block_size, 0, stream>>>(
-//         posz_ptr,
-//         n_have,
-//         posz_query_ptr,
-//         n_query,
-//         indices->typed_data(),
-//         leaf_search
-//     );
-
-//     cudaError_t last_error = cudaGetLastError();
-//     if (last_error != cudaSuccess) {
-//         return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-//     }
-//     return ffi::Error::Success();
-// }
 
 #endif // CUSTOM_JAX_TREE_H
