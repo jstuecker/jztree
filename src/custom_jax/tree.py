@@ -7,7 +7,7 @@ from .common import conditional_callback
 
 jax.ffi.register_ffi_target("PosZorderSort", ffi_tree_new.PosZorderSort(), platform="CUDA")
 jax.ffi.register_ffi_target("BuildZTree", ffi_tree_new.BuildZTree(), platform="CUDA")
-jax.ffi.register_ffi_target("SummarizeLeaves", ffi_tree.SummarizeLeaves(), platform="CUDA")
+jax.ffi.register_ffi_target("SummarizeLeaves", ffi_tree_new.SummarizeLeaves(), platform="CUDA")
 jax.ffi.register_ffi_target("SearchSortedZ", ffi_tree.SearchSortedZ(), platform="CUDA")
 
 def lvl_to_ext(level_binary):
@@ -108,8 +108,8 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
     out_splits_type = jax.ShapeDtypeStruct((xnleaf.shape[0]+1,), jnp.int32)
 
     flag_split = jax.ffi.ffi_call("SummarizeLeaves", (out_splits_type,), vmap_method="sequential")(
-        xnleaf, nleaves_filled, max_size=np.uint64(max_size),
-        block_size=np.uint64(block_size), scan_size=np.uint64(scan_size))[0]
+        xnleaf, nleaves_filled, max_size=np.int32(max_size),
+        block_size=np.uint64(block_size), scan_size=np.int32(scan_size))[0]
     
     # print(flag_split)
     # print(np.min(flag_split[flag_split>-1000]))

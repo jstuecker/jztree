@@ -280,47 +280,6 @@ __global__ void KernelSummarizeLeaves(
     }
 }
 
-ffi::Error HostSummarizeLeaves(
-    cudaStream_t stream, 
-    ffi::Buffer<ffi::F32> xnleaf,
-    ffi::Buffer<ffi::S32> nleaves_filled,
-    ffi::ResultBuffer<ffi::S32> flags_split,
-    size_t max_size,
-    size_t block_size,
-    size_t scan_size
-) {
-    size_t n_leaves = xnleaf.element_count()/4;
-
-    size_t alloc_bytes = (block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t));
-
-    KernelSummarizeLeaves<<< div_ceil(n_leaves+1, block_size), block_size, alloc_bytes, stream>>>(
-        reinterpret_cast<const PosN*>(xnleaf.typed_data()),
-        nleaves_filled.typed_data(),
-        flags_split->typed_data(),
-        max_size,
-        n_leaves,
-        scan_size
-    );
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    SummarizeLeaves, HostSummarizeLeaves,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::Buffer<ffi::F32>>()        // xleaf
-        .Arg<ffi::Buffer<ffi::S32>>()        // nleaves_filled
-        .Ret<ffi::Buffer<ffi::S32>>()        // flags_split
-        .Attr<size_t>("max_size")
-        .Attr<size_t>("block_size")
-        .Attr<size_t>("scan_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible}
-);
 
 __global__ void KernelSearchSortedZ(
     const float3* posz_have,
@@ -416,7 +375,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 NB_MODULE(ffi_tree, m) {
     // m.def("BuildZTree", []() { return EncapsulateFfiCall(BuildZTree); });
-    m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
+    // m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(SummarizeLeaves); });
     m.def("SearchSortedZ", []() { return EncapsulateFfiCall(SearchSortedZ); });
     // A bunch of deprecated functions
     // m.def("OldArgsort", []() { return EncapsulateFfiCall(OldArgsort); });

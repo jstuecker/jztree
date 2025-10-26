@@ -291,7 +291,7 @@ struct PosN {
 /*                                         SummarizeLeaves                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-__global__ void KernelSummarizeLeaves(
+__global__ void SummarizeLeaves(
     const PosN* xnleaf,
     const int* nleaves_filled,
     int32_t* split_flags,
@@ -385,6 +385,10 @@ __global__ void KernelSummarizeLeaves(
 //     }
 //     return ffi::Error::Success();
 // }
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                         Search Sorted Z                                        */
+/* ---------------------------------------------------------------------------------------------- */
 
 __global__ void KernelSearchSortedZ(
     const float3* posz_have,

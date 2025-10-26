@@ -98,10 +98,65 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: SummarizeLeaves                           */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error SummarizeLeavesFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer xnleaf,
+    ffi::AnyBuffer nleaves_filled,
+    ffi::Result<ffi::AnyBuffer> split_flags,
+    int max_size,
+    int scan_size,
+    size_t block_size
+) {
+    int n_leaves = xnleaf.element_count()/4;
+    dim3 blockDim(block_size);
+    dim3 gridDim(div_ceil(n_leaves+1, block_size));
+    size_t smem = (block_size + 2*scan_size + 1) * (sizeof(PosN) + sizeof(int32_t));
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    PosN* xnleaf_val = reinterpret_cast<PosN*>(xnleaf.untyped_data());
+    int* nleaves_filled_val = reinterpret_cast<int*>(nleaves_filled.untyped_data());
+    int32_t* split_flags_val = reinterpret_cast<int32_t*>(split_flags->untyped_data());
+
+    void* args[] = {
+        &xnleaf_val,
+        &nleaves_filled_val,
+        &split_flags_val,
+        &max_size,
+        &n_leaves,
+        &scan_size
+    };
+    cudaLaunchKernel((const void*)SummarizeLeaves, gridDim, blockDim, args, smem, stream);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    SummarizeLeavesFFI, SummarizeLeavesFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // xnleaf
+        .Arg<ffi::AnyBuffer>() // nleaves_filled
+        .Ret<ffi::AnyBuffer>() // split_flags
+        .Attr<int>("max_size")
+        .Attr<int>("scan_size")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_tree_new, m) {
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(&PosZorderSortFFI); });
     m.def("BuildZTree", []() { return EncapsulateFfiCall(&BuildZTreeFFI); });
+    m.def("SummarizeLeaves", []() { return EncapsulateFfiCall(&SummarizeLeavesFFI); });
 }
