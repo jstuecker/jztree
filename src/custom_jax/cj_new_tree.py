@@ -88,7 +88,7 @@ def cj_evaluate_tree_plane(
     nint_out = cfg_tree.ilist_alloc_fac * plane.size()
     
     node_range = jnp.array([0, plane_lr.nnodes], dtype=jnp.int32)
-    spl_nodes = plane.ispl
+    spl_nodes = plane_lr.ispl
     spl_ilist = ilist_lr.ispl
     ilist_nodes = ilist_lr.iother
     

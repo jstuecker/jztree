@@ -28,29 +28,42 @@ __global__ void CountInteractions(
     // attributes:
     float epsilon
 ) {
+    // Node A info:
     int2 nrange = node_range[0];
     int nodeid = nrange.x + blockIdx.x;
     if (nodeid >= nrange.y) {
         return;
     }
 
+    // Child A info:
     int2 child_range = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
-
     __shared__ NodeInfo childA[BLOCKSIZE];
-    
-    if(threadIdx.x < (child_range.y - child_range.x))
+    if(child_range.x + threadIdx.x < child_range.y)
         childA[threadIdx.x] = children[child_range.x + threadIdx.x];
     else
-        childA[threadIdx.x] = {0.f, 0.f, 0.f, 0};
+        childA[threadIdx.x] = {NAN, NAN, NAN, 10000};
     
-    // int ipart = prange.x + threadIdx.x;
-    // bool valid = ipart < prange.y;
+    // Interaction list info:
+    int2 ilist_range = {spl_ilist[nodeid], spl_ilist[nodeid + 1]};
+    __syncthreads();
 
-    // if(valid) {
-    //     loc_out[ipart] = threadIdx.x; // placeholder write
-    // }
-    if(threadIdx.x < (child_range.y - child_range.x)) {
-        child_count_out[child_range.x + threadIdx.x] = child_range.x + threadIdx.x;
+    __shared__ int2 segments[BLOCKSIZE];
+    SegmentManager<BLOCKSIZE> seg_mgr(
+        ilist_nodes,
+        spl_nodes,
+        segments,
+        ilist_range.x,
+        ilist_range.y
+    );
+
+    int iterartion = 0;
+    while(!seg_mgr.finished()) {
+        int2 id = seg_mgr.next();
+        
+        if((blockIdx.x == 0) && (id.y >= 0)) {
+            child_count_out[child_range.x + threadIdx.x + iterartion*blockDim.x] = seg_mgr.nids_loaded();
+        }
+        iterartion += 1;
     }
 }
 

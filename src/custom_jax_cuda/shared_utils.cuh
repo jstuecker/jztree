@@ -62,16 +62,16 @@ struct SegmentManager {
     }
     
     __device__ __forceinline__ int2 next() {
-        // If required, load more segments
-        if(next_seg >= seg_loaded) {
-            loadSegments();
-        }
-
-        int2 id = {-1, istart - seg_loaded + next_seg};
+        int2 id = {-1, -1};
         // Go through the segments until we are sure that every thread has something
         num_loaded = 0;
-        while (next_seg < seg_loaded)
+        while (!finished())
         {
+            // If required, load more segments
+            if(next_seg >= seg_loaded) {
+                loadSegments();
+            }
+
             int2 seg = segments[next_seg]; // {start, length}
             int nadd = min(seg.y - seg_offset, blockDim.x - num_loaded);
             if((threadIdx.x >= num_loaded ) && (threadIdx.x < num_loaded + nadd)) {
