@@ -111,7 +111,8 @@ def cj_evaluate_tree_plane(
         node_range, spl_nodes, spl_ilist, ilist_nodes, children, #mp_values,
         # p=np.int32(cfg_tree.p), 
         # block_size=np.uint64(32),
-        epsilon=np.float32(cfg.softening)
+        softening=np.float32(cfg.softening),
+        opening_angle=np.float32(cfg.opening.opening_angle)
     )[0]
 
     loc = jnp.zeros(out_loc.shape, dtype=out_loc.dtype)  # Placeholder for local expansions

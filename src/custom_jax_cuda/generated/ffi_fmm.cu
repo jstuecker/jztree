@@ -24,7 +24,8 @@ ffi::Error CountInteractionsFFIHost(
     ffi::AnyBuffer ilist_nodes,
     ffi::AnyBuffer children,
     ffi::Result<ffi::AnyBuffer> child_count_out,
-    float epsilon
+    float softening,
+    float opening_angle
 ) {
     dim3 blockDim(32);
     dim3 gridDim(spl_nodes.element_count() - 1);
@@ -49,7 +50,8 @@ ffi::Error CountInteractionsFFIHost(
         &ilist_nodes_val,
         &children_val,
         &child_count_out_val,
-        &epsilon
+        &softening,
+        &opening_angle
     };
     cudaLaunchKernel((const void*)CountInteractions, gridDim, blockDim, args, smem, stream);
 
@@ -70,7 +72,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // ilist_nodes
         .Arg<ffi::AnyBuffer>() // children
         .Ret<ffi::AnyBuffer>() // child_count_out
-        .Attr<float>("epsilon"),
+        .Attr<float>("softening")
+        .Attr<float>("opening_angle"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
