@@ -68,6 +68,13 @@ __device__ __forceinline__ T warp_reduce_sum(T v) {
     return v;
 }
 
+template<typename T>
+__device__ __forceinline__ void block_reduce_sum_shared(T v, T* smem) {
+    T val = warp_reduce_sum(v);
+    if((threadIdx.x & 0x1f) == 0)
+        atomicAdd(smem, val);
+}
+
 template<int p>
 __global__ void CountInteractions(
     // inputs:
@@ -151,16 +158,12 @@ __global__ void CountInteractions(
         for(int i = 0; i < num_childrenA; i++) {
             bool need_open = OpeningCriterion(childA[i], childB_ext, opening_angle);
 
-            int num = warp_reduce_sum((need_open && id.x >= 0) ? 1 : 0);
-            if((threadIdx.x & 0x1f) == 0)
-                atomicAdd(&num_open[i], num);
+            block_reduce_sum_shared((need_open && id.x >= 0) ? 1 : 0, &num_open[i]);
 
             for(int k = 0; k < ncomb; k++) {
                 float val = mp_childB[k];
 
-                float sum = warp_reduce_sum(val);
-                if((threadIdx.x & 0x1f) == 0)
-                    atomicAdd(&loc[i * ncomb + k], sum);
+                block_reduce_sum_shared(val, &loc[i * ncomb + k]);
             }
         }
     }
