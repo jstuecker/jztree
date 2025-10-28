@@ -7,6 +7,8 @@
 
 #define BLOCKSIZE 32
 
+#define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
+
 struct NodeInfo {
     float3 center;
     int level;
@@ -106,6 +108,10 @@ __global__ void CountInteractions(
     if(threadIdx.x < BLOCKSIZE) {
         num_open[threadIdx.x] = 0;
     }
+    __shared__ float loc[BLOCKSIZE * NCOMB(p)];
+    for(int i = threadIdx.x; i < BLOCKSIZE * NCOMB(p); i += BLOCKSIZE) {
+        loc[i] = 0.0f;
+    }
     
     // Interaction list info:
     int2 ilist_range = {spl_ilist[nodeid], spl_ilist[nodeid + 1]};
@@ -124,26 +130,46 @@ __global__ void CountInteractions(
         int2 id = seg_mgr.next();
 
         NodeWithExt childB_ext;
+
+        constexpr int ncomb = NCOMB(p);
+        float mp_childB[ncomb];
+
         if(id.x >= 0) {
             NodeInfo childB = children[id.x];
             childB_ext = {childB.center, LvlToExt(childB.level)};
+            for(int i = 0; i < ncomb; i++) {
+                mp_childB[i] = mp_values[id.x * ncomb + i];
+            }
         }
         else {
-            childB_ext = {NAN, NAN, NAN, 1e10, 1e10, 1e10};
+            // If we set invalid multipoles to zero, we can avoid branching later on
+            for(int k = 0; k < ncomb; k++) {
+                mp_childB[k] = 0.0f;
+            }
         }
 
         for(int i = 0; i < num_childrenA; i++) {
             bool need_open = OpeningCriterion(childA[i], childB_ext, opening_angle);
 
             int num = warp_reduce_sum((need_open && id.x >= 0) ? 1 : 0);
-
             if((threadIdx.x & 0x1f) == 0)
                 atomicAdd(&num_open[i], num);
+
+            for(int k = 0; k < ncomb; k++) {
+                float val = mp_childB[k];
+
+                float sum = warp_reduce_sum(val);
+                if((threadIdx.x & 0x1f) == 0)
+                    atomicAdd(&loc[i * ncomb + k], sum);
+            }
         }
     }
     __syncthreads();
     if(child_range.x + threadIdx.x < child_range.y) {
         child_count_out[child_range.x + threadIdx.x] = num_open[threadIdx.x];
+    }
+    for(int i = threadIdx.x; i < num_childrenA * NCOMB(p); i += BLOCKSIZE) {
+        loc_out[child_range.x * NCOMB(p) + i] = loc[i];
     }
 }
 
