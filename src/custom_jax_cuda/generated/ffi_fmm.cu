@@ -23,15 +23,19 @@ ffi::Error CountInteractionsFFIHost(
     ffi::AnyBuffer spl_ilist,
     ffi::AnyBuffer ilist_nodes,
     ffi::AnyBuffer children,
+    ffi::AnyBuffer mp_values,
+    ffi::Result<ffi::AnyBuffer> loc_out,
     ffi::Result<ffi::AnyBuffer> child_count_out,
     float softening,
-    float opening_angle
+    float opening_angle,
+    int p
 ) {
     dim3 blockDim(32);
     dim3 gridDim(spl_nodes.element_count() - 1);
     size_t smem = 0;
     
     // Initialize output buffers
+    cudaMemsetAsync(loc_out->untyped_data(), 0, loc_out->size_bytes(), stream);
     cudaMemsetAsync(child_count_out->untyped_data(), 0, child_count_out->size_bytes(), stream);
     
     // Build a bundled argument list for cudaLaunchKernel
@@ -41,6 +45,8 @@ ffi::Error CountInteractionsFFIHost(
     int* spl_ilist_val = reinterpret_cast<int*>(spl_ilist.untyped_data());
     int* ilist_nodes_val = reinterpret_cast<int*>(ilist_nodes.untyped_data());
     NodeInfo* children_val = reinterpret_cast<NodeInfo*>(children.untyped_data());
+    float* mp_values_val = reinterpret_cast<float*>(mp_values.untyped_data());
+    float* loc_out_val = reinterpret_cast<float*>(loc_out->untyped_data());
     int* child_count_out_val = reinterpret_cast<int*>(child_count_out->untyped_data());
 
     void* args[] = {
@@ -49,11 +55,27 @@ ffi::Error CountInteractionsFFIHost(
         &spl_ilist_val,
         &ilist_nodes_val,
         &children_val,
+        &mp_values_val,
+        &loc_out_val,
         &child_count_out_val,
         &softening,
         &opening_angle
     };
-    cudaLaunchKernel((const void*)CountInteractions, gridDim, blockDim, args, smem, stream);
+    
+    // We have template parameters, so we need to instantiate all valid templates
+    // For this we select a function pointer through switch statements
+    const void* kernel;
+    switch(p) {
+        case 1: kernel = (const void*) CountInteractions<1>; break;
+        case 2: kernel = (const void*) CountInteractions<2>; break;
+        case 3: kernel = (const void*) CountInteractions<3>; break;
+        default: return ffi::Error::Internal(
+            "Unsupported p=" + std::to_string(p) + " in CountInteractionsFFIHost"\
+            " -- Only supporting values: (1,2,3)"
+        );
+    };
+    
+    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -71,9 +93,12 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // spl_ilist
         .Arg<ffi::AnyBuffer>() // ilist_nodes
         .Arg<ffi::AnyBuffer>() // children
+        .Arg<ffi::AnyBuffer>() // mp_values
+        .Ret<ffi::AnyBuffer>() // loc_out
         .Ret<ffi::AnyBuffer>() // child_count_out
         .Attr<float>("softening")
-        .Attr<float>("opening_angle"),
+        .Attr<float>("opening_angle")
+        .Attr<int>("p"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 

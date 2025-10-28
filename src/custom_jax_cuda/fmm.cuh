@@ -66,7 +66,7 @@ __device__ __forceinline__ T warp_reduce_sum(T v) {
     return v;
 }
 
-// template<int p>
+template<int p>
 __global__ void CountInteractions(
     // inputs:
     const int2* node_range,
@@ -74,9 +74,9 @@ __global__ void CountInteractions(
     const int* spl_ilist,
     const int* ilist_nodes,
     const NodeInfo* children,
-    // const float* mp_values,
+    const float* mp_values,
     // outputs:
-    // float* loc_out,
+    float* loc_out,
     int* child_count_out,
     // int* child_ilist_out,
     // attributes:
