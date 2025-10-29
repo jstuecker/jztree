@@ -60,9 +60,6 @@ build_ztree.jit = jax.jit(build_ztree, static_argnames=("block_size",))
 def div_ceil(a, b):
     return (a + b - 1) // b
 
-def prepend_num(arr, val=0):
-    return jnp.concatenate([jnp.asarray([val], dtype=arr.dtype), arr], axis=0)
-
 def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None, alloc_fac_nodes=1., alloc_min=128):
     """Summarizes leaf nodes into parent nodes
     """
@@ -71,7 +68,7 @@ def summarize_leaves(xleaf, nleaf=None, max_size=64, num_part=None, ref_fac=None
         nleaf = jnp.ones((xleaf.shape[0],), dtype=jnp.int32)
         num = jnp.arange(0, len(xleaf)+1, dtype=jnp.int32)
     else:
-        num = prepend_num(jnp.cumsum(nleaf), 0)
+        num = jnp.pad(jnp.cumsum(nleaf), (1, 0))
     if num_part is None:
         num_part = len(xleaf)
     if ref_fac is None:

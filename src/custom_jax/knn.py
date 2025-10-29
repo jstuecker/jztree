@@ -68,8 +68,7 @@ def offset_sum(num):
     return cs - num, cs[-1]
 
 def cumsum_starting_with_zero(num):
-    cs = jnp.cumsum(num, axis=0)
-    return jnp.concatenate([jnp.array([0], dtype=num.dtype), cs], axis=0)
+    return jnp.pad(jnp.cumsum(num), (1, 0))
 
 def masked_prefix_sum(mask):
     off, _ = offset_sum(mask)
