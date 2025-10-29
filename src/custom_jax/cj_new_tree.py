@@ -12,7 +12,7 @@ from typing import Tuple
 
 jax.ffi.register_ffi_target("MultipolesFromParticles", ffi_multipoles.MultipolesFromParticles(), platform="CUDA")
 jax.ffi.register_ffi_target("CoarsenMultipoles", ffi_multipoles.CoarsenMultipoles(), platform="CUDA")
-jax.ffi.register_ffi_target("CountInteractions", ffi_fmm.CountInteractions(), platform="CUDA")
+jax.ffi.register_ffi_target("CountInteractionsAndM2L", ffi_fmm.CountInteractionsAndM2L(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
 from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList
@@ -104,7 +104,7 @@ def cj_evaluate_tree_plane(
     
     # Make FFI call
     loc, spl_child_ilist = jax.ffi.ffi_call(
-        "CountInteractions",
+        "CountInteractionsAndM2L",
         (out_loc, out_interaction_count, )
     )(
         node_range, spl_nodes, spl_ilist, ilist_nodes, children, mp_values,

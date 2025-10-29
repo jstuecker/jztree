@@ -13,10 +13,10 @@ namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: CountInteractions                         */
+/*                             FFI call to CUDA kernel: CountInteractionsAndM2L                   */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error CountInteractionsFFIHost(
+ffi::Error CountInteractionsAndM2LFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer node_range,
     ffi::AnyBuffer spl_nodes,
@@ -66,11 +66,11 @@ ffi::Error CountInteractionsFFIHost(
     // For this we select a function pointer through switch statements
     const void* kernel;
     switch(p) {
-        case 1: kernel = (const void*) CountInteractions<1>; break;
-        case 2: kernel = (const void*) CountInteractions<2>; break;
-        case 3: kernel = (const void*) CountInteractions<3>; break;
+        case 1: kernel = (const void*) CountInteractionsAndM2L<1>; break;
+        case 2: kernel = (const void*) CountInteractionsAndM2L<2>; break;
+        case 3: kernel = (const void*) CountInteractionsAndM2L<3>; break;
         default: return ffi::Error::Internal(
-            "Unsupported p=" + std::to_string(p) + " in CountInteractionsFFIHost"\
+            "Unsupported p=" + std::to_string(p) + " in CountInteractionsAndM2LFFIHost"\
             " -- Only supporting values: (1,2,3)"
         );
     };
@@ -85,7 +85,7 @@ ffi::Error CountInteractionsFFIHost(
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    CountInteractionsFFI, CountInteractionsFFIHost,
+    CountInteractionsAndM2LFFI, CountInteractionsAndM2LFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // node_range
@@ -107,5 +107,5 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_fmm, m) {
-    m.def("CountInteractions", []() { return EncapsulateFfiCall(&CountInteractionsFFI); });
+    m.def("CountInteractionsAndM2L", []() { return EncapsulateFfiCall(&CountInteractionsAndM2LFFI); });
 }

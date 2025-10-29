@@ -83,7 +83,7 @@ __device__ __forceinline__ T block_reduce_sum_shared(T v, T* smem) {
 #define ALLTHREADS 0xFFFFFFFF
 
 template<int p>
-__global__ void CountInteractions(
+__global__ void CountInteractionsAndM2L(
     // inputs:
     const int2* node_range,
     const int* spl_nodes,
