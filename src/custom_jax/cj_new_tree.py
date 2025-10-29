@@ -4,6 +4,8 @@ import jax
 import jax.numpy as jnp
 
 from fmdj.config import Config, TreeConfig
+from fmdj.new_tree import dense_interaction_list
+from fmdj.multipoles import shift_local_to_local
 
 import custom_jax_cuda.ffi_multipoles as ffi_multipoles
 import custom_jax_cuda.ffi_fmm as ffi_fmm
@@ -82,32 +84,29 @@ def cj_evaluate_tree_plane(
     - loc: multipole local expansion, shape (Nchild, M)
     - new_ilist: new interaction list for children
     """
-    assert plane_lr is not None
-    assert ilist_lr is not None
+    if plane_lr is None or ilist_lr is None: # Root level
+        ilist_lr = dense_interaction_list(plane.size(), nnodes=plane.nnodes)
+        spl_nodes = jnp.minimum(jnp.arange(0, plane.size() + 1, dtype=jnp.int32), plane.nnodes)
+        node_range = jnp.array([0, plane.nnodes], dtype=jnp.int32)
+    else:
+        spl_nodes = plane_lr.ispl
+        node_range = jnp.array([0, plane_lr.nnodes], dtype=jnp.int32)
     
     cfg_tree: TreeConfig = cfg.tree
     nint_out = cfg_tree.ilist_alloc_fac * plane.size()
-    
-    node_range = jnp.array([0, plane_lr.nnodes], dtype=jnp.int32)
-    spl_nodes = plane_lr.ispl
-    spl_ilist = ilist_lr.ispl
-    ilist_nodes = ilist_lr.iother
-    mp_values = plane.mp.values
-    
-    nchild = plane.size()
 
     children = jnp.concatenate((plane.mp.center(), plane.lvl.view(jnp.float32)[...,None]), axis=-1)
     
     # Determine output shapes
     out_loc = jax.ShapeDtypeStruct(plane.mp.values.shape, jnp.float32)
-    out_interaction_count = jax.ShapeDtypeStruct((nchild + 1,), jnp.int32)
+    out_interaction_count = jax.ShapeDtypeStruct((plane.size(),), jnp.int32)
     
     # Count opened interactions and evaluate M2L
     loc, interaction_counts = jax.ffi.ffi_call(
         "CountInteractionsAndM2L",
         (out_loc, out_interaction_count, )
     )(
-        node_range, spl_nodes, spl_ilist, ilist_nodes, children, mp_values,
+        node_range, spl_nodes, ilist_lr.ispl, ilist_lr.iother, children, plane.mp.values,
         p=np.int32(cfg_tree.p),
         softening=np.float32(cfg.softening),
         opening_angle=np.float32(cfg.opening.opening_angle)
@@ -121,12 +120,17 @@ def cj_evaluate_tree_plane(
         "InsertInteractions",
         (out_child_ilist,)
     )(
-        node_range, spl_nodes, spl_ilist, ilist_nodes, children, ispl_child,
+        node_range, spl_nodes, ilist_lr.ispl, ilist_lr.iother, children, ispl_child,
         opening_angle=np.float32(cfg.opening.opening_angle)
     )[0]
 
     # Create interaction list from outputs
     new_ilist = InteractionList(ispl=ispl_child, iother=child_ilist, nfilled=ispl_child[-1])
+
+    # Evaluate L2L part
+    if loc_lr is not None:
+        ipar = plane_lr.icoarse_of_fine()
+        loc = loc + shift_local_to_local(loc_lr[ipar], plane.mp.center() - plane_lr.mp.center()[ipar])
     
     return loc, new_ilist
 cj_evaluate_tree_plane.jit = jax.jit(cj_evaluate_tree_plane, static_argnames=['cfg'])
