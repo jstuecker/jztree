@@ -78,7 +78,7 @@ __device__ __forceinline__ T block_reduce_sum_shared(T v, T* smem) {
 }
 
 #define BLOCKSIZE 32
-#define MAX_NUMA 4
+#define MAX_NUMA 8
 
 template<int p>
 __global__ void CountInteractions(
@@ -162,7 +162,7 @@ __global__ void CountInteractions(
     while(!seg_mgr.finished()) {
         int2 id = seg_mgr.next();
 
-        // Each thread loads one other child B to possibly interact with
+        // Each thread loads one other child B to check the opening criterion
         NodeWithExt childB_ext;
         if(id.x >= 0) {
             NodeInfo childB = children[id.x];
@@ -183,7 +183,7 @@ __global__ void CountInteractions(
             bool need_open = OpeningCriterion(childA[i], childB_ext, opening_angle);
             bool actually_open = need_open && (id.x >= 0);
             bool interact_now = !need_open && (id.x >= 0);
-            any_interacts = any_interacts || actually_open;
+            any_interacts = any_interacts || interact_now;
 
             // Sum over all threads
             num_open[i] += __popc(__ballot_sync(__activemask(), actually_open));
@@ -192,6 +192,8 @@ __global__ void CountInteractions(
             // we only store the flag for the child that we need to write to later
             interact_flags_wa = (i == a_write) ? interact_flags : interact_flags_wa;
         }
+
+        __syncthreads();
 
         // only read the multipoles if at least one interaction happens with this childB
         if(any_interacts) {
@@ -213,7 +215,6 @@ __global__ void CountInteractions(
         for(int ib=read_b_offset; ib < ninteractionsB_withA; ib += n_write_a) {
             // have to add the m2l interactions between a_write and the ib-th set bit in 
             // interact_flags_wa
-            // dummy: for now simply add the multipole
 
             // find the ib-th set bit
             int b_read = __fns(interact_flags_wa, 0, ib+1);
@@ -226,6 +227,8 @@ __global__ void CountInteractions(
                 for(int k = 0; k < ncomb; k++) {
                     LocA[k] = NAN;
                 }
+
+                continue;
             }
 
             float mp[ncomb];

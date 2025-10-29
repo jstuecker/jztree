@@ -97,8 +97,6 @@ def cj_evaluate_tree_plane(
 
     children = jnp.concatenate((plane.mp.center(), plane.lvl.view(jnp.float32)[...,None]), axis=-1)
     
-    # mp_values = plane.mp.values
-    
     # Determine output shapes
     out_loc = jax.ShapeDtypeStruct(plane.mp.values.shape, jnp.float32)
     out_interaction_count = jax.ShapeDtypeStruct((nchild + 1,), jnp.int32)
