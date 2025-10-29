@@ -1,6 +1,8 @@
 #ifndef CUSTOM_JAX_FMM_H
 #define CUSTOM_JAX_FMM_H
 
+#include "multipoles.cuh"
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                   Evaluate Tree Plane Kernel                                   */
 /* ---------------------------------------------------------------------------------------------- */
@@ -129,7 +131,7 @@ __global__ void CountInteractions(
     }
 
     // Child B info. This is transposed to reduce smem bank conflicts
-    __shared__ float posB[ncomb][BLOCKSIZE];
+    __shared__ float3 posB[BLOCKSIZE];
     __shared__ float mpB[ncomb][BLOCKSIZE];
     
     // Interaction list info:
@@ -193,9 +195,7 @@ __global__ void CountInteractions(
 
         // only read the multipoles if at least one interaction happens with this childB
         if(any_interacts) {
-            posB[0][threadIdx.x] = childB_ext.center.x;
-            posB[1][threadIdx.x] = childB_ext.center.y;
-            posB[2][threadIdx.x] = childB_ext.center.z;
+            posB[threadIdx.x] = childB_ext.center;
 
             // Note: This read would probably be more efficient if we coalesced the loads better
             // or maybe if we transposed the multipole layout in advance:
@@ -227,12 +227,16 @@ __global__ void CountInteractions(
                     LocA[k] = NAN;
                 }
             }
-            
+
+            float mp[ncomb];
             #pragma unroll
             for(int k = 0; k < ncomb; k++) {
-                float val = mpB[k][b_read]; //* xaWrite.x * posB[0][b_read]; // dummy operation
-                LocA[k] += val;
+                mp[k] = mpB[k][b_read];
             }
+
+            float3 dx = float3diff(posB[b_read], xaWrite);
+
+            m2l_translator<p>(dx, mp, LocA, softening*softening);
         }
     }
 

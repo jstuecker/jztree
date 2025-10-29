@@ -234,6 +234,59 @@ __global__ void IlistM2L(const float3* __restrict__ x, const float* __restrict__
     }
 }
 
+
+template<int p>
+__device__ __forceinline__ void m2l_translator(
+    float3 dx,
+    const float* Mp,
+    float* loc,
+    float epsilon2
+) {
+    constexpr int ncomb = NCOMB(p);
+
+    float Dn[ncomb];
+    setupDnG<p>(dx, epsilon2, Dn);
+
+    int kflat = 0;
+    #pragma unroll
+    for(int ksum = 0; ksum <= p; ksum++) {
+        #pragma unroll
+        for(int kz = 0; kz <= ksum; kz++) {
+            #pragma unroll
+            for(int ky = 0; ky <= ksum - kz; ky++) {
+                const int kx = ksum - ky - kz;
+                float Lnew = 0.f;
+
+                int nflat = 0;
+                #pragma unroll
+                for (int nsum = 0; nsum <= p - ksum; nsum++) {
+                    #pragma unroll
+                    for (int nz = 0; nz <= nsum; nz++) {
+                        #pragma unroll
+                        for (int ny = 0; ny <= nsum - nz; ny++) {
+                            const int nx = nsum - ny - nz;
+                            
+                            float Dnk = Dn[multi_to_flat(kx + nx, ky + ny, kz + nz)];
+                            float Mpn = Mp[nflat];
+                            
+                            const float infvac = 1./fact3f(nx, ny, nz);
+                            Lnew += Dnk * Mpn * infvac;
+                            nflat += 1;
+                        }
+                    }
+                }
+
+                const float sign = ksum % 2 == 0 ? -1.f : 1.f;
+                const float fac = sign / fact3f(kx, ky, kz);
+
+                loc[kflat] += Lnew * fac;
+
+                kflat += 1;
+            }
+        }
+    }
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                         Leaf M2L kernel                                        */
 /* ---------------------------------------------------------------------------------------------- */
