@@ -5,8 +5,6 @@
 /*                                   Evaluate Tree Plane Kernel                                   */
 /* ---------------------------------------------------------------------------------------------- */
 
-#define BLOCKSIZE 32
-
 #define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
 
 struct NodeInfo {
@@ -69,11 +67,16 @@ __device__ __forceinline__ T warp_reduce_sum(T v) {
 }
 
 template<typename T>
-__device__ __forceinline__ void block_reduce_sum_shared(T v, T* smem) {
+__device__ __forceinline__ T block_reduce_sum_shared(T v, T* smem) {
     T val = warp_reduce_sum(v);
-    if((threadIdx.x & 0x1f) == 0)
-        atomicAdd(smem, val);
+    // if((threadIdx.x & 0x1f) == 0)
+        atomicAdd(smem, v);
+        // smem[0] += val;
+    return val;
 }
+
+#define BLOCKSIZE 32
+#define MAX_NUMA 4
 
 template<int p>
 __global__ void CountInteractions(
@@ -92,6 +95,8 @@ __global__ void CountInteractions(
     float softening,
     float opening_angle
 ) {
+    constexpr int ncomb = NCOMB(p);
+
     // Node A info:
     int2 nrange = node_range[0];
     int nodeid = nrange.x + blockIdx.x;
@@ -103,7 +108,7 @@ __global__ void CountInteractions(
     int2 child_range = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
     int num_childrenA = min(child_range.y - child_range.x, blockDim.x); // handle larger nodes later
 
-    __shared__ NodeWithExt childA[BLOCKSIZE];
+    __shared__ NodeWithExt childA[MAX_NUMA];
     if(child_range.x + threadIdx.x < child_range.y) {
         NodeInfo child = children[child_range.x + threadIdx.x];
         childA[threadIdx.x] = {child.center, LvlToExt(child.level)};
@@ -111,14 +116,21 @@ __global__ void CountInteractions(
     else
         childA[threadIdx.x] = {NAN, NAN, NAN, 1e10, 1e10, 1e10};
 
-    __shared__ int num_open[BLOCKSIZE];
-    if(threadIdx.x < BLOCKSIZE) {
-        num_open[threadIdx.x] = 0;
+    int num_open[MAX_NUMA];
+    #pragma unroll
+    for(int i = 0; i < MAX_NUMA; i++) {
+        num_open[i] = 0;
     }
-    __shared__ float loc[BLOCKSIZE * NCOMB(p)];
-    for(int i = threadIdx.x; i < BLOCKSIZE * NCOMB(p); i += BLOCKSIZE) {
-        loc[i] = 0.0f;
+
+    float LocA[ncomb];
+    #pragma unroll
+    for(int i = 0; i < ncomb; i++) {
+        LocA[i] = 0.0f;
     }
+
+    // Child B info. This is transposed to reduce smem bank conflicts
+    __shared__ float posB[ncomb][BLOCKSIZE];
+    __shared__ float mpB[ncomb][BLOCKSIZE];
     
     // Interaction list info:
     int2 ilist_range = {spl_ilist[nodeid], spl_ilist[nodeid + 1]};
@@ -133,46 +145,114 @@ __global__ void CountInteractions(
         ilist_range.y
     );
 
+
+    // Precalculate layout for M2L interactions
+    // Which childA am I writing to:
+    int a_write = threadIdx.x % num_childrenA;   
+    // Where I would read from in the first iteration:
+    int read_b_offset = threadIdx.x / num_childrenA;
+    // Number of threads that aren't evenly distributed:
+    int residual_threads = blockDim.x % num_childrenA; 
+    // Number of threads that write to the same childA as me:
+    int n_write_a = blockDim.x / num_childrenA + (a_write < residual_threads);
+    float3 xaWrite = childA[a_write].center;
+
     while(!seg_mgr.finished()) {
         int2 id = seg_mgr.next();
 
+        // Each thread loads one other child B to possibly interact with
         NodeWithExt childB_ext;
-
-        constexpr int ncomb = NCOMB(p);
-        float mp_childB[ncomb];
-
         if(id.x >= 0) {
             NodeInfo childB = children[id.x];
             childB_ext = {childB.center, LvlToExt(childB.level)};
-            for(int i = 0; i < ncomb; i++) {
-                mp_childB[i] = mp_values[id.x * ncomb + i];
-            }
-        }
-        else {
-            // If we set invalid multipoles to zero, we can avoid branching later on
-            for(int k = 0; k < ncomb; k++) {
-                mp_childB[k] = 0.0f;
-            }
         }
 
-        for(int i = 0; i < num_childrenA; i++) {
+        // For each child A, we count the cumulative number of opens and we 
+        // flag the M2L interactions that need to be evaluated now
+
+        unsigned int interact_flags_wa = 0;
+
+        bool any_interacts = false;
+        #pragma unroll
+        for(int i = 0; i < MAX_NUMA; i++) {
+            if(i >= num_childrenA)
+                continue;
+
             bool need_open = OpeningCriterion(childA[i], childB_ext, opening_angle);
+            bool actually_open = need_open && (id.x >= 0);
+            bool interact_now = !need_open && (id.x >= 0);
+            any_interacts = any_interacts || actually_open;
 
-            block_reduce_sum_shared((need_open && id.x >= 0) ? 1 : 0, &num_open[i]);
+            // Sum over all threads
+            num_open[i] += __popc(__ballot_sync(__activemask(), actually_open));
+            // Flag the active m2l interactions for this child
+            unsigned int interact_flags = __ballot_sync(__activemask(), interact_now);
+            // we only store the flag for the child that we need to write to later
+            interact_flags_wa = (i == a_write) ? interact_flags : interact_flags_wa;
+        }
 
+        // only read the multipoles if at least one interaction happens with this childB
+        if(any_interacts) {
+            posB[0][threadIdx.x] = childB_ext.center.x;
+            posB[1][threadIdx.x] = childB_ext.center.y;
+            posB[2][threadIdx.x] = childB_ext.center.z;
+
+            // Note: This read would probably be more efficient if we coalesced the loads better
+            // or maybe if we transposed the multipole layout in advance:
+            for(int k=0; k<ncomb; k++) {
+                mpB[k][threadIdx.x] = mp_values[id.x * ncomb + k];
+            }
+        }
+
+        __syncthreads();
+
+        // Now we have all the data we need for the M2L interactions in shared memory.
+        // To avoid reduction operations across threads, we transpose the problem differently here.
+
+        int ninteractionsB_withA = __popc(interact_flags_wa);
+        for(int ib=read_b_offset; ib < ninteractionsB_withA; ib += n_write_a) {
+            // have to add the m2l interactions between a_write and the ib-th set bit in 
+            // interact_flags_wa
+            // dummy: for now simply add the multipole
+
+            // find the ib-th set bit
+            int b_read = __fns(interact_flags_wa, 0, ib+1);
+
+            if(b_read > 32) {
+                // This should not be possible to happen.
+                // To be sure about this, for now invalidate multipoles
+                // later I can delete this part of the code
+                #pragma unroll
+                for(int k = 0; k < ncomb; k++) {
+                    LocA[k] = NAN;
+                }
+            }
+            
+            #pragma unroll
             for(int k = 0; k < ncomb; k++) {
-                float val = mp_childB[k];
-
-                block_reduce_sum_shared(val, &loc[i * ncomb + k]);
+                float val = mpB[k][b_read]; //* xaWrite.x * posB[0][b_read]; // dummy operation
+                LocA[k] += val;
             }
         }
     }
+
     __syncthreads();
-    if(child_range.x + threadIdx.x < child_range.y) {
-        child_count_out[child_range.x + threadIdx.x] = num_open[threadIdx.x];
+    if(threadIdx.x == 0) { 
+        // Since num_open lives in registers, the simplest way of writing it is with a single thread
+        #pragma unroll
+        for(int i = 0; i < MAX_NUMA; i++) {
+            if(child_range.x + i < child_range.y) {
+                child_count_out[child_range.x + i] = num_open[i];
+            }
+        }
     }
-    for(int i = threadIdx.x; i < num_childrenA * NCOMB(p); i += BLOCKSIZE) {
-        loc_out[child_range.x * NCOMB(p) + i] = loc[i];
+
+    #pragma unroll
+    for(int i = 0; i < ncomb; i++) {
+        // now atomically add the results
+        // note: we can easily avoid the atomic here -- change that later!
+        int iout = (child_range.x + a_write) * ncomb + i;
+        atomicAdd(&loc_out[iout], LocA[i]);
     }
 }
 
