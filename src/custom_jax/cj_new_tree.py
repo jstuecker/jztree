@@ -13,6 +13,7 @@ from typing import Tuple
 jax.ffi.register_ffi_target("MultipolesFromParticles", ffi_multipoles.MultipolesFromParticles(), platform="CUDA")
 jax.ffi.register_ffi_target("CoarsenMultipoles", ffi_multipoles.CoarsenMultipoles(), platform="CUDA")
 jax.ffi.register_ffi_target("CountInteractionsAndM2L", ffi_fmm.CountInteractionsAndM2L(), platform="CUDA")
+jax.ffi.register_ffi_target("InsertInteractions", ffi_fmm.InsertInteractions(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
 from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList
@@ -100,10 +101,9 @@ def cj_evaluate_tree_plane(
     # Determine output shapes
     out_loc = jax.ShapeDtypeStruct(plane.mp.values.shape, jnp.float32)
     out_interaction_count = jax.ShapeDtypeStruct((nchild + 1,), jnp.int32)
-    out_child_ilist = jax.ShapeDtypeStruct((nint_out,), jnp.int32)
     
-    # Make FFI call
-    loc, spl_child_ilist = jax.ffi.ffi_call(
+    # Count opened interactions and evaluate M2L
+    loc, interaction_counts = jax.ffi.ffi_call(
         "CountInteractionsAndM2L",
         (out_loc, out_interaction_count, )
     )(
@@ -113,10 +113,20 @@ def cj_evaluate_tree_plane(
         opening_angle=np.float32(cfg.opening.opening_angle)
     )
 
-    child_ilist = jnp.zeros(out_child_ilist.shape, dtype=out_child_ilist.dtype)  # Placeholder for child interaction list
-    
+    # Insert interactions
+    ispl_child = jnp.pad(jnp.cumsum(interaction_counts), (1, 0))
+    out_child_ilist = jax.ShapeDtypeStruct((nint_out,), jnp.int32)
+
+    child_ilist = jax.ffi.ffi_call(
+        "InsertInteractions",
+        (out_child_ilist,)
+    )(
+        node_range, spl_nodes, spl_ilist, ilist_nodes, children, ispl_child,
+        opening_angle=np.float32(cfg.opening.opening_angle)
+    )[0]
+
     # Create interaction list from outputs
-    new_ilist = InteractionList(ispl=spl_child_ilist, iother=child_ilist, nfilled=spl_child_ilist[-1])
+    new_ilist = InteractionList(ispl=ispl_child, iother=child_ilist, nfilled=ispl_child[-1])
     
     return loc, new_ilist
 cj_evaluate_tree_plane.jit = jax.jit(cj_evaluate_tree_plane, static_argnames=['cfg'])

@@ -93,8 +93,7 @@ __global__ void CountInteractionsAndM2L(
     const float* mp_values,
     // outputs:
     float* loc_out,
-    int* child_count_out,
-    // int* child_ilist_out,
+    int* ilist_child_count_out,
     // attributes:
     float softening,
     float opening_angle
@@ -113,16 +112,15 @@ __global__ void CountInteractionsAndM2L(
     // This loop should handle almost always everything on the first pass
     // However, to deal with edge cases we have to loop over scenarios where 
     // the node has more than MAX_NUMA children
-    int offsetA=child_range.x;
     for(int offsetA=child_range.x; offsetA < child_range.y; offsetA += MAX_NUMA) {
+        int num_childrenA = min(MAX_NUMA, child_range.y - offsetA);
+
         // childA info
         __shared__ NodeWithExt childA[MAX_NUMA];
-        if(offsetA + threadIdx.x < child_range.y) {
+        if(threadIdx.x < num_childrenA) {
             NodeInfo child = children[offsetA + threadIdx.x];
             childA[threadIdx.x] = {child.center, LvlToExt(child.level)};
         }
-        else
-            childA[threadIdx.x] = {NAN, NAN, NAN, 1e10, 1e10, 1e10};
 
         int num_open[MAX_NUMA];
         #pragma unroll
@@ -155,7 +153,6 @@ __global__ void CountInteractionsAndM2L(
 
 
         // Precalculate layout for M2L interactions
-        int num_childrenA = min(MAX_NUMA, child_range.y - offsetA);
         // Which childA am I writing to:
         int a_write = threadIdx.x % num_childrenA;   
         // Where I would read from in the first iteration:
@@ -256,7 +253,7 @@ __global__ void CountInteractionsAndM2L(
             #pragma unroll
             for(int i = 0; i < MAX_NUMA; i++) {
                 if(offsetA + i < child_range.y) {
-                    child_count_out[offsetA + i] = num_open[i];
+                    ilist_child_count_out[offsetA + i] = num_open[i];
                 }
             }
         }
@@ -269,6 +266,103 @@ __global__ void CountInteractionsAndM2L(
             atomicAdd(&loc_out[iout], LocA[i]);
         }
         __syncthreads();
+    }
+}
+
+__device__ __forceinline__ int nbits_set_before(unsigned mask, int bit)
+{
+    unsigned lower_mask = (bit == 0) ? 0u : ((1u << bit) - 1u);
+    return __popc(mask & lower_mask);
+}
+
+__global__ void InsertInteractions(
+    // inputs:
+    const int2* node_range,
+    const int* spl_nodes,
+    const int* spl_ilist,
+    const int* ilist_nodes,
+    const NodeInfo* children,
+    const int* spl_ilist_child,
+    // outputs:
+    int* child_ilist_out,
+    // attributes:
+    float opening_angle
+) {
+    // Node A info:
+    int2 nrange = node_range[0];
+    int nodeid = nrange.x + blockIdx.x;
+    if (nodeid >= nrange.y) {
+        return;
+    }
+
+    int2 child_range = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
+
+    // This loop should handle almost always everything on the first pass
+    // However, to deal with edge cases we have to loop over scenarios where 
+    // the node has more than MAX_NUMA children
+    for(int offsetA=child_range.x; offsetA < child_range.y; offsetA += MAX_NUMA) {
+        int num_childrenA = min(MAX_NUMA, child_range.y - offsetA);
+
+        // childA info
+        __shared__ NodeWithExt childA[MAX_NUMA];
+        __shared__ int ilist_offsets[MAX_NUMA];
+        if(threadIdx.x < num_childrenA) {
+            NodeInfo child = children[offsetA + threadIdx.x];
+            childA[threadIdx.x] = {child.center, LvlToExt(child.level)};
+            ilist_offsets[threadIdx.x] = spl_ilist_child[offsetA + threadIdx.x];
+        }
+
+        int num_open[MAX_NUMA];
+        #pragma unroll
+        for(int i = 0; i < MAX_NUMA; i++) {
+            num_open[i] = 0;
+        }
+
+        // Child B info
+        __shared__ float3 posB[BLOCKSIZE];
+        
+        // Interaction list info:
+        int2 ilist_range = {spl_ilist[nodeid], spl_ilist[nodeid + 1]};
+        __syncthreads();
+
+        __shared__ int2 segments[BLOCKSIZE];
+        SegmentManager<BLOCKSIZE> seg_mgr(
+            ilist_nodes,
+            spl_nodes,
+            segments,
+            ilist_range.x,
+            ilist_range.y
+        );
+
+        while(!seg_mgr.finished()) {
+            int2 id = seg_mgr.next();
+
+            // Each thread loads one other child B to check the opening criterion
+            NodeWithExt childB_ext;
+            if(id.x >= 0) {
+                NodeInfo childB = children[id.x];
+                childB_ext = {childB.center, LvlToExt(childB.level)};
+            }
+
+            #pragma unroll
+            for(int i = 0; i < MAX_NUMA; i++) {
+                if(i >= num_childrenA)
+                    continue;
+
+                bool need_open = OpeningCriterion(childA[i], childB_ext, opening_angle);
+                need_open = need_open && (id.x >= 0);
+
+                unsigned open_mask = __ballot_sync(ALLTHREADS, need_open);
+
+                // Count the number of activated bits before our thread's bit
+                int warp_offset = nbits_set_before(open_mask, threadIdx.x & 0x1f);
+
+                if(need_open)
+                    child_ilist_out[ilist_offsets[i] + num_open[i] + warp_offset] = id.x;
+                
+                num_open[i] += __popc(open_mask);
+            }
+        }
     }
 }
 
