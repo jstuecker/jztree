@@ -417,19 +417,21 @@ __global__ void NewForceAndPot(
 
     int num = prange.y-prange.x;
 
-    // Precalculate layout for M2L interactions
+    // Precalculate layout for M2L interactions: blockdim.x -> (num, n_write) + residuals
+    int n_write = blockDim.x / num;
     // Which particle I am writing to:
     int a_write = threadIdx.x % num;   
     // Where I would read from in the first iteration:
     int read_b_offset = threadIdx.x / num;
-    // Number of threads that aren't evenly distributed:
-    int residual_threads = blockDim.x % num; 
-    // Number of threads that write to the same childA as me:
-    int n_write_a = blockDim.x / num + (a_write < residual_threads);
+    // Flag residual threads as invalid
+    // (To avoid divergence we let these follow allong the calculations, 
+    //  but later discard their result)
+    int valid = threadIdx.x < num * n_write;
+
     PMass xaWrite = posm[prange.x + a_write];
 
     __shared__ int2 segments[32];
-    SegmentManager seg_mgr( // Todo: make this not require a template variable
+    SegmentManager seg_mgr(
         ilist_nodes,
         spl_nodes,
         segments,
@@ -452,7 +454,7 @@ __global__ void NewForceAndPot(
         __syncthreads();
 
         // Now compute interactions
-        for(int ib=read_b_offset; ib < seg_mgr.num_loaded; ib += n_write_a) {
+        for(int ib=read_b_offset; ib < seg_mgr.num_loaded; ib += n_write) {
             accumulateForceAndPot(
                 xaWrite,
                 xm_b[ib],
@@ -464,11 +466,13 @@ __global__ void NewForceAndPot(
         __syncthreads();
     }
 
-    int iout = prange.x + a_write;
-    atomicAdd(&fphi[iout].force.x, fphi_a.force.x);
-    atomicAdd(&fphi[iout].force.y, fphi_a.force.y);
-    atomicAdd(&fphi[iout].force.z, fphi_a.force.z);
-    atomicAdd(&fphi[iout].pot, fphi_a.pot);    
+    if(valid) {
+        int iout = prange.x + a_write;
+        atomicAdd(&fphi[iout].force.x, fphi_a.force.x);
+        atomicAdd(&fphi[iout].force.y, fphi_a.force.y);
+        atomicAdd(&fphi[iout].force.z, fphi_a.force.z);
+        atomicAdd(&fphi[iout].pot, fphi_a.pot);    
+    }
 }
 
 #endif
