@@ -51,7 +51,7 @@ kernels["InsertInteractions"].grid_size_expression = "spl_nodes.element_count() 
 kernels["InsertInteractions"].block_size_expression = 32
 
 kernels["NewForceAndPot"].grid_size_expression = "spl_nodes.element_count() - 1"
-kernels["NewForceAndPot"].block_size_expression = "64" #"max_leaf_size"
+kernels["NewForceAndPot"].block_size_expression = "128" #"max_leaf_size"
 kernels["NewForceAndPot"].smem_size_expression = "blockDim.x * sizeof(float4)"
 kernels["NewForceAndPot"].init_outputs_zero = True
 

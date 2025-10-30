@@ -180,7 +180,7 @@ ffi::Error NewForceAndPotFFIHost(
     float softening,
     int max_leaf_size
 ) {
-    dim3 blockDim(64);
+    dim3 blockDim(128);
     dim3 gridDim(spl_nodes.element_count() - 1);
     size_t smem = blockDim.x * sizeof(float4);
     
