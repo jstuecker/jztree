@@ -393,8 +393,6 @@ __forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, floa
     fphi_i.pot += -minvr;
 }
 
-#define BLOCKSIZE2 32
-
 __global__ void NewForceAndPot(
     // inputs:
     const int2* node_range,
@@ -430,21 +428,21 @@ __global__ void NewForceAndPot(
     int n_write_a = blockDim.x / num + (a_write < residual_threads);
     PMass xaWrite = posm[prange.x + a_write];
 
-    __shared__ int2 segments[BLOCKSIZE2];
+    __shared__ int2 segments[32];
     SegmentManager seg_mgr( // Todo: make this not require a template variable
         ilist_nodes,
         spl_nodes,
         segments,
         spl_ilist[nodeid],
         spl_ilist[nodeid + 1],
-        BLOCKSIZE2
+        32
     );
 
     ForceAndPot fphi_a = {{0.f,0.f,0.f}, 0.f};
 
-    while(!seg_mgr.finished()) {
-        __shared__ PMass xm_b[BLOCKSIZE2];
+    extern __shared__ PMass xm_b[];
 
+    while(!seg_mgr.finished()) {
         int id = seg_mgr.next();
 
         // Each thread loads one other particle B
@@ -462,6 +460,8 @@ __global__ void NewForceAndPot(
                 fphi_a
             );
         }
+
+        __syncthreads();
     }
 
     int iout = prange.x + a_write;
