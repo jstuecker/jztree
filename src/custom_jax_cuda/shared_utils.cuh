@@ -16,14 +16,12 @@ inline int div_ceil(int a, int b) {
     return (a + b - 1) / b;
 }
 
-template <int NLOAD, bool SINGLE = false>
 struct SegmentManager {
     // Manages a pointer based segment list so that it can be traversed with threads
     // almost as if it was a linear structure
     // each segment goes from isplits[i] to isplits[i+1]
     // inodes contains the indices of the segments to be processed
     // istart, iend define the range of inodes to be processed
-    // if SINGLE is set, only particles in one segment are loaded at a time
 
     int istart, iend;                     // indices into inodes[]
     const int* __restrict__ inodes;       // segment indices to visit (defaults to 0,1,... if nullptr)
@@ -35,20 +33,22 @@ struct SegmentManager {
     int next_seg = 0;
     int seg_offset = 0;
     int num_loaded = 0;
+    int nload_max = 0;
     
-    __device__ __forceinline__ SegmentManager(const int* inodes_, const int* isplits_, int2* segments_, int istart_, int iend_) {
+    __device__ __forceinline__ SegmentManager(const int* inodes_, const int* isplits_, int2* segments_, int istart_, int iend_, int nload_max_) {
         inodes = inodes_;
         isplits = isplits_;
         segments = segments_;
 
         istart = istart_;
         iend = iend_;
+        nload_max = nload_max_;
         
         loadSegments();
     }
 
     __device__ __forceinline__ void loadSegments() {
-        seg_loaded = min(NLOAD, iend-istart);
+        seg_loaded = min(nload_max, iend-istart);
         if(threadIdx.x < seg_loaded) {
             int segment_idx = inodes ? inodes[istart + threadIdx.x] : istart + threadIdx.x;
             int i0 = isplits[segment_idx];
@@ -76,7 +76,6 @@ struct SegmentManager {
             int nadd = min(seg.y - seg_offset, blockDim.x - num_loaded);
             if((threadIdx.x >= num_loaded ) && (threadIdx.x < num_loaded + nadd)) {
                 id = seg.x + seg_offset + (threadIdx.x - num_loaded);
-                // id.y = istart - seg_loaded + next_seg;
             }
             num_loaded += nadd;
             if(num_loaded >= blockDim.x) {
@@ -85,9 +84,6 @@ struct SegmentManager {
             }
             seg_offset = 0;
             next_seg += 1;
-
-            if(SINGLE) 
-                break; // only load at most one segment at a time
         }
 
         return id;

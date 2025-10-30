@@ -143,12 +143,13 @@ __global__ void CountInteractionsAndM2L(
         __syncthreads();
 
         __shared__ int2 segments[BLOCKSIZE];
-        SegmentManager<BLOCKSIZE> seg_mgr(
+        SegmentManager seg_mgr(
             ilist_nodes,
             spl_nodes,
             segments,
             ilist_range.x,
-            ilist_range.y
+            ilist_range.y,
+            BLOCKSIZE
         );
 
 
@@ -323,12 +324,13 @@ __global__ void InsertInteractions(
         __syncthreads();
 
         __shared__ int2 segments[BLOCKSIZE];
-        SegmentManager<BLOCKSIZE> seg_mgr(
+        SegmentManager seg_mgr(
             ilist_nodes,
             spl_nodes,
             segments,
             ilist_range.x,
-            ilist_range.y
+            ilist_range.y,
+            BLOCKSIZE
         );
 
         while(!seg_mgr.finished()) {
@@ -429,12 +431,13 @@ __global__ void NewForceAndPot(
     PMass xaWrite = posm[prange.x + a_write];
 
     __shared__ int2 segments[BLOCKSIZE2];
-    SegmentManager<BLOCKSIZE2> seg_mgr( // Todo: make this not require a template variable
+    SegmentManager seg_mgr( // Todo: make this not require a template variable
         ilist_nodes,
         spl_nodes,
         segments,
         spl_ilist[nodeid],
-        spl_ilist[nodeid + 1]
+        spl_ilist[nodeid + 1],
+        BLOCKSIZE2
     );
 
     ForceAndPot fphi_a = {{0.f,0.f,0.f}, 0.f};
