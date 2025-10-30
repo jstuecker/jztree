@@ -48,6 +48,7 @@ struct SegmentManager {
     }
 
     __device__ __forceinline__ void loadSegments() {
+        __syncthreads();
         seg_loaded = min(nload_max, iend-istart);
         if(threadIdx.x < seg_loaded) {
             int segment_idx = inodes ? inodes[istart + threadIdx.x] : istart + threadIdx.x;
@@ -72,7 +73,7 @@ struct SegmentManager {
                 loadSegments();
             }
 
-            int2 seg = segments[next_seg]; // {start, length}
+            int2 seg = segments[next_seg];
             int nadd = min(seg.y - seg_offset, blockDim.x - num_loaded);
             if((threadIdx.x >= num_loaded ) && (threadIdx.x < num_loaded + nadd)) {
                 id = seg.x + seg_offset + (threadIdx.x - num_loaded);
