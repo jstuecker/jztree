@@ -46,9 +46,11 @@ ffi::Error SimpleArangeFFIHost(
         case 1: kernel = (const void*) SimpleArange<1>; break;
         case 2: kernel = (const void*) SimpleArange<2>; break;
         case 3: kernel = (const void*) SimpleArange<3>; break;
+        case 4: kernel = (const void*) SimpleArange<4>; break;
+        case 5: kernel = (const void*) SimpleArange<5>; break;
         default: return ffi::Error::Internal(
             "Unsupported p=" + std::to_string(p) + " in SimpleArangeFFIHost"\
-            " -- Only supporting values: (1,2,3)"
+            " -- Only supporting values: (1,2,3,4,5)"
         );
     };
     

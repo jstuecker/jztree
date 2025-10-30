@@ -6,7 +6,7 @@ import cj_codetools.generator as gen
 
 HERE = Path(__file__).resolve().parent
 
-p_instance_values = (1, 2, 3)
+p_instance_values = (1, 2, 3, 4, 5)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                            ffi_example                                           #

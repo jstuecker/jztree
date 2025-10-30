@@ -60,9 +60,11 @@ ffi::Error IlistM2LFFIHost(
         case 1: kernel = (const void*) IlistM2L<1>; break;
         case 2: kernel = (const void*) IlistM2L<2>; break;
         case 3: kernel = (const void*) IlistM2L<3>; break;
+        case 4: kernel = (const void*) IlistM2L<4>; break;
+        case 5: kernel = (const void*) IlistM2L<5>; break;
         default: return ffi::Error::Internal(
             "Unsupported p=" + std::to_string(p) + " in IlistM2LFFIHost"\
-            " -- Only supporting values: (1,2,3)"
+            " -- Only supporting values: (1,2,3,4,5)"
         );
     };
     
@@ -142,9 +144,11 @@ ffi::Error IlistLeaf2NodeM2LFFIHost(
         case 1: kernel = (const void*) IlistLeaf2NodeM2L<1>; break;
         case 2: kernel = (const void*) IlistLeaf2NodeM2L<2>; break;
         case 3: kernel = (const void*) IlistLeaf2NodeM2L<3>; break;
+        case 4: kernel = (const void*) IlistLeaf2NodeM2L<4>; break;
+        case 5: kernel = (const void*) IlistLeaf2NodeM2L<5>; break;
         default: return ffi::Error::Internal(
             "Unsupported p=" + std::to_string(p) + " in IlistLeaf2NodeM2LFFIHost"\
-            " -- Only supporting values: (1,2,3)"
+            " -- Only supporting values: (1,2,3,4,5)"
         );
     };
     
@@ -216,9 +220,11 @@ ffi::Error MultipolesFromParticlesFFIHost(
         case 1: kernel = (const void*) MultipolesFromParticles<1>; break;
         case 2: kernel = (const void*) MultipolesFromParticles<2>; break;
         case 3: kernel = (const void*) MultipolesFromParticles<3>; break;
+        case 4: kernel = (const void*) MultipolesFromParticles<4>; break;
+        case 5: kernel = (const void*) MultipolesFromParticles<5>; break;
         default: return ffi::Error::Internal(
             "Unsupported p=" + std::to_string(p) + " in MultipolesFromParticlesFFIHost"\
-            " -- Only supporting values: (1,2,3)"
+            " -- Only supporting values: (1,2,3,4,5)"
         );
     };
     
@@ -289,9 +295,11 @@ ffi::Error CoarsenMultipolesFFIHost(
         case 1: kernel = (const void*) CoarsenMultipoles<1>; break;
         case 2: kernel = (const void*) CoarsenMultipoles<2>; break;
         case 3: kernel = (const void*) CoarsenMultipoles<3>; break;
+        case 4: kernel = (const void*) CoarsenMultipoles<4>; break;
+        case 5: kernel = (const void*) CoarsenMultipoles<5>; break;
         default: return ffi::Error::Internal(
             "Unsupported p=" + std::to_string(p) + " in CoarsenMultipolesFFIHost"\
-            " -- Only supporting values: (1,2,3)"
+            " -- Only supporting values: (1,2,3,4,5)"
         );
     };
     

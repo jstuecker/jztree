@@ -69,9 +69,11 @@ ffi::Error CountInteractionsAndM2LFFIHost(
         case 1: kernel = (const void*) CountInteractionsAndM2L<1>; break;
         case 2: kernel = (const void*) CountInteractionsAndM2L<2>; break;
         case 3: kernel = (const void*) CountInteractionsAndM2L<3>; break;
+        case 4: kernel = (const void*) CountInteractionsAndM2L<4>; break;
+        case 5: kernel = (const void*) CountInteractionsAndM2L<5>; break;
         default: return ffi::Error::Internal(
             "Unsupported p=" + std::to_string(p) + " in CountInteractionsAndM2LFFIHost"\
-            " -- Only supporting values: (1,2,3)"
+            " -- Only supporting values: (1,2,3,4,5)"
         );
     };
     
