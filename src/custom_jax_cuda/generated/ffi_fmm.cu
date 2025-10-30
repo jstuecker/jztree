@@ -180,9 +180,9 @@ ffi::Error NewForceAndPotFFIHost(
     float softening,
     int max_leaf_size
 ) {
-    dim3 blockDim(max_leaf_size);
+    dim3 blockDim(32);
     dim3 gridDim(spl_nodes.element_count() - 1);
-    size_t smem = 2*min(max_leaf_size, blockDim.x) * sizeof(float4);
+    size_t smem = 2*blockDim.x * sizeof(float4) + 2 * blockDim.x * sizeof(int32_t);
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
@@ -190,7 +190,7 @@ ffi::Error NewForceAndPotFFIHost(
     int* spl_nodes_val = reinterpret_cast<int*>(spl_nodes.untyped_data());
     int* spl_ilist_val = reinterpret_cast<int*>(spl_ilist.untyped_data());
     int* ilist_nodes_val = reinterpret_cast<int*>(ilist_nodes.untyped_data());
-    PosMass* posm_val = reinterpret_cast<PosMass*>(posm.untyped_data());
+    PMass* posm_val = reinterpret_cast<PMass*>(posm.untyped_data());
     ForceAndPot* fphi_val = reinterpret_cast<ForceAndPot*>(fphi->untyped_data());
 
     void* args[] = {

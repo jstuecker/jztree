@@ -318,9 +318,6 @@ __global__ void InsertInteractions(
             num_open[i] = 0;
         }
 
-        // Child B info
-        __shared__ float3 posB[BLOCKSIZE];
-        
         // Interaction list info:
         int2 ilist_range = {spl_ilist[nodeid], spl_ilist[nodeid + 1]};
         __syncthreads();
@@ -371,10 +368,28 @@ __global__ void InsertInteractions(
 /*                                        New force kernel                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
+struct PMass {
+    float3 pos;
+    float mass;
+};
+
 struct ForceAndPot {
     float3 force;
     float  pot;
 };
+
+__forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, float softening2, ForceAndPot &fphi_i) {
+    float3 dx = float3diff(xmj.pos, xmi.pos);
+    float rinv = rsqrtf(norm2(dx) + softening2);
+
+    float minvr = xmj.mass * rinv;
+    float minvr3 = minvr * rinv * rinv;
+
+    fphi_i.force.x += minvr3 * dx.x;
+    fphi_i.force.y += minvr3 * dx.y;
+    fphi_i.force.z += minvr3 * dx.z;
+    fphi_i.pot += -minvr;
+}
 
 __global__ void NewForceAndPot(
     // inputs:
@@ -382,7 +397,7 @@ __global__ void NewForceAndPot(
     const int* spl_nodes,
     const int* spl_ilist,
     const int* ilist_nodes,
-    const PosMass* posm,
+    const PMass* posm,
     // outputs:
     ForceAndPot* fphi,
     // attributes:
@@ -398,22 +413,57 @@ __global__ void NewForceAndPot(
     
     int2 prange = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
 
-    if(threadIdx.x <= prange.y - prange.x) {
-        fphi[prange.x + threadIdx.x] = {blockIdx.x*1.0f, threadIdx.x*1.0f, 0.f, 0.f};
-    }
-
     int num = min(prange.y-prange.x,  min(max_leaf_size, blockDim.x));
 
-    extern __shared__ PosMass xm_a[];
-    PosMass* xm_b = &xm_a[num];
+    // extern __shared__ PMass xm_a[];
+    // PMass* xm_b = &xm_a[blockDim.x];
+    __shared__ PMass xm_a[BLOCKSIZE];
+    __shared__ PMass xm_b[BLOCKSIZE];
 
     if(threadIdx.x < num) {
         xm_a[threadIdx.x] = posm[prange.x + threadIdx.x];
     }
+    else {
+        xm_a[threadIdx.x] = {{0.f,0.f,0.f}, 0.f};
+    }
+    __syncthreads();
+
+    // int2* segments = (int2*)&xm_b[blockDim.x];
+    __shared__ int2 segments[BLOCKSIZE];
+    SegmentManager<BLOCKSIZE> seg_mgr( // Todo: make this not require a template variable
+        ilist_nodes,
+        spl_nodes,
+        segments,
+        spl_ilist[nodeid],
+        spl_ilist[nodeid + 1]
+    );
+
+    ForceAndPot fphi_a = {{0.f,0.f,0.f}, 0.f};
+
+    while(!seg_mgr.finished()) {
+        int2 id = seg_mgr.next();
+
+        __syncthreads();
+
+        // Each thread loads one other particle B
+        if(id.x >= 0) {
+            xm_b[threadIdx.x] = posm[id.x];
+        }
+        __syncthreads();
+
+        // Now compute interactions
+        for(int j=0; j<seg_mgr.num_loaded; j++) {
+            accumulateForceAndPot(
+                xm_a[threadIdx.x],
+                xm_b[j],
+                softening2,
+                fphi_a
+            );
+        }
+    }
 
     if(threadIdx.x < num) {
-        // dummy output
-        fphi[threadIdx.x] = {xm_a[threadIdx.x].x, 0.f, 0.f, 0.f};
+        fphi[prange.x + threadIdx.x] = fphi_a;
     }
 }
 
