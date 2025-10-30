@@ -164,12 +164,12 @@ __global__ void CountInteractionsAndM2L(
         float3 xaWrite = childA[a_write].center;
 
         while(!seg_mgr.finished()) {
-            int2 id = seg_mgr.next();
+            int id = seg_mgr.next();
 
             // Each thread loads one other child B to check the opening criterion
             NodeWithExt childB_ext;
-            if(id.x >= 0) {
-                NodeInfo childB = children[id.x];
+            if(id >= 0) {
+                NodeInfo childB = children[id];
                 childB_ext = {childB.center, LvlToExt(childB.level)};
             }
 
@@ -185,8 +185,8 @@ __global__ void CountInteractionsAndM2L(
                     continue;
 
                 bool need_open = OpeningCriterion(childA[i], childB_ext, opening_angle);
-                bool actually_open = need_open && (id.x >= 0);
-                bool interact_now = !need_open && (id.x >= 0);
+                bool actually_open = need_open && (id >= 0);
+                bool interact_now = !need_open && (id >= 0);
                 any_interacts = any_interacts || interact_now;
 
                 // Sum over all threads
@@ -206,7 +206,7 @@ __global__ void CountInteractionsAndM2L(
                 // Note: This read would probably be more efficient if we coalesced the loads better
                 // or maybe if we transposed the multipole layout in advance:
                 for(int k=0; k<ncomb; k++) {
-                    mpB[k][threadIdx.x] = mp_values[id.x * ncomb + k];
+                    mpB[k][threadIdx.x] = mp_values[id * ncomb + k];
                 }
             }
 
@@ -332,12 +332,12 @@ __global__ void InsertInteractions(
         );
 
         while(!seg_mgr.finished()) {
-            int2 id = seg_mgr.next();
+            int id = seg_mgr.next();
 
             // Each thread loads one other child B to check the opening criterion
             NodeWithExt childB_ext;
-            if(id.x >= 0) {
-                NodeInfo childB = children[id.x];
+            if(id >= 0) {
+                NodeInfo childB = children[id];
                 childB_ext = {childB.center, LvlToExt(childB.level)};
             }
 
@@ -347,7 +347,7 @@ __global__ void InsertInteractions(
                     continue;
 
                 bool need_open = OpeningCriterion(childA[i], childB_ext, opening_angle);
-                need_open = need_open && (id.x >= 0);
+                need_open = need_open && (id >= 0);
 
                 unsigned open_mask = __ballot_sync(ALLTHREADS, need_open);
 
@@ -355,7 +355,7 @@ __global__ void InsertInteractions(
                 int warp_offset = nbits_set_before(open_mask, threadIdx.x & 0x1f);
 
                 if(need_open)
-                    child_ilist_out[ilist_offsets[i] + num_open[i] + warp_offset] = id.x;
+                    child_ilist_out[ilist_offsets[i] + num_open[i] + warp_offset] = id;
                 
                 num_open[i] += __popc(open_mask);
             }
@@ -368,12 +368,12 @@ __global__ void InsertInteractions(
 /*                                        New force kernel                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-struct alignas(16) PMass {
+struct __align__(16) PMass {
     float3 pos;
     float mass;
 };
 
-struct alignas(16) ForceAndPot {
+struct __align__(16) ForceAndPot {
     float3 force;
     float  pot;
 };
@@ -442,11 +442,11 @@ __global__ void NewForceAndPot(
     while(!seg_mgr.finished()) {
         __shared__ PMass xm_b[BLOCKSIZE2];
 
-        int2 id = seg_mgr.next();
+        int id = seg_mgr.next();
 
         // Each thread loads one other particle B
-        if(id.x >= 0) {
-            xm_b[threadIdx.x] = posm[id.x];
+        if(id >= 0) {
+            xm_b[threadIdx.x] = posm[id];
         }
         __syncthreads();
 

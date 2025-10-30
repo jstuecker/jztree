@@ -182,7 +182,7 @@ ffi::Error NewForceAndPotFFIHost(
 ) {
     dim3 blockDim(32);
     dim3 gridDim(spl_nodes.element_count() - 1);
-    size_t smem = 2*blockDim.x * sizeof(float4) + 2 * blockDim.x * sizeof(int32_t);
+    size_t smem = 0;
     
     // Initialize output buffers
     cudaMemsetAsync(fphi->untyped_data(), 0, fphi->size_bytes(), stream);
