@@ -50,6 +50,9 @@ kernels["InsertInteractions"].grid_size_expression = "spl_nodes.element_count() 
 # kernels["InsertInteractions"].init_outputs_zero = True # this is actually expensive and not needed
 kernels["InsertInteractions"].block_size_expression = 32
 
+kernels["NewForceAndPot"].grid_size_expression = "spl_nodes.element_count() - 1"
+kernels["NewForceAndPot"].block_size_expression = 32
+
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_fmm.cu"), 
     functions = kernels, 

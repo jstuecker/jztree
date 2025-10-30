@@ -16,6 +16,7 @@ jax.ffi.register_ffi_target("MultipolesFromParticles", ffi_multipoles.Multipoles
 jax.ffi.register_ffi_target("CoarsenMultipoles", ffi_multipoles.CoarsenMultipoles(), platform="CUDA")
 jax.ffi.register_ffi_target("CountInteractionsAndM2L", ffi_fmm.CountInteractionsAndM2L(), platform="CUDA")
 jax.ffi.register_ffi_target("InsertInteractions", ffi_fmm.InsertInteractions(), platform="CUDA")
+jax.ffi.register_ffi_target("NewForceAndPot", ffi_fmm.NewForceAndPot(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
 from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList
@@ -141,3 +142,19 @@ def simple_arange(n: int) -> jnp.ndarray:
         block_size=np.uint64(64)
     )[0]
     return arr
+
+def cj_new_force_and_pot(particles: Particles, 
+                         plane: TreePlane, 
+                         ilist: InteractionList,
+                         cfg: Config) -> jnp.ndarray:
+    node_range = jnp.array([0, plane.nnodes], dtype=jnp.int32)
+    
+    fphi = jax.ffi.ffi_call("NewForceAndPot", (
+        jax.ShapeDtypeStruct((particles.pos.shape[0], 4), jnp.float32),
+    ))(
+        node_range, plane.ispl, ilist.ispl, ilist.iother, particles.posm(),
+        softening=np.float32(cfg.softening)
+    )[0]
+
+    return fphi
+cj_new_force_and_pot.jit = jax.jit(cj_new_force_and_pot, static_argnames=['cfg'])

@@ -166,10 +166,70 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: NewForceAndPot                            */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error NewForceAndPotFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer node_range,
+    ffi::AnyBuffer spl_nodes,
+    ffi::AnyBuffer spl_ilist,
+    ffi::AnyBuffer ilist_nodes,
+    ffi::AnyBuffer children,
+    ffi::Result<ffi::AnyBuffer> fphi,
+    float softening
+) {
+    dim3 blockDim(32);
+    dim3 gridDim(spl_nodes.element_count() - 1);
+    size_t smem = 0;
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    int2* node_range_val = reinterpret_cast<int2*>(node_range.untyped_data());
+    int* spl_nodes_val = reinterpret_cast<int*>(spl_nodes.untyped_data());
+    int* spl_ilist_val = reinterpret_cast<int*>(spl_ilist.untyped_data());
+    int* ilist_nodes_val = reinterpret_cast<int*>(ilist_nodes.untyped_data());
+    PosMass* children_val = reinterpret_cast<PosMass*>(children.untyped_data());
+    ForceAndPot* fphi_val = reinterpret_cast<ForceAndPot*>(fphi->untyped_data());
+
+    void* args[] = {
+        &node_range_val,
+        &spl_nodes_val,
+        &spl_ilist_val,
+        &ilist_nodes_val,
+        &children_val,
+        &fphi_val,
+        &softening
+    };
+    cudaLaunchKernel((const void*)NewForceAndPot, gridDim, blockDim, args, smem, stream);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    NewForceAndPotFFI, NewForceAndPotFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // node_range
+        .Arg<ffi::AnyBuffer>() // spl_nodes
+        .Arg<ffi::AnyBuffer>() // spl_ilist
+        .Arg<ffi::AnyBuffer>() // ilist_nodes
+        .Arg<ffi::AnyBuffer>() // children
+        .Ret<ffi::AnyBuffer>() // fphi
+        .Attr<float>("softening"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_fmm, m) {
     m.def("CountInteractionsAndM2L", []() { return EncapsulateFfiCall(&CountInteractionsAndM2LFFI); });
     m.def("InsertInteractions", []() { return EncapsulateFfiCall(&InsertInteractionsFFI); });
+    m.def("NewForceAndPot", []() { return EncapsulateFfiCall(&NewForceAndPotFFI); });
 }
