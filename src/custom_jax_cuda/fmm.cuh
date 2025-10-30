@@ -368,12 +368,12 @@ __global__ void InsertInteractions(
 /*                                        New force kernel                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-struct PMass {
+struct alignas(16) PMass {
     float3 pos;
     float mass;
 };
 
-struct ForceAndPot {
+struct alignas(16) ForceAndPot {
     float3 force;
     float  pot;
 };
@@ -390,6 +390,8 @@ __forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, floa
     fphi_i.force.z += minvr3 * dx.z;
     fphi_i.pot += -minvr;
 }
+
+#define BLOCKSIZE2 32
 
 __global__ void NewForceAndPot(
     // inputs:
@@ -413,24 +415,38 @@ __global__ void NewForceAndPot(
     
     int2 prange = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
 
-    int num = min(prange.y-prange.x,  min(max_leaf_size, blockDim.x));
+    int num = prange.y-prange.x; //min(prange.y-prange.x,  min(max_leaf_size, blockDim.x));
 
     // extern __shared__ PMass xm_a[];
     // PMass* xm_b = &xm_a[blockDim.x];
-    __shared__ PMass xm_a[BLOCKSIZE];
-    __shared__ PMass xm_b[BLOCKSIZE];
+    // __shared__ PMass xm_a[BLOCKSIZE];
+    __shared__ PMass xm_b[BLOCKSIZE2];
 
-    if(threadIdx.x < num) {
-        xm_a[threadIdx.x] = posm[prange.x + threadIdx.x];
-    }
-    else {
-        xm_a[threadIdx.x] = {{0.f,0.f,0.f}, 0.f};
-    }
-    __syncthreads();
+    // if(threadIdx.x < prange.y-prange.x) {
+    //     xm_a[threadIdx.x] = posm[prange.x + threadIdx.x];
+    // }
+    // else {
+    //     xm_a[threadIdx.x] = {{0.f,0.f,0.f}, 0.f};
+    // }
+
+    // PMass xma = xm_a[threadIdx.x];
+    // __syncthreads();
+
+
+    // Precalculate layout for M2L interactions
+    // Which particle I am writing to:
+    int a_write = threadIdx.x % num;   
+    // Where I would read from in the first iteration:
+    int read_b_offset = threadIdx.x / num;
+    // Number of threads that aren't evenly distributed:
+    int residual_threads = blockDim.x % num; 
+    // Number of threads that write to the same childA as me:
+    int n_write_a = blockDim.x / num + (a_write < residual_threads);
+    PMass xaWrite = posm[prange.x + a_write];
 
     // int2* segments = (int2*)&xm_b[blockDim.x];
-    __shared__ int2 segments[BLOCKSIZE];
-    SegmentManager<BLOCKSIZE> seg_mgr( // Todo: make this not require a template variable
+    __shared__ int2 segments[BLOCKSIZE2];
+    SegmentManager<BLOCKSIZE2> seg_mgr( // Todo: make this not require a template variable
         ilist_nodes,
         spl_nodes,
         segments,
@@ -443,7 +459,7 @@ __global__ void NewForceAndPot(
     while(!seg_mgr.finished()) {
         int2 id = seg_mgr.next();
 
-        __syncthreads();
+        // __syncthreads();
 
         // Each thread loads one other particle B
         if(id.x >= 0) {
@@ -452,19 +468,26 @@ __global__ void NewForceAndPot(
         __syncthreads();
 
         // Now compute interactions
-        for(int j=0; j<seg_mgr.num_loaded; j++) {
+        // for(int j=0; j<seg_mgr.num_loaded; j++) {
+        for(int ib=read_b_offset; ib < seg_mgr.num_loaded; ib += n_write_a) {
             accumulateForceAndPot(
-                xm_a[threadIdx.x],
-                xm_b[j],
+                xaWrite,
+                // xm_a[threadIdx.x],
+                xm_b[ib],
                 softening2,
                 fphi_a
             );
         }
     }
 
-    if(threadIdx.x < num) {
-        fphi[prange.x + threadIdx.x] = fphi_a;
-    }
+
+    int iout = prange.x + a_write;
+    atomicAdd(&fphi[iout].force.x, fphi_a.force.x);
+    atomicAdd(&fphi[iout].force.y, fphi_a.force.y);
+    atomicAdd(&fphi[iout].force.z, fphi_a.force.z);
+    atomicAdd(&fphi[iout].pot, fphi_a.pot);
+    // fphi[prange.x + threadIdx.x] = fphi_a;
+    
 }
 
 #endif

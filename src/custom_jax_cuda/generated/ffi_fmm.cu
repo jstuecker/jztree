@@ -184,6 +184,9 @@ ffi::Error NewForceAndPotFFIHost(
     dim3 gridDim(spl_nodes.element_count() - 1);
     size_t smem = 2*blockDim.x * sizeof(float4) + 2 * blockDim.x * sizeof(int32_t);
     
+    // Initialize output buffers
+    cudaMemsetAsync(fphi->untyped_data(), 0, fphi->size_bytes(), stream);
+    
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
     int2* node_range_val = reinterpret_cast<int2*>(node_range.untyped_data());
