@@ -77,6 +77,20 @@ __device__ __forceinline__ T block_reduce_sum_shared(T v, T* smem) {
     return val;
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                     CountInteractionsAndM2L                                    */
+/* ---------------------------------------------------------------------------------------------- */
+
+// Todo:
+// I think I can still optimize the input/output pattern of the kernels below 
+// and drastically reduce the amount of data that is needed to store the interaction list
+// This may be done by summarzing the interaction list, wherever nodes are continguous
+// e.g. 4,5,6,7,10,11,12,14,16 -> 4-7 10-12 14 16 ...
+// This will also allow to optimally coalesce memory access and reduce the overhead that
+// comes with the indexing scheme.
+// I have measured that ~72% of interactions are int[i+1] == int[i]+1
+// 59% are int[i+2] == int[i]+2 (for these cases we can actually save memory)
+
 #define BLOCKSIZE 32
 #define MAX_NUMA 16
 
@@ -135,6 +149,8 @@ __global__ void CountInteractionsAndM2L(
         }
 
         // Child B info. This is transposed to reduce smem bank conflicts
+        // Todo: BLOCKSIZE does not need to be a compile time constant here.
+        //       Make it more flexible! (Need to adapt the warp communication scheme below though!)
         __shared__ float3 posB[BLOCKSIZE];
         __shared__ float mpB[ncomb][BLOCKSIZE];
         
@@ -152,6 +168,9 @@ __global__ void CountInteractionsAndM2L(
             BLOCKSIZE
         );
 
+        // Todo:
+        // I realized that it is better to discard the residual threads, as is done in the
+        // force kernel. Also do that here!
 
         // Precalculate layout for M2L interactions
         // Which childA am I writing to:
@@ -204,7 +223,7 @@ __global__ void CountInteractionsAndM2L(
             if(any_interacts) {
                 posB[threadIdx.x] = childB_ext.center;
 
-                // Note: This read would probably be more efficient if we coalesced the loads better
+                // Todo: Check whether this read is more efficient if we coalesced the loads better
                 // or maybe if we transposed the multipole layout in advance:
                 for(int k=0; k<ncomb; k++) {
                     mpB[k][threadIdx.x] = mp_values[id * ncomb + k];
@@ -269,6 +288,10 @@ __global__ void CountInteractionsAndM2L(
         __syncthreads();
     }
 }
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                       InsertInteractions                                       */
+/* ---------------------------------------------------------------------------------------------- */
 
 __device__ __forceinline__ int nbits_set_before(unsigned mask, int bit)
 {
@@ -406,6 +429,8 @@ __global__ void NewForceAndPot(
     float softening,
     int max_leaf_size
 ) {
+    // Note: I might want to test that the self-interaction behaves well
+
     float softening2 = softening * softening;
 
     int2 nrange = node_range[0];
