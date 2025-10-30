@@ -52,7 +52,10 @@ __device__ __forceinline__ bool OpeningCriterion(
     float opening_angle
 ) {
     float r2 = norm2(float3diff(nodeA.center, nodeB.center));
-    float L2 = norm2(float3sum(nodeA.extent, nodeB.extent));
+    // float L2 = norm2(float3sum(nodeA.extent, nodeB.extent));
+    float3 Ltot = float3sum(nodeA.extent, nodeB.extent);
+    float Lmax = fmaxf(fmaxf(Ltot.x, Ltot.y), Ltot.z);
+    float L2 = Lmax * Lmax;
 
     bool need_open = L2 > opening_angle * opening_angle * r2;
     // also open if L2 had an overflow (and r2 is valid)
