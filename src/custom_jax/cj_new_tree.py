@@ -153,7 +153,7 @@ def cj_new_force_and_pot(particles: Particles,
         jax.ShapeDtypeStruct((particles.pos.shape[0], 4), jnp.float32),
     ))(
         node_range, plane.ispl, ilist.ispl, ilist.iother, particles.posm(),
-        softening=np.float32(cfg.softening)
+        softening=np.float32(cfg.softening), max_leaf_size=np.int32(cfg.tree.max_leaf_size)
     )[0]
 
     return fphi

@@ -175,13 +175,14 @@ ffi::Error NewForceAndPotFFIHost(
     ffi::AnyBuffer spl_nodes,
     ffi::AnyBuffer spl_ilist,
     ffi::AnyBuffer ilist_nodes,
-    ffi::AnyBuffer children,
+    ffi::AnyBuffer posm,
     ffi::Result<ffi::AnyBuffer> fphi,
-    float softening
+    float softening,
+    int max_leaf_size
 ) {
-    dim3 blockDim(32);
+    dim3 blockDim(max_leaf_size);
     dim3 gridDim(spl_nodes.element_count() - 1);
-    size_t smem = 0;
+    size_t smem = 2*min(max_leaf_size, blockDim.x) * sizeof(float4);
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
@@ -189,7 +190,7 @@ ffi::Error NewForceAndPotFFIHost(
     int* spl_nodes_val = reinterpret_cast<int*>(spl_nodes.untyped_data());
     int* spl_ilist_val = reinterpret_cast<int*>(spl_ilist.untyped_data());
     int* ilist_nodes_val = reinterpret_cast<int*>(ilist_nodes.untyped_data());
-    PosMass* children_val = reinterpret_cast<PosMass*>(children.untyped_data());
+    PosMass* posm_val = reinterpret_cast<PosMass*>(posm.untyped_data());
     ForceAndPot* fphi_val = reinterpret_cast<ForceAndPot*>(fphi->untyped_data());
 
     void* args[] = {
@@ -197,9 +198,10 @@ ffi::Error NewForceAndPotFFIHost(
         &spl_nodes_val,
         &spl_ilist_val,
         &ilist_nodes_val,
-        &children_val,
+        &posm_val,
         &fphi_val,
-        &softening
+        &softening,
+        &max_leaf_size
     };
     cudaLaunchKernel((const void*)NewForceAndPot, gridDim, blockDim, args, smem, stream);
 
@@ -218,9 +220,10 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // spl_nodes
         .Arg<ffi::AnyBuffer>() // spl_ilist
         .Arg<ffi::AnyBuffer>() // ilist_nodes
-        .Arg<ffi::AnyBuffer>() // children
+        .Arg<ffi::AnyBuffer>() // posm
         .Ret<ffi::AnyBuffer>() // fphi
-        .Attr<float>("softening"),
+        .Attr<float>("softening")
+        .Attr<int>("max_leaf_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 

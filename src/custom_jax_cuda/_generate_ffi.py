@@ -51,7 +51,8 @@ kernels["InsertInteractions"].grid_size_expression = "spl_nodes.element_count() 
 kernels["InsertInteractions"].block_size_expression = 32
 
 kernels["NewForceAndPot"].grid_size_expression = "spl_nodes.element_count() - 1"
-kernels["NewForceAndPot"].block_size_expression = 32
+kernels["NewForceAndPot"].block_size_expression = "max_leaf_size"
+kernels["NewForceAndPot"].smem_size_expression = "2*min(max_leaf_size, blockDim.x) * sizeof(float4)"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_fmm.cu"), 
