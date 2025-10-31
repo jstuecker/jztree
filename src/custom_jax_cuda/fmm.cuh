@@ -12,23 +12,6 @@
 
 #define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
 
-
-
-__device__ __forceinline__ float3 LvlToExt(int level) {
-    // Converts a node's or leaf's binary level to its extend per dimension
-
-    // CUDA's integer division does not what we want for negative numbers. 
-    // e.g. -4/3 = -1 whereas what we want is python behaviour: -4//3 = -2
-    // We add an offset to ensure that CUDA divides positive integers only:
-    int olvl = (level + 3000) / 3 - 1000;
-    int omod = level - olvl * 3;
-    int lx = olvl;
-    int ly = olvl + (omod >= 2);
-    int lz = olvl + (omod >= 1);
-    
-    return make_float3(ldexpf(1.0f, lx), ldexpf(1.0f, ly), ldexpf(1.0f, lz));
-}
-
 __device__ __forceinline__ bool OpeningCriterion(
     NodeWithExt nodeA,
     NodeWithExt nodeB,
