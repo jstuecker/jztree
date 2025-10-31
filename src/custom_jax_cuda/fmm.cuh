@@ -89,7 +89,7 @@ __global__ void CountInteractionsAndM2L(
     const int* spl_nodes,
     const int* spl_ilist,
     const int* ilist_nodes,
-    const NodeInfo* children,
+    const Node* children,
     const float* mp_values,
     // outputs:
     float* loc_out,
@@ -118,7 +118,7 @@ __global__ void CountInteractionsAndM2L(
         // childA info
         __shared__ NodeWithExt childA[MAX_NUMA];
         if(threadIdx.x < num_childrenA) {
-            NodeInfo child = children[offsetA + threadIdx.x];
+            Node child = children[offsetA + threadIdx.x];
             childA[threadIdx.x] = {child.center, LvlToExt(child.level)};
         }
 
@@ -175,7 +175,7 @@ __global__ void CountInteractionsAndM2L(
             // Each thread loads one other child B to check the opening criterion
             NodeWithExt childB_ext;
             if(id >= 0) {
-                NodeInfo childB = children[id];
+                Node childB = children[id];
                 childB_ext = {childB.center, LvlToExt(childB.level)};
             }
 
@@ -291,7 +291,7 @@ __global__ void InsertInteractions(
     const int* spl_nodes,
     const int* spl_ilist,
     const int* ilist_nodes,
-    const NodeInfo* children,
+    const Node* children,
     const int* spl_ilist_child,
     // outputs:
     int* child_ilist_out,
@@ -317,7 +317,7 @@ __global__ void InsertInteractions(
         __shared__ NodeWithExt childA[MAX_NUMA];
         __shared__ int ilist_offsets[MAX_NUMA];
         if(threadIdx.x < num_childrenA) {
-            NodeInfo child = children[offsetA + threadIdx.x];
+            Node child = children[offsetA + threadIdx.x];
             childA[threadIdx.x] = {child.center, LvlToExt(child.level)};
             ilist_offsets[threadIdx.x] = spl_ilist_child[offsetA + threadIdx.x];
         }
@@ -348,7 +348,7 @@ __global__ void InsertInteractions(
             // Each thread loads one other child B to check the opening criterion
             NodeWithExt childB_ext;
             if(id >= 0) {
-                NodeInfo childB = children[id];
+                Node childB = children[id];
                 childB_ext = {childB.center, LvlToExt(childB.level)};
             }
 

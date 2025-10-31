@@ -26,16 +26,6 @@ struct Neighbor {
     int id;
 };
 
-struct Particle {
-    float3 pos;
-    int id;
-};
-
-struct Node {
-    float3 center;
-    int level;
-};
-
 struct PosR {
     float3 pos;
     float r;
@@ -199,7 +189,7 @@ __global__ void KernelIlistKNN(
 
         SortedNearestK<k> nearestK(INFTY, -1);
 
-        extern __shared__ Particle particles[];
+        extern __shared__ PosId particles[];
 
         PrefetchList2<int,float> pf_ilist(ilist, ir2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
 
@@ -226,7 +216,7 @@ __global__ void KernelIlistKNN(
 
                 // Now search for the nearest neighbors in A
                 for (int j = 0; j < nload; j++) {
-                    Particle p = particles[j];
+                    PosId p = particles[j];
                     float r2 = distance_squared(p.pos, posQ, boxsize);
                     nearestK.consider(r2, p.id);
                 }
@@ -252,7 +242,7 @@ void launch_KernelIlistKNN(
     const int* ilist, const float* ir2list, const int* ilist_splitsQ,
     Neighbor* knn, int max_part_smem, float boxsize) {
         
-    int alloc_size = max_part_smem * sizeof(Particle);
+    int alloc_size = max_part_smem * sizeof(PosId);
 
     switch(k) {
         case 4: KernelIlistKNN<4><<< nleavesQ, block_size, alloc_size, stream>>>(xT, xQ, isplitT, isplitQ, ilist, ir2list, ilist_splitsQ, knn, max_part_smem, boxsize); break;

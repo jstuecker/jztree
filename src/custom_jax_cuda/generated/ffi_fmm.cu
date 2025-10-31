@@ -51,7 +51,7 @@ ffi::Error CountInteractionsAndM2LFFIHost(
     int* spl_nodes_val = reinterpret_cast<int*>(spl_nodes.untyped_data());
     int* spl_ilist_val = reinterpret_cast<int*>(spl_ilist.untyped_data());
     int* ilist_nodes_val = reinterpret_cast<int*>(ilist_nodes.untyped_data());
-    NodeInfo* children_val = reinterpret_cast<NodeInfo*>(children.untyped_data());
+    Node* children_val = reinterpret_cast<Node*>(children.untyped_data());
     float* mp_values_val = reinterpret_cast<float*>(mp_values.untyped_data());
     float* loc_out_val = reinterpret_cast<float*>(loc_out->untyped_data());
     int* ilist_child_count_out_val = reinterpret_cast<int*>(ilist_child_count_out->untyped_data());
@@ -136,7 +136,7 @@ ffi::Error InsertInteractionsFFIHost(
     int* spl_nodes_val = reinterpret_cast<int*>(spl_nodes.untyped_data());
     int* spl_ilist_val = reinterpret_cast<int*>(spl_ilist.untyped_data());
     int* ilist_nodes_val = reinterpret_cast<int*>(ilist_nodes.untyped_data());
-    NodeInfo* children_val = reinterpret_cast<NodeInfo*>(children.untyped_data());
+    Node* children_val = reinterpret_cast<Node*>(children.untyped_data());
     int* spl_ilist_child_val = reinterpret_cast<int*>(spl_ilist_child.untyped_data());
     int* child_ilist_out_val = reinterpret_cast<int*>(child_ilist_out->untyped_data());
 
