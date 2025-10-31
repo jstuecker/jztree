@@ -419,7 +419,7 @@ __forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, floa
     fphi_i.pot += -minvr;
 }
 
-__global__ void NewForceAndPot(
+__global__ void GroupedForceAndPot(
     // inputs:
     const int2* node_range,
     const int* spl_nodes,

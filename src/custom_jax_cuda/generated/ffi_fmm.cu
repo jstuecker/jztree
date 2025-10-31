@@ -168,10 +168,10 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: NewForceAndPot                            */
+/*                             FFI call to CUDA kernel: GroupedForceAndPot                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error NewForceAndPotFFIHost(
+ffi::Error GroupedForceAndPotFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer node_range,
     ffi::AnyBuffer spl_nodes,
@@ -208,7 +208,7 @@ ffi::Error NewForceAndPotFFIHost(
         &softening,
         &max_leaf_size
     };
-    cudaLaunchKernel((const void*)NewForceAndPot, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel((const void*)GroupedForceAndPot, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -218,7 +218,7 @@ ffi::Error NewForceAndPotFFIHost(
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    NewForceAndPotFFI, NewForceAndPotFFIHost,
+    GroupedForceAndPotFFI, GroupedForceAndPotFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // node_range
@@ -239,5 +239,5 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 NB_MODULE(ffi_fmm, m) {
     m.def("CountInteractionsAndM2L", []() { return EncapsulateFfiCall(&CountInteractionsAndM2LFFI); });
     m.def("InsertInteractions", []() { return EncapsulateFfiCall(&InsertInteractionsFFI); });
-    m.def("NewForceAndPot", []() { return EncapsulateFfiCall(&NewForceAndPotFFI); });
+    m.def("GroupedForceAndPot", []() { return EncapsulateFfiCall(&GroupedForceAndPotFFI); });
 }
