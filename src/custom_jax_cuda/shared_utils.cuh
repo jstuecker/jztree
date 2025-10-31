@@ -8,60 +8,6 @@ __device__ __forceinline__ unsigned int next_pow2_u32(unsigned int x) {
     return 1u << (32 - __clz(x - 1));      // __clz: count leading zeros
 }
 
-struct KV {
-    float k;   // key (float32)
-    int32_t v; // value (int32)
-};
-
-// Compare-and-swap: ascending on key; swap value with it
-__device__ __forceinline__
-void cas(float &ak, int32_t &av, float &bk, int32_t &bv, bool dir /*true=>ascending*/) {
-    // Treat NaN as +inf so they go to the end in ascending
-    float ak_eff = isnan(ak) ? INFTY : ak;
-    float bk_eff = isnan(bk) ? INFTY : bk;
-
-    bool greater = (ak_eff > bk_eff);
-    if (greater == dir) {
-        float tk = ak; ak = bk; bk = tk;
-        int32_t tv = av; av = bv; bv = tv;
-    }
-}
-
-template <typename T>
-void comparator(std::vector<T> &a, std::size_t i, std::size_t j) {
-  if (i < j && j < a.size() && a[j] < a[i])
-    std::swap(a[i], a[j]);
-}
-
-template <typename T> void impBitonicSort(std::vector<T> &a) {
-  // Iterate k as if the array size were rounded up to the nearest power of two.
-  for (std::size_t k = 2; (k >> 1) < a.size(); k <<= 1) {
-    for (std::size_t i = 0; i < a.size(); i++)
-      comparator(a, i, i ^ (k - 1));
-    for (std::size_t j = k >> 1; 0 < j; j >>= 1)
-      for (std::size_t i = 0; i < a.size(); i++)
-        comparator(a, i, i ^ j);
-  }
-}
-
-int main() {
-  for (int n = 2; n <= 8; n++) {
-    std::vector<int> unsorted(n);
-    std::iota(unsorted.begin(), unsorted.end(), 0);
-    do {
-      auto sorted = unsorted;
-      impBitonicSort(sorted);
-      if (!std::is_sorted(sorted.begin(), sorted.end())) {
-        for (int i : unsorted)
-          std::printf(" %d", i);
-        std::printf("\n");
-        return 1;
-      }
-    } while (std::next_permutation(unsorted.begin(), unsorted.end()));
-  }
-}
-
-
 __device__ __forceinline__ 
 void compare_and_swap(float *val, int32_t *idx, int i, int j, int len) {
     if(i < j && j < len && val[i] > val[j]) {

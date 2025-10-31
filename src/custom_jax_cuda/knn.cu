@@ -678,7 +678,7 @@ ffi::Error HostConstructIlist(
     // Since most segments are small enough to be sorted in shared memory, this adds a very
     // small overhead (~ O(2ms) for 1M particles). So it is well worth it.
     int smem_size = 512;
-    size_t smem_bytes = smem_size * sizeof(KV);
+    size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int32_t));
     int nsegs = leaf_ilist_splits->element_count() - 1;
     segmented_bitonic_sort_kv<<< nsegs, blocksize_sort, smem_bytes, stream>>>(
         leaf_ilist_rad->typed_data(), leaf_ilist->typed_data(), 
@@ -724,7 +724,7 @@ ffi::Error HostSegmentSort(
 {
     int nsegs = isplit.element_count() - 1;
     int blocksize = 64;
-    size_t smem_bytes = smem_size * sizeof(KV);
+    size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int));
 
     // copy data to output buffers
     cudaMemcpyAsync(key_out->typed_data(), key.typed_data(), key.size_bytes(), cudaMemcpyDeviceToDevice, stream);
