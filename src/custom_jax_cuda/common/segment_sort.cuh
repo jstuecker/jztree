@@ -1,3 +1,6 @@
+#ifndef CUSTOM_JAX_SEGMENT_SORT_CUH
+#define CUSTOM_JAX_SEGMENT_SORT_CUH
+
 #define INFTY  INFINITY //__int_as_float(0x7f800000)
 
 // Utility: next power-of-two >= n (cap at MAX_THREADS)
@@ -83,3 +86,5 @@ __global__ void segmented_bitonic_sort_kv(
         bitonic_sort(&keys[start], &values[start], len);
     }
 }
+
+#endif
