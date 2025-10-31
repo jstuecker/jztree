@@ -4,6 +4,8 @@
 #include <cub/cub.cuh>
 #include <math_constants.h>
 
+#include "common/math.cuh"
+
 #if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2
 #error "CUB version 2.0.0 or higher required"
 #endif

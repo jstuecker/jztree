@@ -1,6 +1,8 @@
 #ifndef CUSTOM_JAX_INTERFACE_TESTS_H
 #define CUSTOM_JAX_INTERFACE_TESTS_H
 
+#include "common/math.cuh"
+
 template <int p>
 __global__ void SimpleArange(
     const int* add,

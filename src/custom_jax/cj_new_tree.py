@@ -9,6 +9,7 @@ from fmdj.multipoles import shift_local_to_local
 
 import custom_jax_cuda.ffi_multipoles as ffi_multipoles
 import custom_jax_cuda.ffi_fmm as ffi_fmm
+import custom_jax_cuda.ffi_forces as ffi_forces
 
 from typing import Tuple
 
@@ -16,7 +17,7 @@ jax.ffi.register_ffi_target("MultipolesFromParticles", ffi_multipoles.Multipoles
 jax.ffi.register_ffi_target("CoarsenMultipoles", ffi_multipoles.CoarsenMultipoles(), platform="CUDA")
 jax.ffi.register_ffi_target("CountInteractionsAndM2L", ffi_fmm.CountInteractionsAndM2L(), platform="CUDA")
 jax.ffi.register_ffi_target("InsertInteractions", ffi_fmm.InsertInteractions(), platform="CUDA")
-jax.ffi.register_ffi_target("GroupedForceAndPot", ffi_fmm.GroupedForceAndPot(), platform="CUDA")
+jax.ffi.register_ffi_target("GroupedForceAndPot", ffi_forces.GroupedForceAndPot(), platform="CUDA")
 
 # Note: This import may break things if imported in the wrong order... Have to fix this later!
 from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList

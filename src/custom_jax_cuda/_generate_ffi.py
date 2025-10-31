@@ -7,6 +7,7 @@ import cj_codetools.generator as gen
 HERE = Path(__file__).resolve().parent
 
 p_instance_values = (1, 2, 3, 4, 5)
+default_includes = ["../common/math.cuh"]
 
 # ------------------------------------------------------------------------------------------------ #
 #                                            ffi_example                                           #
@@ -29,7 +30,28 @@ for kernel in funcs.values():
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_example.cu"), 
     functions = funcs, 
-    includes = ["../ffi_example.cuh"]
+    includes = default_includes + ["../ffi_example.cuh"]
+)
+
+
+# ------------------------------------------------------------------------------------------------ #
+#                                            forces.cuh                                            #
+# ------------------------------------------------------------------------------------------------ #
+
+kernels = parse.get_functions_from_file(
+    str(HERE / "forces.cuh"), 
+    only_kernels=True
+)
+
+kernels["GroupedForceAndPot"].grid_size_expression = "spl_nodes.element_count() - 1"
+kernels["GroupedForceAndPot"].block_size_expression = "128" #"max_leaf_size"
+kernels["GroupedForceAndPot"].smem_size_expression = "blockDim.x * sizeof(float4)"
+kernels["GroupedForceAndPot"].init_outputs_zero = True
+
+gen.generate_ffi_module_file(
+    output_file = str(HERE / "generated/ffi_forces.cu"), 
+    functions = kernels, 
+    includes = default_includes + ["../forces.cuh"]
 )
 
 # ------------------------------------------------------------------------------------------------ #
@@ -50,15 +72,10 @@ kernels["InsertInteractions"].grid_size_expression = "spl_nodes.element_count() 
 # kernels["InsertInteractions"].init_outputs_zero = True # this is actually expensive and not needed
 kernels["InsertInteractions"].block_size_expression = 32
 
-kernels["GroupedForceAndPot"].grid_size_expression = "spl_nodes.element_count() - 1"
-kernels["GroupedForceAndPot"].block_size_expression = "128" #"max_leaf_size"
-kernels["GroupedForceAndPot"].smem_size_expression = "blockDim.x * sizeof(float4)"
-kernels["GroupedForceAndPot"].init_outputs_zero = True
-
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_fmm.cu"), 
     functions = kernels, 
-    includes = ["../fmm.cuh"]
+    includes = default_includes + ["../fmm.cuh"]
 )
 
 # ------------------------------------------------------------------------------------------------ #
@@ -83,7 +100,7 @@ kernels["CoarsenMultipoles"].grid_size_expression = "isplit.element_count() - 1"
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_multipoles.cu"), 
     functions = kernels, 
-    includes = ["../multipoles.cuh"]
+    includes = default_includes + ["../multipoles.cuh"]
 )
 
 # ------------------------------------------------------------------------------------------------ #
@@ -115,5 +132,5 @@ functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tree.cu"), 
     functions = functions, 
-    includes = ["../tree.cuh"]
+    includes = default_includes + ["../tree.cuh"]
 )

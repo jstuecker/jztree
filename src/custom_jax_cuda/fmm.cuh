@@ -2,6 +2,9 @@
 #define CUSTOM_JAX_FMM_H
 
 #include "multipoles.cuh"
+#include "common/math.cuh"
+#include "common/data.cuh"
+#include "common/iterators.cuh"
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                   Evaluate Tree Plane Kernel                                   */
@@ -9,27 +12,7 @@
 
 #define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
 
-struct NodeInfo {
-    float3 center;
-    int level;
-};
 
-struct NodeWithExt {
-    float3 center;
-    float3 extent;
-};
-
-__device__ __forceinline__ float3 float3sum(float3 a, float3 b) {
-    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
-__device__ __forceinline__ float3 float3diff(float3 a, float3 b) {
-    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-__device__ __forceinline__ float norm2(float3 a) {
-    return a.x * a.x + a.y * a.y + a.z * a.z;
-}
 
 __device__ __forceinline__ float3 LvlToExt(int level) {
     // Converts a node's or leaf's binary level to its extend per dimension
@@ -391,117 +374,5 @@ __global__ void InsertInteractions(
     }
 }
 
-
-/* ---------------------------------------------------------------------------------------------- */
-/*                                        New force kernel                                        */
-/* ---------------------------------------------------------------------------------------------- */
-
-struct __align__(16) PMass {
-    float3 pos;
-    float mass;
-};
-
-struct __align__(16) ForceAndPot {
-    float3 force;
-    float  pot;
-};
-
-__forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, float softening2, ForceAndPot &fphi_i) {
-    float3 dx = float3diff(xmj.pos, xmi.pos);
-    float rinv = rsqrtf(norm2(dx) + softening2);
-
-    float minvr = xmj.mass * rinv;
-    float minvr3 = minvr * rinv * rinv;
-
-    fphi_i.force.x += minvr3 * dx.x;
-    fphi_i.force.y += minvr3 * dx.y;
-    fphi_i.force.z += minvr3 * dx.z;
-    fphi_i.pot += -minvr;
-}
-
-__global__ void GroupedForceAndPot(
-    // inputs:
-    const int2* node_range,
-    const int* spl_nodes,
-    const int* spl_ilist,
-    const int* ilist_nodes,
-    const PMass* posm,
-    // outputs:
-    ForceAndPot* fphi,
-    // attributes:
-    float softening,
-    int max_leaf_size
-) {
-    // Note: I should try to add Khan summation option
-    //       I think the numerical error might be dominated by the summation in this kernel
-
-    float softening2 = softening * softening;
-
-    int2 nrange = node_range[0];
-    int nodeid = nrange.x + blockIdx.x;
-    if (nodeid >= nrange.y)
-        return;
-    
-    int2 prange = {spl_nodes[nodeid], spl_nodes[nodeid + 1]};
-
-    int num = prange.y-prange.x;
-
-    // Precalculate layout for M2L interactions: blockdim.x -> (num, n_write) + residuals
-    int n_write = blockDim.x / num;
-    // Which particle I am writing to:
-    int a_write = threadIdx.x % num;   
-    // Where I would read from in the first iteration:
-    int read_b_offset = threadIdx.x / num;
-    // Flag residual threads as invalid
-    // (To avoid divergence we let these follow allong the calculations, 
-    //  but later discard their result)
-    int valid = threadIdx.x < num * n_write;
-
-    PMass xaWrite = posm[prange.x + a_write];
-
-    __shared__ int2 segments[32];
-    SegmentManager seg_mgr(
-        ilist_nodes,
-        spl_nodes,
-        segments,
-        spl_ilist[nodeid],
-        spl_ilist[nodeid + 1],
-        32
-    );
-
-    ForceAndPot fphi_a = {{0.f,0.f,0.f}, 0.f};
-
-    extern __shared__ PMass xm_b[];
-
-    while(!seg_mgr.finished()) {
-        int id = seg_mgr.next();
-
-        // Each thread loads one other particle B
-        if(id >= 0) {
-            xm_b[threadIdx.x] = posm[id];
-        }
-        __syncthreads();
-
-        // Now compute interactions
-        for(int ib=read_b_offset; ib < seg_mgr.num_loaded; ib += n_write) {
-            accumulateForceAndPot(
-                xaWrite,
-                xm_b[ib],
-                softening2,
-                fphi_a
-            );
-        }
-
-        __syncthreads();
-    }
-
-    if(valid) {
-        int iout = prange.x + a_write;
-        atomicAdd(&fphi[iout].force.x, fphi_a.force.x);
-        atomicAdd(&fphi[iout].force.y, fphi_a.force.y);
-        atomicAdd(&fphi[iout].force.z, fphi_a.force.z);
-        atomicAdd(&fphi[iout].pot, fphi_a.pot);    
-    }
-}
 
 #endif

@@ -4,12 +4,22 @@
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 #include "shared_utils.cuh"
+#include "common/data.cuh"
+#include "common/math.cuh"
+#include "common/iterators.cuh"
 #include <cub/cub.cuh>
 
 #define INTERACTION_BINS 16
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
+
+template <typename T>
+nanobind::capsule EncapsulateFfiCall(T *fn) {
+    static_assert(std::is_invocable_r_v<XLA_FFI_Error *, T, XLA_FFI_CallFrame *>,
+                  "Encapsulated function must be and XLA FFI handler");
+    return nanobind::capsule(reinterpret_cast<void *>(fn));
+}
 
 struct Neighbor {
     float r2;
