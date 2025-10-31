@@ -3,7 +3,7 @@
 #include <cmath>
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
-#include "shared_utils.cuh"
+#include "common/segment_sort.cuh"
 #include "common/data.cuh"
 #include "common/math.cuh"
 #include "common/iterators.cuh"
