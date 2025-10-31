@@ -6,7 +6,7 @@
 #include "common/data.cuh"
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                                     Helper device functions                                    */
+/*                                 Derivatives of Green's Function                                */
 /* ---------------------------------------------------------------------------------------------- */
 
 template<int p>
@@ -56,196 +56,6 @@ __device__ void setupDnG(float3 dx, float eps2, float* __restrict__ Dn) {
         }
 
         Dn[0] = G[q];
-    }
-}
-
-/* ---------------------------------------------------------------------------------------------- */
-/*                                           M2L Kernel                                           */
-/* ---------------------------------------------------------------------------------------------- */
-
-template<int p>
-__global__ void IlistM2L(const float3* __restrict__ x, const float* __restrict__ mp, 
-        const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
-        float* __restrict__ Lout, size_t interactions_per_block, float epsilon) {
-    const size_t block_size = blockDim.x;
-    float epsilon2 = epsilon * epsilon;
-
-    int imin = iminmax[0], imax = iminmax[1];
-
-    constexpr int ncomb = NCOMB(p);
-
-    for (int iint = 0; iint < interactions_per_block; iint++) {
-        int int_id = imin + block_size * (blockIdx.x * interactions_per_block + iint) + threadIdx.x;
-        if (int_id >= imax) {
-            return;
-        }
-
-        int iA = interactions[int_id].x, iB = interactions[int_id].y;
-        float3 xA = x[iA], xB = x[iB];
-        float3 dx = {xB.x - xA.x, xB.y - xA.y, xB.z - xA.z};
-        float Dn[ncomb];
-        setupDnG<p>(dx, epsilon2, Dn);
-
-        float Mp[ncomb];
-        #pragma unroll
-        for (int iM=0; iM < ncomb; iM++) {
-            Mp[iM] = mp[iB * ncomb + iM];
-        }
-
-        int kflat = 0;
-        #pragma unroll
-        for(int ksum = 0; ksum <= p; ksum++) {
-            #pragma unroll
-            for(int kz = 0; kz <= ksum; kz++) {
-                #pragma unroll
-                for(int ky = 0; ky <= ksum - kz; ky++) {
-                    const int kx = ksum - ky - kz;
-                    float Lnew = 0.f;
-
-                    int nflat = 0;
-                    #pragma unroll
-                    for (int nsum = 0; nsum <= p - ksum; nsum++) {
-                        #pragma unroll
-                        for (int nz = 0; nz <= nsum; nz++) {
-                            #pragma unroll
-                            for (int ny = 0; ny <= nsum - nz; ny++) {
-                                const int nx = nsum - ny - nz;
-                                
-                                float Dnk = Dn[multi_to_flat(kx + nx, ky + ny, kz + nz)];
-                                float Mpn = Mp[nflat];
-                                
-                                const float infvac = 1./fact3f(nx, ny, nz);
-                                Lnew += Dnk * Mpn * infvac;
-                                nflat += 1;
-                            }
-                        }
-                    }
-
-                    const float sign = ksum % 2 == 0 ? -1.f : 1.f;
-                    const float fac = sign / fact3f(kx, ky, kz);
-                    atomicAdd(&Lout[iA * ncomb + kflat], Lnew * fac); 
-                    kflat += 1;
-                }
-            }
-        }
-    }
-}
-
-
-template<int p>
-__device__ __forceinline__ void m2l_translator(
-    float3 dx,
-    const float* Mp,
-    float* loc,
-    float epsilon2
-) {
-    constexpr int ncomb = NCOMB(p);
-
-    float Dn[ncomb];
-    setupDnG<p>(dx, epsilon2, Dn);
-
-    int kflat = 0;
-    #pragma unroll
-    for(int ksum = 0; ksum <= p; ksum++) {
-        #pragma unroll
-        for(int kz = 0; kz <= ksum; kz++) {
-            #pragma unroll
-            for(int ky = 0; ky <= ksum - kz; ky++) {
-                const int kx = ksum - ky - kz;
-                float Lnew = 0.f;
-
-                int nflat = 0;
-                #pragma unroll
-                for (int nsum = 0; nsum <= p - ksum; nsum++) {
-                    #pragma unroll
-                    for (int nz = 0; nz <= nsum; nz++) {
-                        #pragma unroll
-                        for (int ny = 0; ny <= nsum - nz; ny++) {
-                            const int nx = nsum - ny - nz;
-                            
-                            float Dnk = Dn[multi_to_flat(kx + nx, ky + ny, kz + nz)];
-                            float Mpn = Mp[nflat];
-                            
-                            const float infvac = 1./fact3f(nx, ny, nz);
-                            Lnew += Dnk * Mpn * infvac;
-                            nflat += 1;
-                        }
-                    }
-                }
-
-                const float sign = ksum % 2 == 0 ? -1.f : 1.f;
-                const float fac = sign / fact3f(kx, ky, kz);
-
-                loc[kflat] += Lnew * fac;
-
-                kflat += 1;
-            }
-        }
-    }
-}
-
-/* ---------------------------------------------------------------------------------------------- */
-/*                                         Leaf M2L kernel                                        */
-/* ---------------------------------------------------------------------------------------------- */
-
-template<int p>
-__global__ void IlistLeaf2NodeM2L(const float3* __restrict__  xnodes, 
-        const float4* __restrict__ xm, const int32_t* __restrict__ isplit, 
-        const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
-        float* __restrict__ Lout, size_t interactions_per_block, float epsilon
-    )  {
-    float epsilon2 = epsilon * epsilon;
-
-    int imin = iminmax[0], imax = iminmax[1];
-
-    constexpr int ncomb = NCOMB(p);
-    float Dn[ncomb];
-
-    __shared__ float Dsum[ncomb];
-    for (int i = threadIdx.x; i < ncomb; i += blockDim.x) 
-        Dsum[i] = 0.0f;
-    __syncthreads();
-
-    for (int iint = 0; iint < interactions_per_block; iint++) {
-        int int_id = imin + iint * gridDim.x + blockIdx.x ;
-        if (int_id >= imax) {
-            return;
-        }
-
-        int2 interaction = interactions[int_id];
-        int iNode = interaction.x, iLeaf = interaction.y;
-        int iPartStart = isplit[iLeaf], iPartEnd = isplit[iLeaf + 1];
-
-        float3 xnode = xnodes[iNode];
-
-        for(int poffset=0; poffset < iPartEnd - iPartStart; poffset += blockDim.x)
-        {
-            int ipart = iPartStart + poffset + threadIdx.x;
-            bool valid = ipart < iPartEnd;
-
-            float4 xmpart = xm[valid ? ipart : iPartEnd-1];
-
-            float3 dx = {xmpart.x - xnode.x, xmpart.y - xnode.y, xmpart.z - xnode.z};
-            setupDnG<p>(dx, epsilon2, Dn);
-
-            add_warp_reduced<ncomb>(Dn, Dsum, valid);
-        }
-
-        __syncthreads();
-
-        // Once we are done with all particles we can ouput the results, split over components
-        for(int kflat=threadIdx.x; kflat < ncomb; kflat += blockDim.x) {
-            int3 k = flat_to_multi<p>(kflat);
-            int ksum = k.x + k.y + k.z;
-            float sign = (ksum & 1) == 0 ? -1.f : 1.f;
-            float Lnew = sign * Dsum[kflat]  / fact3f(k.x, k.y, k.z);
-            
-            atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew);
-
-            Dsum[kflat] = 0.f;
-        }
-
-        __syncthreads();
     }
 }
 
@@ -538,5 +348,203 @@ __global__ void CoarsenMultipoles(
     }
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                         M2L Translation                                        */
+/* ---------------------------------------------------------------------------------------------- */
+
+template<int p>
+__device__ __forceinline__ void m2l_translator(
+    float3 dx,
+    const float* Mp,
+    float* loc,
+    float epsilon2
+) {
+    constexpr int ncomb = NCOMB(p);
+
+    float Dn[ncomb];
+    setupDnG<p>(dx, epsilon2, Dn);
+
+    int kflat = 0;
+    #pragma unroll
+    for(int ksum = 0; ksum <= p; ksum++) {
+        #pragma unroll
+        for(int kz = 0; kz <= ksum; kz++) {
+            #pragma unroll
+            for(int ky = 0; ky <= ksum - kz; ky++) {
+                const int kx = ksum - ky - kz;
+                float Lnew = 0.f;
+
+                int nflat = 0;
+                #pragma unroll
+                for (int nsum = 0; nsum <= p - ksum; nsum++) {
+                    #pragma unroll
+                    for (int nz = 0; nz <= nsum; nz++) {
+                        #pragma unroll
+                        for (int ny = 0; ny <= nsum - nz; ny++) {
+                            const int nx = nsum - ny - nz;
+                            
+                            float Dnk = Dn[multi_to_flat(kx + nx, ky + ny, kz + nz)];
+                            float Mpn = Mp[nflat];
+                            
+                            const float infvac = 1./fact3f(nx, ny, nz);
+                            Lnew += Dnk * Mpn * infvac;
+                            nflat += 1;
+                        }
+                    }
+                }
+
+                const float sign = ksum % 2 == 0 ? -1.f : 1.f;
+                const float fac = sign / fact3f(kx, ky, kz);
+
+                loc[kflat] += Lnew * fac;
+
+                kflat += 1;
+            }
+        }
+    }
+}
+
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                  Old Kernels (not used in core code anymore -- keep for testing)               */
+/* ---------------------------------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                           M2L Kernel                                           */
+/* ---------------------------------------------------------------------------------------------- */
+
+template<int p>
+__global__ void IlistM2L(const float3* __restrict__ x, const float* __restrict__ mp, 
+        const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
+        float* __restrict__ Lout, size_t interactions_per_block, float epsilon) {
+    const size_t block_size = blockDim.x;
+    float epsilon2 = epsilon * epsilon;
+
+    int imin = iminmax[0], imax = iminmax[1];
+
+    constexpr int ncomb = NCOMB(p);
+
+    for (int iint = 0; iint < interactions_per_block; iint++) {
+        int int_id = imin + block_size * (blockIdx.x * interactions_per_block + iint) + threadIdx.x;
+        if (int_id >= imax) {
+            return;
+        }
+
+        int iA = interactions[int_id].x, iB = interactions[int_id].y;
+        float3 xA = x[iA], xB = x[iB];
+        float3 dx = {xB.x - xA.x, xB.y - xA.y, xB.z - xA.z};
+        float Dn[ncomb];
+        setupDnG<p>(dx, epsilon2, Dn);
+
+        float Mp[ncomb];
+        #pragma unroll
+        for (int iM=0; iM < ncomb; iM++) {
+            Mp[iM] = mp[iB * ncomb + iM];
+        }
+
+        int kflat = 0;
+        #pragma unroll
+        for(int ksum = 0; ksum <= p; ksum++) {
+            #pragma unroll
+            for(int kz = 0; kz <= ksum; kz++) {
+                #pragma unroll
+                for(int ky = 0; ky <= ksum - kz; ky++) {
+                    const int kx = ksum - ky - kz;
+                    float Lnew = 0.f;
+
+                    int nflat = 0;
+                    #pragma unroll
+                    for (int nsum = 0; nsum <= p - ksum; nsum++) {
+                        #pragma unroll
+                        for (int nz = 0; nz <= nsum; nz++) {
+                            #pragma unroll
+                            for (int ny = 0; ny <= nsum - nz; ny++) {
+                                const int nx = nsum - ny - nz;
+                                
+                                float Dnk = Dn[multi_to_flat(kx + nx, ky + ny, kz + nz)];
+                                float Mpn = Mp[nflat];
+                                
+                                const float infvac = 1./fact3f(nx, ny, nz);
+                                Lnew += Dnk * Mpn * infvac;
+                                nflat += 1;
+                            }
+                        }
+                    }
+
+                    const float sign = ksum % 2 == 0 ? -1.f : 1.f;
+                    const float fac = sign / fact3f(kx, ky, kz);
+                    atomicAdd(&Lout[iA * ncomb + kflat], Lnew * fac); 
+                    kflat += 1;
+                }
+            }
+        }
+    }
+}
+
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                         Leaf M2L kernel                                        */
+/* ---------------------------------------------------------------------------------------------- */
+
+template<int p>
+__global__ void IlistLeaf2NodeM2L(const float3* __restrict__  xnodes, 
+        const float4* __restrict__ xm, const int32_t* __restrict__ isplit, 
+        const int2* __restrict__ interactions, const int* __restrict__ iminmax, 
+        float* __restrict__ Lout, size_t interactions_per_block, float epsilon
+    )  {
+    float epsilon2 = epsilon * epsilon;
+
+    int imin = iminmax[0], imax = iminmax[1];
+
+    constexpr int ncomb = NCOMB(p);
+    float Dn[ncomb];
+
+    __shared__ float Dsum[ncomb];
+    for (int i = threadIdx.x; i < ncomb; i += blockDim.x) 
+        Dsum[i] = 0.0f;
+    __syncthreads();
+
+    for (int iint = 0; iint < interactions_per_block; iint++) {
+        int int_id = imin + iint * gridDim.x + blockIdx.x ;
+        if (int_id >= imax) {
+            return;
+        }
+
+        int2 interaction = interactions[int_id];
+        int iNode = interaction.x, iLeaf = interaction.y;
+        int iPartStart = isplit[iLeaf], iPartEnd = isplit[iLeaf + 1];
+
+        float3 xnode = xnodes[iNode];
+
+        for(int poffset=0; poffset < iPartEnd - iPartStart; poffset += blockDim.x)
+        {
+            int ipart = iPartStart + poffset + threadIdx.x;
+            bool valid = ipart < iPartEnd;
+
+            float4 xmpart = xm[valid ? ipart : iPartEnd-1];
+
+            float3 dx = {xmpart.x - xnode.x, xmpart.y - xnode.y, xmpart.z - xnode.z};
+            setupDnG<p>(dx, epsilon2, Dn);
+
+            add_warp_reduced<ncomb>(Dn, Dsum, valid);
+        }
+
+        __syncthreads();
+
+        // Once we are done with all particles we can ouput the results, split over components
+        for(int kflat=threadIdx.x; kflat < ncomb; kflat += blockDim.x) {
+            int3 k = flat_to_multi<p>(kflat);
+            int ksum = k.x + k.y + k.z;
+            float sign = (ksum & 1) == 0 ? -1.f : 1.f;
+            float Lnew = sign * Dsum[kflat]  / fact3f(k.x, k.y, k.z);
+            
+            atomicAdd(&Lout[iNode*ncomb + kflat],  Lnew);
+
+            Dsum[kflat] = 0.f;
+        }
+
+        __syncthreads();
+    }
+}
 
 #endif // CUSTOM_JAX_MULTIPOLES_H
