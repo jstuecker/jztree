@@ -9,31 +9,6 @@
 /*                                     Helper device functions                                    */
 /* ---------------------------------------------------------------------------------------------- */
 
-__device__ __forceinline__  __device__ float warp_sum(float v) {
-    #pragma unroll
-    for (int off = 16; off > 0; off >>= 1)
-        v += __shfl_down_sync(0xffffffff, v, off);
-    return v;
-}
-
-__device__ __forceinline__ float warp_reduce_sum(float v) {
-    unsigned m = 0xffffffff;
-    for (int offset = 16; offset > 0; offset >>= 1)
-        v += __shfl_down_sync(m, v, offset);
-    return v;
-}
-
-template<int N>
-__device__ void add_warp_reduced(const float (&Dn)[N], float* __restrict__ Dsum, bool valid) {
-    const int lane = threadIdx.x & 31;
-    #pragma unroll
-    for (int k = 0; k < N; ++k) {
-        float v = valid ? Dn[k] : 0.f;
-        v = warp_sum(v);
-        if (lane == 0) atomicAdd(&Dsum[k], v);
-    }
-}
-
 template<int p>
 __device__ void setupGn(float r2, float eps2, float* __restrict__ G)
 {
@@ -47,82 +22,6 @@ __device__ void setupGn(float r2, float eps2, float* __restrict__ G)
         G[n] = -(2*n-1) * G[n-1] * rinv2;
     }
 }
-
-#define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
-
-__device__ __forceinline__ float get_xk(const float3& x, int k) {
-    return (k == 0) ? x.x : (k == 1 ? x.y : x.z);
-}
-
-__host__ __device__ __forceinline__
-float powi_upto6(float x, int n) {
-
-    switch (n) {
-        case 0: return 1.0f;
-        case 1: return x;
-        case 2: return x * x;
-        case 3: { float x2 = x * x; return x2 * x; }
-        case 4: { float x2 = x * x; return x2 * x2; }
-        case 5: { float x2 = x * x; float x4 = x2 * x2; return x4 * x; }
-        case 6: { float x2 = x * x; float x3 = x2 * x; return x3 * x3; }
-        default: // fallback if someone passes >6
-            return powf(x, (float)n);
-    }
-}
-
-__device__ __forceinline__ float fact_upto6f(unsigned k) {
-    float f = 1.f;
-    f *= (k >= 2) ? 2.f : 1.f;
-    f *= (k >= 3) ? 3.f : 1.f;
-    f *= (k >= 4) ? 4.f : 1.f;
-    f *= (k >= 5) ? 5.f : 1.f;
-    f *= (k >= 6) ? 6.f : 1.f;
-    return f;
-}
-
-__device__ __forceinline__ float binomial(unsigned n, unsigned k) {
-    if (k > n) return 0.f;
-    float res = 1.f;
-    for (unsigned i = 1; i <= k; i++) {
-        res *= float(n - (k - i)) / float(i);
-    }
-    return res;
-}
-
-__device__ __forceinline__ float fact3f(unsigned kx, unsigned ky, unsigned kz) {
-    return fact_upto6f(kx) * fact_upto6f(ky) * fact_upto6f(kz);
-}
-
-__device__ __forceinline__ constexpr  int multi_to_flat(const int kx, const int ky, const int kz) {
-    int p = kx + ky + kz;
-    int npoff = ((p+2)*(p+1)*p) / 6; // offset of the p-th symmeric tensor
-    int off = npoff + (kz*(2*p + 3 - kz))/2 + ky;
-
-    return off > 0 ? off : 0; // Ensure we don't return negative indices
-}
-
-template<int pmax>
-__device__ __forceinline__ constexpr  int3 flat_to_multi(const int kflat) {
-    int i = 0, ksum, kz, ky;
-    #pragma unroll
-    for(ksum=0; ksum <= pmax; ksum++) {
-        int nadd = ((ksum+2)*(ksum+1)) >> 1;
-        if (i + nadd > kflat)
-            break;
-        i += nadd;
-    }
-    #pragma unroll
-    for(kz=0; kz <= ksum; kz++) {
-        int nadd = (ksum-kz+1);
-        if (i + nadd > kflat)
-            break;
-        i += nadd;
-    }
-    ky = kflat - i;
-
-    return int3{ksum-ky-kz, ky, kz};
-}
-
 
 template<int p>
 __device__ void setupDnG(float3 dx, float eps2, float* __restrict__ Dn) {

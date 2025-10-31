@@ -7,10 +7,8 @@
 #include "common/iterators.cuh"
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                                   Evaluate Tree Plane Kernel                                   */
+/*                                       Opening Criterion                                        */
 /* ---------------------------------------------------------------------------------------------- */
-
-#define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
 
 __device__ __forceinline__ bool OpeningCriterion(
     NodeWithExt nodeA,
@@ -27,23 +25,6 @@ __device__ __forceinline__ bool OpeningCriterion(
     // also open if L2 had an overflow (and r2 is valid)
     need_open = need_open || ((isnan(L2) || isinf(L2)) && !isnan(r2));
     return need_open;
-}
-
-template<typename T>
-__device__ __forceinline__ T warp_reduce_sum(T v) {
-    #pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1)
-        v += __shfl_down_sync(__activemask(), v, offset);
-    return v;
-}
-
-template<typename T>
-__device__ __forceinline__ T block_reduce_sum_shared(T v, T* smem) {
-    T val = warp_reduce_sum(v);
-    // if((threadIdx.x & 0x1f) == 0)
-        atomicAdd(smem, v);
-        // smem[0] += val;
-    return val;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
