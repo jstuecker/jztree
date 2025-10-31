@@ -2,7 +2,7 @@
 
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
-#include "shared_utils.cuh"
+#include "../shared_utils.cuh"
 
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
