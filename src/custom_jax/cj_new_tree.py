@@ -156,5 +156,7 @@ def cj_new_force_and_pot(particles: Particles,
         softening=np.float32(cfg.softening), max_leaf_size=np.int32(cfg.tree.max_leaf_size)
     )[0]
 
+    fphi = fphi.at[...,3].add(particles.mass/cfg.softening) # Remove self-interaction from potential
+
     return fphi
 cj_new_force_and_pot.jit = jax.jit(cj_new_force_and_pot, static_argnames=['cfg'])

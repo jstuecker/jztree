@@ -35,7 +35,7 @@ def conditional_callback(flag, f, *args, **kwargs):
     res = jax.lax.cond(
         flag, 
         lambda : io_callback(f, jax.ShapeDtypeStruct((), jnp.int32), *args, **kwargs),
-        lambda : 0
+        lambda : jnp.int32(0)
     )
 
     return res

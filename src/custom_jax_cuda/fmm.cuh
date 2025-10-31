@@ -432,7 +432,8 @@ __global__ void NewForceAndPot(
     float softening,
     int max_leaf_size
 ) {
-    // Note: I might want to test that the self-interaction behaves well
+    // Note: I should try to add Khan summation option
+    //       I think the numerical error might be dominated by the summation in this kernel
 
     float softening2 = softening * softening;
 
