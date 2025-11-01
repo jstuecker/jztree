@@ -9,7 +9,12 @@
 /*                                        Helper Functions                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-__forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, float softening2, ForcePot &fphi_i) {
+__forceinline__ __device__ void accumulateForceAndPot(
+    PMass xmi, 
+    PMass xmj, 
+    float softening2, 
+    ForcePot &fphi_i
+) {
     float3 dx = float3diff(xmj.pos, xmi.pos);
     float rinv = rsqrtf(norm2(dx) + softening2);
 
@@ -20,6 +25,34 @@ __forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, floa
     fphi_i.force.y += minvr3 * dx.y;
     fphi_i.force.z += minvr3 * dx.z;
     fphi_i.pot += -minvr;
+}
+
+__forceinline__ __device__ void kahan_add(float &sum, float add, float &c) {
+    // Cancels summation error with an extra variable c, that needs to start at 0
+    // https://en.wikipedia.org/wiki/Kahan_summation_algorithm
+    float y = add - c;
+    float t = sum + y;
+    c = (t - sum) - y;
+    sum = t;
+}
+
+__forceinline__ __device__ void accumulateForceAndPotKahan(
+    PMass xmi, 
+    PMass xmj, 
+    float softening2, 
+    ForcePot &fphi_i,
+    ForcePot &fphi_kahan
+) {
+    float3 dx = float3diff(xmj.pos, xmi.pos);
+    float rinv = rsqrtf(norm2(dx) + softening2);
+
+    float minvr = xmj.mass * rinv;
+    float minvr3 = minvr * rinv * rinv;
+    
+    kahan_add(fphi_i.force.x, minvr3 * dx.x, fphi_kahan.force.x);
+    kahan_add(fphi_i.force.y, minvr3 * dx.y, fphi_kahan.force.y);
+    kahan_add(fphi_i.force.z, minvr3 * dx.z, fphi_kahan.force.z);
+    kahan_add(fphi_i.pot, -minvr, fphi_kahan.pot);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -36,6 +69,7 @@ __global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float 
     extern __shared__ PMass xmj_shared[];
 
     ForcePot fphi_i = {0.f, 0.f, 0.f, 0.f};
+    ForcePot fphi_kahan = {0.f, 0.f, 0.f, 0.f};
 
     for (int jblock = 0; jblock < steps; jblock += 1) {
         int num = min(blockDim.x, n - blockDim.x * jblock);
@@ -46,15 +80,16 @@ __global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float 
         __syncthreads();
 
         for (int j = 0; j < num; j++) {
-            accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+            if(kahan) {
+                accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
+            }
+            else {
+                accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+            }
         }
     }
 
     fphi_i.pot += xmi.mass / epsilon; // remove self-interaction from potential
-
-    if(kahan) {
-        fphi_i.pot = fphi_i.pot * 2.f;
-    }
 
     fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
 }
