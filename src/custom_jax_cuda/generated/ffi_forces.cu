@@ -29,10 +29,11 @@ ffi::Error ForceAndPotentialFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer xm,
     ffi::Result<ffi::AnyBuffer> fphi,
-    int n,
     float epsilon,
+    bool kahan,
     size_t block_size
 ) {
+    int n = xm.element_count()/4;
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(xm.element_count()/4, block_size));
     size_t smem = blockDim.x * sizeof(float4);
@@ -48,7 +49,29 @@ ffi::Error ForceAndPotentialFFIHost(
         &n,
         &epsilon
     };
-    cudaLaunchKernel((const void*)ForceAndPotential, gridDim, blockDim, args, smem, stream);
+    
+    // We have template parameters, so we need to instantiate all valid templates
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<bool>;
+    using TFunctionType = decltype(ForceAndPotential<true>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{true}] = ForceAndPotential<true>;
+    instance_map[{false}] = ForceAndPotential<false>;
+
+    auto it = instance_map.find({kahan});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (kahan)"\
+            " in ForceAndPotentialFFIHost -- Only supporting:\n"\
+            "(true), (false)"
+        );
+    }
+
+    TFunctionType* instance = it->second;
+    
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -63,8 +86,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // xm
         .Ret<ffi::AnyBuffer>() // fphi
-        .Attr<int>("n")
         .Attr<float>("epsilon")
+        .Attr<bool>("kahan")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

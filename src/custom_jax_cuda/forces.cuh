@@ -26,6 +26,7 @@ __forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, floa
 /*                                       Simple Force Kernel                                      */
 /* ---------------------------------------------------------------------------------------------- */
 
+template <bool kahan>
 __global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float epsilon) {
     const int steps = div_ceil(n, blockDim.x);
     float epsilon2 = epsilon * epsilon;
@@ -51,11 +52,15 @@ __global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float 
 
     fphi_i.pot += xmi.mass / epsilon; // remove self-interaction from potential
 
+    if(kahan) {
+        fphi_i.pot = fphi_i.pot * 2.f;
+    }
+
     fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                                        New force kernel                                        */
+/*                                     Grouped force kernel                                       */
 /* ---------------------------------------------------------------------------------------------- */
 
 __global__ void GroupedForceAndPot(
