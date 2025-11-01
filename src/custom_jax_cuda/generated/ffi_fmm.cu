@@ -3,6 +3,8 @@
 // one of the kernels. The FFI Bindings are very tedious in jax and they involve a lot of 
 // boilerplate code that is easy to mess up.
 
+#include <map>
+#include <tuple>
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 
@@ -70,21 +72,30 @@ ffi::Error CountInteractionsAndM2LFFIHost(
     };
     
     // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through switch statements
-    const void* kernel;
-    switch(p) {
-        case 1: kernel = (const void*) CountInteractionsAndM2L<1>; break;
-        case 2: kernel = (const void*) CountInteractionsAndM2L<2>; break;
-        case 3: kernel = (const void*) CountInteractionsAndM2L<3>; break;
-        case 4: kernel = (const void*) CountInteractionsAndM2L<4>; break;
-        case 5: kernel = (const void*) CountInteractionsAndM2L<5>; break;
-        default: return ffi::Error::Internal(
-            "Unsupported p=" + std::to_string(p) + " in CountInteractionsAndM2LFFIHost"\
-            " -- Only supporting values: (1,2,3,4,5)"
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<int>;
+    using TFunctionType = decltype(CountInteractionsAndM2L<1>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{1}] = CountInteractionsAndM2L<1>;
+    instance_map[{2}] = CountInteractionsAndM2L<2>;
+    instance_map[{3}] = CountInteractionsAndM2L<3>;
+    instance_map[{4}] = CountInteractionsAndM2L<4>;
+    instance_map[{5}] = CountInteractionsAndM2L<5>;
+
+    auto it = instance_map.find({p});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (p)"\
+            " in CountInteractionsAndM2LFFIHost -- Only supporting:\n"\
+            "(1), (2), (3), (4), (5)"
         );
-    };
+    }
+
+    TFunctionType* instance = it->second;
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

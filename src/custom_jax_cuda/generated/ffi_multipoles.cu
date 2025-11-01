@@ -3,6 +3,8 @@
 // one of the kernels. The FFI Bindings are very tedious in jax and they involve a lot of 
 // boilerplate code that is easy to mess up.
 
+#include <map>
+#include <tuple>
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 
@@ -55,21 +57,30 @@ ffi::Error MultipolesFromParticlesFFIHost(
     };
     
     // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through switch statements
-    const void* kernel;
-    switch(p) {
-        case 1: kernel = (const void*) MultipolesFromParticles<1>; break;
-        case 2: kernel = (const void*) MultipolesFromParticles<2>; break;
-        case 3: kernel = (const void*) MultipolesFromParticles<3>; break;
-        case 4: kernel = (const void*) MultipolesFromParticles<4>; break;
-        case 5: kernel = (const void*) MultipolesFromParticles<5>; break;
-        default: return ffi::Error::Internal(
-            "Unsupported p=" + std::to_string(p) + " in MultipolesFromParticlesFFIHost"\
-            " -- Only supporting values: (1,2,3,4,5)"
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<int>;
+    using TFunctionType = decltype(MultipolesFromParticles<1>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{1}] = MultipolesFromParticles<1>;
+    instance_map[{2}] = MultipolesFromParticles<2>;
+    instance_map[{3}] = MultipolesFromParticles<3>;
+    instance_map[{4}] = MultipolesFromParticles<4>;
+    instance_map[{5}] = MultipolesFromParticles<5>;
+
+    auto it = instance_map.find({p});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (p)"\
+            " in MultipolesFromParticlesFFIHost -- Only supporting:\n"\
+            "(1), (2), (3), (4), (5)"
         );
-    };
+    }
+
+    TFunctionType* instance = it->second;
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -130,21 +141,30 @@ ffi::Error CoarsenMultipolesFFIHost(
     };
     
     // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through switch statements
-    const void* kernel;
-    switch(p) {
-        case 1: kernel = (const void*) CoarsenMultipoles<1>; break;
-        case 2: kernel = (const void*) CoarsenMultipoles<2>; break;
-        case 3: kernel = (const void*) CoarsenMultipoles<3>; break;
-        case 4: kernel = (const void*) CoarsenMultipoles<4>; break;
-        case 5: kernel = (const void*) CoarsenMultipoles<5>; break;
-        default: return ffi::Error::Internal(
-            "Unsupported p=" + std::to_string(p) + " in CoarsenMultipolesFFIHost"\
-            " -- Only supporting values: (1,2,3,4,5)"
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<int>;
+    using TFunctionType = decltype(CoarsenMultipoles<1>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{1}] = CoarsenMultipoles<1>;
+    instance_map[{2}] = CoarsenMultipoles<2>;
+    instance_map[{3}] = CoarsenMultipoles<3>;
+    instance_map[{4}] = CoarsenMultipoles<4>;
+    instance_map[{5}] = CoarsenMultipoles<5>;
+
+    auto it = instance_map.find({p});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (p)"\
+            " in CoarsenMultipolesFFIHost -- Only supporting:\n"\
+            "(1), (2), (3), (4), (5)"
         );
-    };
+    }
+
+    TFunctionType* instance = it->second;
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -209,21 +229,30 @@ ffi::Error IlistM2LFFIHost(
     };
     
     // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through switch statements
-    const void* kernel;
-    switch(p) {
-        case 1: kernel = (const void*) IlistM2L<1>; break;
-        case 2: kernel = (const void*) IlistM2L<2>; break;
-        case 3: kernel = (const void*) IlistM2L<3>; break;
-        case 4: kernel = (const void*) IlistM2L<4>; break;
-        case 5: kernel = (const void*) IlistM2L<5>; break;
-        default: return ffi::Error::Internal(
-            "Unsupported p=" + std::to_string(p) + " in IlistM2LFFIHost"\
-            " -- Only supporting values: (1,2,3,4,5)"
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<int>;
+    using TFunctionType = decltype(IlistM2L<1>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{1}] = IlistM2L<1>;
+    instance_map[{2}] = IlistM2L<2>;
+    instance_map[{3}] = IlistM2L<3>;
+    instance_map[{4}] = IlistM2L<4>;
+    instance_map[{5}] = IlistM2L<5>;
+
+    auto it = instance_map.find({p});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (p)"\
+            " in IlistM2LFFIHost -- Only supporting:\n"\
+            "(1), (2), (3), (4), (5)"
         );
-    };
+    }
+
+    TFunctionType* instance = it->second;
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -293,21 +322,30 @@ ffi::Error IlistLeaf2NodeM2LFFIHost(
     };
     
     // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through switch statements
-    const void* kernel;
-    switch(p) {
-        case 1: kernel = (const void*) IlistLeaf2NodeM2L<1>; break;
-        case 2: kernel = (const void*) IlistLeaf2NodeM2L<2>; break;
-        case 3: kernel = (const void*) IlistLeaf2NodeM2L<3>; break;
-        case 4: kernel = (const void*) IlistLeaf2NodeM2L<4>; break;
-        case 5: kernel = (const void*) IlistLeaf2NodeM2L<5>; break;
-        default: return ffi::Error::Internal(
-            "Unsupported p=" + std::to_string(p) + " in IlistLeaf2NodeM2LFFIHost"\
-            " -- Only supporting values: (1,2,3,4,5)"
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<int>;
+    using TFunctionType = decltype(IlistLeaf2NodeM2L<1>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{1}] = IlistLeaf2NodeM2L<1>;
+    instance_map[{2}] = IlistLeaf2NodeM2L<2>;
+    instance_map[{3}] = IlistLeaf2NodeM2L<3>;
+    instance_map[{4}] = IlistLeaf2NodeM2L<4>;
+    instance_map[{5}] = IlistLeaf2NodeM2L<5>;
+
+    auto it = instance_map.find({p});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (p)"\
+            " in IlistLeaf2NodeM2LFFIHost -- Only supporting:\n"\
+            "(1), (2), (3), (4), (5)"
         );
-    };
+    }
+
+    TFunctionType* instance = it->second;
     
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
