@@ -309,9 +309,7 @@ __global__ void CoarsenMultipoles(
     for (int ioff = istart; ioff < iend; ioff += blockDim.x) {
         int index = ioff + threadIdx.x;
         // compute displacement from child center to inode com
-        // float dx = com.x - xcent[index].x;
-        // float dy = com.y - xcent[index].y;
-        float3 dpos = make_float3(com.x-xcent[index].x, com.y-xcent[index].y, com.z-xcent[index].z);
+        float3 dpos = make_float3(xcent[index].x-com.x, xcent[index].y-com.y, xcent[index].z-com.z);
 
         // load source multipoles
         // compute shifted multipoles into a small stack array
