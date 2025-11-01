@@ -20,6 +20,54 @@ namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: ForceAndPotential                         */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error ForceAndPotentialFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer xm,
+    ffi::Result<ffi::AnyBuffer> fphi,
+    int n,
+    float epsilon,
+    size_t block_size
+) {
+    dim3 blockDim(block_size);
+    dim3 gridDim(div_ceil(xm.element_count()/4, block_size));
+    size_t smem = blockDim.x * sizeof(float4);
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    PMass* xm_val = reinterpret_cast<PMass*>(xm.untyped_data());
+    ForcePot* fphi_val = reinterpret_cast<ForcePot*>(fphi->untyped_data());
+
+    void* args[] = {
+        &xm_val,
+        &fphi_val,
+        &n,
+        &epsilon
+    };
+    cudaLaunchKernel((const void*)ForceAndPotential, gridDim, blockDim, args, smem, stream);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    ForceAndPotentialFFI, ForceAndPotentialFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // xm
+        .Ret<ffi::AnyBuffer>() // fphi
+        .Attr<int>("n")
+        .Attr<float>("epsilon")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: GroupedForceAndPot                        */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -48,7 +96,7 @@ ffi::Error GroupedForceAndPotFFIHost(
     int* spl_ilist_val = reinterpret_cast<int*>(spl_ilist.untyped_data());
     int* ilist_nodes_val = reinterpret_cast<int*>(ilist_nodes.untyped_data());
     PMass* posm_val = reinterpret_cast<PMass*>(posm.untyped_data());
-    ForceAndPot* fphi_val = reinterpret_cast<ForceAndPot*>(fphi->untyped_data());
+    ForcePot* fphi_val = reinterpret_cast<ForcePot*>(fphi->untyped_data());
 
     void* args[] = {
         &node_range_val,
@@ -89,5 +137,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_forces, m) {
+    m.def("ForceAndPotential", []() { return EncapsulateFfiCall(&ForceAndPotentialFFI); });
     m.def("GroupedForceAndPot", []() { return EncapsulateFfiCall(&GroupedForceAndPotFFI); });
 }

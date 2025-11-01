@@ -26,7 +26,7 @@ struct __align__(16) PosId {
     int32_t id;
 };
 
-struct __align__(16) ForceAndPot {
+struct __align__(16) ForcePot {
     float3 force;
     float  pot;
 };

@@ -6,10 +6,10 @@
 #include "common/iterators.cuh"
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                                        New force kernel                                        */
+/*                                        Helper Functions                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-__forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, float softening2, ForceAndPot &fphi_i) {
+__forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, float softening2, ForcePot &fphi_i) {
     float3 dx = float3diff(xmj.pos, xmi.pos);
     float rinv = rsqrtf(norm2(dx) + softening2);
 
@@ -22,6 +22,42 @@ __forceinline__ __device__ void accumulateForceAndPot(PMass xmi, PMass xmj, floa
     fphi_i.pot += -minvr;
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                       Simple Force Kernel                                      */
+/* ---------------------------------------------------------------------------------------------- */
+
+__global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float epsilon) {
+    const int steps = div_ceil(n, blockDim.x);
+    float epsilon2 = epsilon * epsilon;
+
+    PMass xmi = xm[blockIdx.x * blockDim.x + threadIdx.x];
+
+    extern __shared__ PMass xmj_shared[];
+
+    ForcePot fphi_i = {0.f, 0.f, 0.f, 0.f};
+
+    for (int jblock = 0; jblock < steps; jblock += 1) {
+        int num = min(blockDim.x, n - blockDim.x * jblock);
+
+        __syncthreads();
+        if(threadIdx.x < num)
+            xmj_shared[threadIdx.x] = xm[jblock * blockDim.x + threadIdx.x];
+        __syncthreads();
+
+        for (int j = 0; j < num; j++) {
+            accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+        }
+    }
+
+    fphi_i.pot += xmi.mass / epsilon; // remove self-interaction from potential
+
+    fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                        New force kernel                                        */
+/* ---------------------------------------------------------------------------------------------- */
+
 __global__ void GroupedForceAndPot(
     // inputs:
     const int2* node_range,
@@ -30,7 +66,7 @@ __global__ void GroupedForceAndPot(
     const int* ilist_nodes,
     const PMass* posm,
     // outputs:
-    ForceAndPot* fphi,
+    ForcePot* fphi,
     // attributes:
     float softening,
     int max_leaf_size
@@ -72,7 +108,7 @@ __global__ void GroupedForceAndPot(
         32
     );
 
-    ForceAndPot fphi_a = {{0.f,0.f,0.f}, 0.f};
+    ForcePot fphi_a = {{0.f,0.f,0.f}, 0.f};
 
     extern __shared__ PMass xm_b[];
 

@@ -5,12 +5,36 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from custom_jax_cuda import ffi_old_forces as ffi_forces
+from custom_jax_cuda import ffi_old_forces
+from custom_jax_cuda import ffi_forces
 
-jax.ffi.register_ffi_target("potential", ffi_forces.potential(), platform="CUDA")
-jax.ffi.register_ffi_target("force", ffi_forces.force(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_fphi", ffi_forces.ilist_fphi(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_fphi_bwd", ffi_forces.ilist_fphi_bwd(), platform="CUDA")
+jax.ffi.register_ffi_target("potential", ffi_old_forces.potential(), platform="CUDA")
+jax.ffi.register_ffi_target("force", ffi_old_forces.force(), platform="CUDA")
+jax.ffi.register_ffi_target("ilist_fphi", ffi_old_forces.ilist_fphi(), platform="CUDA")
+jax.ffi.register_ffi_target("ilist_fphi_bwd", ffi_old_forces.ilist_fphi_bwd(), platform="CUDA")
+
+jax.ffi.register_ffi_target("ForceAndPotential", ffi_forces.ForceAndPotential(), platform="CUDA")
+
+def force_and_potential(x, mass=1., block_size=64, softening=1e-2):
+    assert x.dtype == jnp.float32
+    assert x.shape[-1] == 3
+    assert x.ndim >= 2
+    assert np.prod(x.shape[:-1]) % block_size == 0, "The length of x must be divisible by the block size."
+    assert softening > 0, "Epsilon must be positive to deal with self-interaction."
+
+    # Reading on GPU will be more efficient if we read pos and mass together as single float4 values
+    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
+
+    out_type = jax.ShapeDtypeStruct(x.shape[:-1], x.dtype)
+    phi = jax.ffi.ffi_call("potential", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(softening))
+    return phi[0]
+force_and_potential = jax.jit(force_and_potential, static_argnames=("block_size", "softening"))
+
+
+# ------------------------------------------------------------------------------------------------ #
+#                                Old Kernels (will be removed later)                               #
+# ------------------------------------------------------------------------------------------------ #
+
 
 # ======= Interfaces from CUDA code to Python =======
 

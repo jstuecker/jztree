@@ -22,7 +22,7 @@ __device__ __forceinline__ float norm2(float3 a) {
 /* ---------------------------------------------------------------------------------------------- */
 
 // Calculates integer division in round-up mode
-inline int div_ceil(int a, int b) {
+__host__ __device__ __forceinline__ int div_ceil(int a, int b) {
     return (a + b - 1) / b;
 }
 
