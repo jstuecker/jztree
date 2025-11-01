@@ -1,3 +1,5 @@
+import numpy as np
+
 try:
     import tree_sitter_cuda
     from tree_sitter import Language, Parser, Query, QueryCursor, Node, Tree
@@ -27,11 +29,21 @@ class FunctionInfo():
     par : dict[str, ParamInfo]
     type : str = "void"
     is_kernel : bool = False
-    template_par : dict[str, ParamInfo] = field(default_factory=dict)
+    template_par : list[str, ParamInfo] = field(default_factory=dict)
     block_size_expression : str = ""
     grid_size_expression : str = ""
     smem_size_expression : str = ""
     init_outputs_zero : bool = False
+    template_instances : list[tuple] | None = None
+
+    def template_values_flat(self):
+        if self.template_instances is not None:
+            return self.template_instances
+
+        all_perm = np.meshgrid(*[p.instances for p in self.template_par.values()], indexing='ij')
+        return np.stack(all_perm, axis=-1).reshape(-1, len(self.template_par))
+    def template_values_str(self):
+        return [", ".join([str(v) for v in vals]) for vals in self.template_values_flat()]
 
 CUDA = Language(tree_sitter_cuda.language())
 parser = Parser(CUDA)

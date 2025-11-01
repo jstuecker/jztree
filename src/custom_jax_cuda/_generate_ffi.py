@@ -16,13 +16,24 @@ default_includes = ["../common/math.cuh"]
 funcs = parse.get_functions_from_file(
     str(HERE / "ffi_example.cuh"),
     only_kernels=False,
-    names=["SimpleArange", "SetToConstantCall"]
+    names=["SimpleArange", "SetToConstantCall", "NestedTemplate"]
 )
 
 funcs["SimpleArange"].grid_size_expression = "div_ceil(output->element_count(), block_size)"
 funcs["SimpleArange"].template_par["p"].instances = p_instance_values
 funcs["SetToConstantCall"].template_par["tpar"].instances = (16, 32, 64)
 funcs["SetToConstantCall"].par["size"].expression = "output->element_count()"
+
+funcs["NestedTemplate"].grid_size_expression = "div_ceil(output->element_count(), block_size)"
+funcs["NestedTemplate"].par["size"].expression = "output->element_count()"
+# Can define template instances as an outer product over individual parameter instances:
+funcs["NestedTemplate"].template_par["p1"].instances = (0, 1)
+funcs["NestedTemplate"].template_par["p2"].instances = (22,33)
+funcs["NestedTemplate"].template_par["flag"].instances = ("true", "false")
+# Or directly as a manual list:
+# funcs["NestedTemplate"].template_instances = [(0, 11, "true"), (3, 4, "false")]
+
+print(funcs["NestedTemplate"].template_values_str()[0])
 
 for kernel in funcs.values():
     print(kernel.name, kernel.is_kernel)

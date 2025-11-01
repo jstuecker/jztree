@@ -13,17 +13,17 @@ def simplify_and_validate(func: FunctionInfo) -> FunctionInfo:
         assert tuple(func.par.keys())[0] == "stream", "All Host functions must use stream as first parameter"
         del func.par["stream"] # will be added automatically
 
-    # convert dicts to lists for easier templating
+    # convert pars to lists for easier templating
     func = replace(
         func, 
-        par = list(func.par.values()),
-        template_par = list(func.template_par.values())
+        par = list(func.par.values())
     )
 
-    for p in func.template_par:
-        if len(p.instances) == 0:
-            raise ValueError(f"Please define instances for template parameter {p.name} "
-                             f"in function {func.name}.")
+    if func.template_instances is None:
+        for name,p in func.template_par.items():
+            if len(p.instances) == 0:
+                raise ValueError(f"Please define instances for template parameter {p.name} "
+                                f"in function {func.name}.")
 
     return func
 

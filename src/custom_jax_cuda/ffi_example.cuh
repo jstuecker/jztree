@@ -45,5 +45,16 @@ void SetToConstantCall(
     );
 }
 
+template <int p1, int p2, bool flag>
+__global__ void NestedTemplate(
+    int* output,
+    int size
+) {
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < size; i += blockDim.x * gridDim.x) {
+        if( i < size )
+            output[i] = p1 * p2 * (flag ? 1 : -1);
+    }
+}
+
 
 #endif // CUSTOM_JAX_INTERFACE_TESTS_H

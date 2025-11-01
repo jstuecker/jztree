@@ -3,6 +3,8 @@
 // one of the kernels. The FFI Bindings are very tedious in jax and they involve a lot of 
 // boilerplate code that is easy to mess up.
 
+#include <map>
+#include <tuple>
 #include "nanobind/nanobind.h"
 #include "xla/ffi/api/ffi.h"
 

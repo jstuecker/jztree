@@ -12,7 +12,7 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
     {{ p.type }} {{ p.name -}}
         {%- endif -%}
 {%- endfor -%}
-{%- for p in f.template_par if p.type=="int" -%}{{ sep() }}
+{%- for p in f.template_par.values() -%}{{ sep() }}
     {{ p.type }} {{ p.name }}
 {%- endfor -%}
 {%- if f.is_kernel and not f.grid_size_expression -%}{{ sep() }}
@@ -74,53 +74,16 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
 
     {%- if f.template_par %}
     
-    // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through switch statements
-    const void* kernel;
+{% include "template_instancing.j2" %}
     
-    {%- for p in f.template_par %}
-        {%-if p.type=="int" %}
-    switch({{ p.name }}) {
-            {%- for pi in p.instances %}
-        case {{pi}}: kernel = (const void*) {{f.name}}<{{ pi }}>; break;
-            {%- endfor %}
-        default: return ffi::Error::Internal(
-            "Unsupported {{p.name}}=" + std::to_string({{p.name}}) + " in {{f.name}}FFIHost"\
-            " -- Only supporting values: (
-            {%- for pi in p.instances -%}
-                {{ pi }}{{ "," if not loop.last else "" }}
-            {%- endfor %})"
-        );
-    };
-        {%- endif %}
-    {%- endfor %}
-    
-    cudaLaunchKernel(kernel, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
     {%- else %}
     cudaLaunchKernel((const void*){{f.name}}, gridDim, blockDim, args, smem, stream);
     {%- endif %}
 {%- else -%}
     {%- if f.template_par %}
-    
-    // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through switch statements
-    {%- for p in f.template_par %}
-        {%-if p.type=="int" %}
-    auto fptr = {{f.name}}<{{ p.instances[0] }}>;
-    switch({{ p.name }}) {
-            {%- for pi in p.instances %}
-        case {{pi}}: fptr = {{f.name}}<{{ pi }}>; break;
-            {%- endfor %}
-        default: return ffi::Error::Internal(
-            "Unsupported {{p.name}}=" + std::to_string({{p.name}}) + " in {{f.name}}FFIHost"\
-            " -- Only supporting values: (
-            {%- for pi in p.instances -%}
-                {{ pi }}{{ "," if not loop.last else "" }}
-            {%- endfor %})"
-        );
-    };
-        {%- endif %}
-    {%- endfor %}
+
+{% include "template_instancing.j2" %}
     {%- endif %}
 
     // Now call our function
@@ -129,7 +92,7 @@ ffi::Error {{ f.name }}FFIHost({{ sep() }}
     {%- endset -%}
 
     {%- if f.template_par %}
-    {{ return_type }}fptr(
+    {{ return_type }}instance(
     {%- else %}
     {{ return_type }}{{ f.name }}(
     {%- endif %}
@@ -178,7 +141,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<{{p.type}}>("{{ p.name }}")
         {%- endif %}
 {%- endfor %}
-{%- for p in f.template_par if p.type=="int" %}
+{%- for p in f.template_par.values() %}
         .Attr<{{p.type}}>("{{ p.name }}")
 {%- endfor %}
 {%- if f.is_kernel and not f.grid_size_expression %}
