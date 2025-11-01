@@ -105,7 +105,8 @@ ffi::Error GroupedForceAndPotFFIHost(
     ffi::AnyBuffer posm,
     ffi::Result<ffi::AnyBuffer> fphi,
     float softening,
-    int max_leaf_size
+    int max_leaf_size,
+    bool kahan
 ) {
     dim3 blockDim(128);
     dim3 gridDim(spl_nodes.element_count() - 1);
@@ -133,7 +134,29 @@ ffi::Error GroupedForceAndPotFFIHost(
         &softening,
         &max_leaf_size
     };
-    cudaLaunchKernel((const void*)GroupedForceAndPot, gridDim, blockDim, args, smem, stream);
+    
+    // We have template parameters, so we need to instantiate all valid templates
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<bool>;
+    using TFunctionType = decltype(GroupedForceAndPot<true>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{true}] = GroupedForceAndPot<true>;
+    instance_map[{false}] = GroupedForceAndPot<false>;
+
+    auto it = instance_map.find({kahan});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (kahan)"\
+            " in GroupedForceAndPotFFIHost -- Only supporting:\n"\
+            "(true), (false)"
+        );
+    }
+
+    TFunctionType* instance = it->second;
+    
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -153,7 +176,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // posm
         .Ret<ffi::AnyBuffer>() // fphi
         .Attr<float>("softening")
-        .Attr<int>("max_leaf_size"),
+        .Attr<int>("max_leaf_size")
+        .Attr<bool>("kahan"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 

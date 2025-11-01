@@ -29,7 +29,7 @@ def force_and_potential(x, mass=1., block_size=64, softening=1e-2, kahan=False):
     fphi = jax.ffi.ffi_call("ForceAndPotential", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(softening),
                                                               kahan=kahan)[0]
     return fphi
-force_and_potential = jax.jit(force_and_potential, static_argnames=("block_size", "softening", "kahan"))
+force_and_potential.jit = jax.jit(force_and_potential, static_argnames=("block_size", "softening", "kahan"))
 
 
 # ------------------------------------------------------------------------------------------------ #

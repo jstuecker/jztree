@@ -154,7 +154,8 @@ def cj_new_force_and_pot(particles: Particles,
         jax.ShapeDtypeStruct((particles.pos.shape[0], 4), jnp.float32),
     ))(
         node_range, plane.ispl, ilist.ispl, ilist.iother, particles.posm(),
-        softening=np.float32(cfg.softening), max_leaf_size=np.int32(cfg.tree.max_leaf_size)
+        softening=np.float32(cfg.softening), max_leaf_size=np.int32(cfg.tree.max_leaf_size),
+        kahan=bool(cfg.tree.kahan_summation)
     )[0]
 
     fphi = fphi.at[...,3].add(particles.mass/cfg.softening) # Remove self-interaction from potential

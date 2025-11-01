@@ -80,12 +80,10 @@ __global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float 
         __syncthreads();
 
         for (int j = 0; j < num; j++) {
-            if(kahan) {
+            if(kahan)
                 accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
-            }
-            else {
+            else
                 accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
-            }
         }
     }
 
@@ -98,6 +96,7 @@ __global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float 
 /*                                     Grouped force kernel                                       */
 /* ---------------------------------------------------------------------------------------------- */
 
+template <bool kahan>
 __global__ void GroupedForceAndPot(
     // inputs:
     const int2* node_range,
@@ -149,6 +148,7 @@ __global__ void GroupedForceAndPot(
     );
 
     ForcePot fphi_a = {{0.f,0.f,0.f}, 0.f};
+    ForcePot fphi_a_kahan = {{0.f,0.f,0.f}, 0.f};
 
     extern __shared__ PMass xm_b[];
 
@@ -163,12 +163,10 @@ __global__ void GroupedForceAndPot(
 
         // Now compute interactions
         for(int ib=read_b_offset; ib < seg_mgr.num_loaded; ib += n_write) {
-            accumulateForceAndPot(
-                xaWrite,
-                xm_b[ib],
-                softening2,
-                fphi_a
-            );
+            if(kahan)
+                accumulateForceAndPotKahan(xaWrite, xm_b[ib], softening2, fphi_a, fphi_a_kahan);
+            else
+                accumulateForceAndPot(xaWrite, xm_b[ib], softening2, fphi_a);
         }
 
         __syncthreads();

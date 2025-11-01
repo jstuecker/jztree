@@ -61,7 +61,6 @@ kernels["GroupedForceAndPot"].init_outputs_zero = True
 
 kernels["ForceAndPotential"].grid_size_expression = "div_ceil(xm.element_count()/4, block_size)"
 kernels["ForceAndPotential"].smem_size_expression = "blockDim.x * sizeof(float4)"
-kernels["ForceAndPotential"].template_par["kahan"].instances = ("true", "false")
 kernels["ForceAndPotential"].par["n"].expression = "xm.element_count()/4"
 
 gen.generate_ffi_module_file(
