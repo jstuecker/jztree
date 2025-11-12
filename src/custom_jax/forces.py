@@ -5,24 +5,17 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from custom_jax_cuda import ffi_old_forces
 from custom_jax_cuda import ffi_forces
 
-jax.ffi.register_ffi_target("potential", ffi_old_forces.potential(), platform="CUDA")
-jax.ffi.register_ffi_target("force", ffi_old_forces.force(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_fphi", ffi_old_forces.ilist_fphi(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_fphi_bwd", ffi_old_forces.ilist_fphi_bwd(), platform="CUDA")
-
-jax.ffi.register_ffi_target("ilist_fphi_new", ffi_forces.IlistForceAndPot(), platform="CUDA")
-jax.ffi.register_ffi_target("ilist_fphi_new_bwd", ffi_forces.BwdIlistForceAndPot(), platform="CUDA")
-
+jax.ffi.register_ffi_target("IlistForceAndPot", ffi_forces.IlistForceAndPot(), platform="CUDA")
+jax.ffi.register_ffi_target("BwdIlistForceAndPot", ffi_forces.BwdIlistForceAndPot(), platform="CUDA")
 jax.ffi.register_ffi_target("ForceAndPotential", ffi_forces.ForceAndPotential(), platform="CUDA")
 
 def force_and_potential(x, mass=1., block_size=64, softening=1e-2, kahan=False):
     assert x.dtype == jnp.float32
     assert x.shape[-1] == 3
     assert x.ndim >= 2
-    # assert np.prod(x.shape[:-1]) % block_size == 0, "The length of x must be divisible by the block size."
+    
     assert softening > 0, "Epsilon must be positive to deal with self-interaction."
 
     # Reading on GPU will be more efficient if we read pos and mass together as single float4 values
@@ -34,61 +27,11 @@ def force_and_potential(x, mass=1., block_size=64, softening=1e-2, kahan=False):
     return fphi
 force_and_potential.jit = jax.jit(force_and_potential, static_argnames=("block_size", "softening", "kahan"))
 
-
 # ------------------------------------------------------------------------------------------------ #
 #                                Old Kernels (will be removed later)                               #
 # ------------------------------------------------------------------------------------------------ #
 
-
-# ======= Interfaces from CUDA code to Python =======
-
-def potential(x, mass=1., block_size=64, softening=1e-2):
-    assert x.dtype == jnp.float32
-    assert x.shape[-1] == 3
-    assert x.ndim >= 2
-    assert np.prod(x.shape[:-1]) % block_size == 0, "The length of x must be divisible by the block size."
-    assert softening > 0, "Epsilon must be positive to deal with self-interaction."
-
-    # Reading on GPU will be more efficient if we read pos and mass together as single float4 values
-    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
-
-    out_type = jax.ShapeDtypeStruct(x.shape[:-1], x.dtype)
-    phi = jax.ffi.ffi_call("potential", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(softening))
-    return phi[0]
-potential_jit = jax.jit(potential, static_argnames=("block_size", "softening"))
-
-def force(x, mass=1., block_size=64, softening=1e-2, get_potential=False):
-    assert x.dtype == jnp.float32
-    assert x.shape[-1] == 3
-    assert x.ndim >= 2
-    assert np.prod(x.shape[:-1]) % block_size == 0, "The length of x must be divisible by the block size."
-    assert softening > 0, "Epsilon must be positive to deal with self-interaction."
-
-    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
-
-    if get_potential:
-        out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (4,), x.dtype)
-        f = jax.ffi.ffi_call("force", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(softening), get_potential=True)[0]
-        return f[..., :3], f[..., 3]  # Return force and potential separately
-    else:
-        out_type = jax.ShapeDtypeStruct(x.shape[:-1] + (3,), x.dtype)
-        f = jax.ffi.ffi_call("force", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(softening), get_potential=False)[0]
-        return f
-force_jit = jax.jit(force, static_argnames=("softening", "get_potential", "block_size"))
-
-def ilist_force(x, isplit, interactions=None, irange=None, mass=1., softening=1e-2, get_potential=True, block_size=32, interactions_per_block=None):
-    """A convenience interface to ilist_phi. Calling ilist_fphi directly is prefered"""
-    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
-    
-    fphi = ilist_fphi(xm, isplit, interactions, irange, softening=softening, block_size=block_size, interactions_per_block=interactions_per_block)
-
-    if get_potential:
-        return fphi[..., :3], fphi[..., 3]
-    else:
-        return fphi[..., :3]
-ilist_force_jit = jax.jit(ilist_force, static_argnames=("softening", "get_potential", "block_size", "interactions_per_block"))
-
-def ilist_fphi_fwd(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None, new=False):
+def ilist_fphi_fwd(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None):
     """
     Calculates forces and potential through an interaction list.
     isplit: offsets in the particle array that defines different nodes. Each node goes from isplit[i] to isplit[i+1], so len(isplit) = nnodes + 1
@@ -119,34 +62,26 @@ def ilist_fphi_fwd(xm, isplit, interactions=None, irange=None, softening=1e-2, b
     assert softening > 0, "Epsilon must be positive to deal with self-interaction."
 
     out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
-
     
-    if not new:
-        fphi = jax.ffi.ffi_call("ilist_fphi", (out_type,))(xm, isplit, interactions, irange, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
-    else:
-        fphi = jax.ffi.ffi_call("ilist_fphi_new", (out_type,))(xm, isplit, interactions, irange, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
+    fphi = jax.ffi.ffi_call("IlistForceAndPot", (out_type,))(xm, isplit, interactions, irange, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
 
     fphi = fphi.at[...,3].add(xm[...,3]/softening) # Remove self-interaction from potential
     
     return fphi, (xm, isplit, interactions, irange)
 
-def ilist_fphi_bwd(softening, block_size, interactions_per_block, new, res, g):
+def ilist_fphi_bwd(softening, block_size, interactions_per_block, res, g):
     xm, isplit, interactions, iminmax = res
     if interactions_per_block is None:
         interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
     out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
 
-    print("bwd")
-    if not new:
-        gxm = jax.ffi.ffi_call("ilist_fphi_bwd", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
-    else:
-        gxm = jax.ffi.ffi_call("ilist_fphi_new_bwd", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
+    gxm = jax.ffi.ffi_call("BwdIlistForceAndPot", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
 
     return (gxm, None, None, None)
 
-@partial(jax.custom_vjp, nondiff_argnames=("softening", "block_size", "interactions_per_block", "new"))
-def ilist_fphi(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None, new=False):
-    fphi, res = ilist_fphi_fwd(xm, isplit, interactions, irange, softening, block_size, interactions_per_block, new=new)
+@partial(jax.custom_vjp, nondiff_argnames=("softening", "block_size", "interactions_per_block"))
+def ilist_fphi(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None):
+    fphi, res = ilist_fphi_fwd(xm, isplit, interactions, irange, softening, block_size, interactions_per_block)
     return fphi
 ilist_fphi.defvjp(ilist_fphi_fwd, ilist_fphi_bwd)
 
