@@ -182,10 +182,74 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: IlistForceAndPotKernel                    */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error IlistForceAndPotKernelFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer xm,
+    ffi::AnyBuffer isplit,
+    ffi::AnyBuffer interactions,
+    ffi::AnyBuffer iminmax,
+    ffi::Result<ffi::AnyBuffer> fphi,
+    size_t interactions_per_block,
+    float epsilon,
+    size_t block_size
+) {
+    dim3 blockDim(block_size);
+    dim3 gridDim(div_ceil(interactions.element_count()/2, interactions_per_block));
+    size_t smem = 0;
+    
+    // Initialize output buffers
+    cudaMemsetAsync(fphi->untyped_data(), 0, fphi->size_bytes(), stream);
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    PMass* xm_val = reinterpret_cast<PMass*>(xm.untyped_data());
+    int32_t* isplit_val = reinterpret_cast<int32_t*>(isplit.untyped_data());
+    int2* interactions_val = reinterpret_cast<int2*>(interactions.untyped_data());
+    int* iminmax_val = reinterpret_cast<int*>(iminmax.untyped_data());
+    ForcePot* fphi_val = reinterpret_cast<ForcePot*>(fphi->untyped_data());
+
+    void* args[] = {
+        &xm_val,
+        &isplit_val,
+        &interactions_val,
+        &iminmax_val,
+        &fphi_val,
+        &interactions_per_block,
+        &epsilon
+    };
+    cudaLaunchKernel((const void*)IlistForceAndPotKernel, gridDim, blockDim, args, smem, stream);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    IlistForceAndPotKernelFFI, IlistForceAndPotKernelFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // xm
+        .Arg<ffi::AnyBuffer>() // isplit
+        .Arg<ffi::AnyBuffer>() // interactions
+        .Arg<ffi::AnyBuffer>() // iminmax
+        .Ret<ffi::AnyBuffer>() // fphi
+        .Attr<size_t>("interactions_per_block")
+        .Attr<float>("epsilon")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_forces, m) {
     m.def("ForceAndPotential", []() { return EncapsulateFfiCall(&ForceAndPotentialFFI); });
     m.def("GroupedForceAndPot", []() { return EncapsulateFfiCall(&GroupedForceAndPotFFI); });
+    m.def("IlistForceAndPotKernel", []() { return EncapsulateFfiCall(&IlistForceAndPotKernelFFI); });
 }

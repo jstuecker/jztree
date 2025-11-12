@@ -182,3 +182,87 @@ __global__ void GroupedForceAndPot(
 }
 
 #endif
+
+
+
+
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                            Old code                                            */
+/* ---------------------------------------------------------------------------------------------- */
+
+
+
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                           Ilist Force                                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+__device__ inline void atomicAddFloat4(float4* addr, const float4 val) {
+    atomicAdd(&addr->x, val.x);
+    atomicAdd(&addr->y, val.y);
+    atomicAdd(&addr->z, val.z);
+    atomicAdd(&addr->w, val.w);
+}
+
+__global__ void IlistForceAndPotKernel(
+    const PMass *xm,
+    const int32_t *isplit,
+    const int2 *interactions,
+    const int *iminmax,
+    ForcePot *fphi,
+    size_t interactions_per_block,
+    float epsilon
+) {
+    const int blocksize = blockDim.x;
+    float epsilon2 = epsilon * epsilon;
+
+    int imin = iminmax[0], imax = iminmax[1];
+
+    extern __shared__ PMass xmj_shared[];
+
+    for (int iint = 0; iint < interactions_per_block; iint++) {
+        int int_id = imin + blockIdx.x * interactions_per_block + iint;
+        if (int_id >= imax) {
+            return;
+        }
+
+        int2 interaction = interactions[int_id];
+        int iAstart = isplit[interaction.x], iAend = isplit[interaction.x + 1];
+        int iBstart = isplit[interaction.y], iBend = isplit[interaction.y + 1];
+
+        /* We have to have interactions between all particles of x[IAstart:IAend] with x[IBstart:IBend]*/
+        /* These may be larger than our warp's blocksize so that we have to loop individual parts of A and B */
+        int nA = iAend - iAstart, nB = iBend - iBstart;
+        for (int i = 0; i < nA; i += blocksize) {
+            ForcePot fphi_i = {0.f, 0.f, 0.f, 0.f};
+            PMass xmi = {0.f, 0.f, 0.f, 0.f};
+            int ioffA = i + threadIdx.x;
+
+            if(ioffA  < nA) {
+                xmi = xm[iAstart + ioffA];
+            }
+
+            for (int j = 0; j < nB; j += blocksize) {
+                int joffB = j + threadIdx.x;
+                if(joffB < nB) {
+                    xmj_shared[threadIdx.x] = xm[iBstart + joffB];
+                }
+                __syncthreads();
+
+                for (int k = 0; k < min(nB - j, blocksize); k++) {
+                    accumulateForceAndPot(xmi, xmj_shared[k], epsilon2, fphi_i);
+                }
+                __syncthreads();
+            }
+
+            if(ioffA < nA) {
+                // atomicAddFloat4(&fphi[iAstart + ioffA], fphi_i);
+                atomicAdd(&fphi[iAstart + ioffA].force.x, fphi_i.force.x);
+                atomicAdd(&fphi[iAstart + ioffA].force.y, fphi_i.force.y);
+                atomicAdd(&fphi[iAstart + ioffA].force.z, fphi_i.force.z);
+                atomicAdd(&fphi[iAstart + ioffA].pot, fphi_i.pot);    
+            }
+        }
+    }
+}
