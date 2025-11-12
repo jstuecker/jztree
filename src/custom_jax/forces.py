@@ -13,8 +13,8 @@ jax.ffi.register_ffi_target("force", ffi_old_forces.force(), platform="CUDA")
 jax.ffi.register_ffi_target("ilist_fphi", ffi_old_forces.ilist_fphi(), platform="CUDA")
 jax.ffi.register_ffi_target("ilist_fphi_bwd", ffi_old_forces.ilist_fphi_bwd(), platform="CUDA")
 
-jax.ffi.register_ffi_target("ilist_fphi_new", ffi_forces.IlistForceAndPotKernel(), platform="CUDA")
-
+jax.ffi.register_ffi_target("ilist_fphi_new", ffi_forces.IlistForceAndPot(), platform="CUDA")
+jax.ffi.register_ffi_target("ilist_fphi_new_bwd", ffi_forces.BwdIlistForceAndPot(), platform="CUDA")
 
 jax.ffi.register_ffi_target("ForceAndPotential", ffi_forces.ForceAndPotential(), platform="CUDA")
 
@@ -130,17 +130,21 @@ def ilist_fphi_fwd(xm, isplit, interactions=None, irange=None, softening=1e-2, b
     
     return fphi, (xm, isplit, interactions, irange)
 
-def ilist_fphi_bwd(softening, block_size, interactions_per_block, res, g):
+def ilist_fphi_bwd(softening, block_size, interactions_per_block, new, res, g):
     xm, isplit, interactions, iminmax = res
     if interactions_per_block is None:
         interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
     out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
 
-    gxm = jax.ffi.ffi_call("ilist_fphi_bwd", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
+    print("bwd")
+    if not new:
+        gxm = jax.ffi.ffi_call("ilist_fphi_bwd", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
+    else:
+        gxm = jax.ffi.ffi_call("ilist_fphi_new_bwd", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
 
     return (gxm, None, None, None)
 
-@partial(jax.custom_vjp, nondiff_argnames=("softening", "block_size", "interactions_per_block"))
+@partial(jax.custom_vjp, nondiff_argnames=("softening", "block_size", "interactions_per_block", "new"))
 def ilist_fphi(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None, new=False):
     fphi, res = ilist_fphi_fwd(xm, isplit, interactions, irange, softening, block_size, interactions_per_block, new=new)
     return fphi

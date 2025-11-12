@@ -63,8 +63,10 @@ kernels["ForceAndPotential"].grid_size_expression = "div_ceil(xm.element_count()
 kernels["ForceAndPotential"].smem_size_expression = "blockDim.x * sizeof(float4)"
 kernels["ForceAndPotential"].par["n"].expression = "xm.element_count()/4"
 
-kernels["IlistForceAndPotKernel"].grid_size_expression = "div_ceil(interactions.element_count()/2, interactions_per_block)"
-kernels["IlistForceAndPotKernel"].init_outputs_zero = True
+kernels["IlistForceAndPot"].grid_size_expression = "div_ceil(interactions.element_count()/2, interactions_per_block)"
+kernels["IlistForceAndPot"].init_outputs_zero = True
+kernels["BwdIlistForceAndPot"].grid_size_expression = "div_ceil(interactions.element_count()/2, interactions_per_block)"
+kernels["BwdIlistForceAndPot"].init_outputs_zero = True
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_forces.cu"), 

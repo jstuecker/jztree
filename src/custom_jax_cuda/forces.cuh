@@ -205,7 +205,7 @@ __device__ inline void atomicAddFloat4(float4* addr, const float4 val) {
     atomicAdd(&addr->w, val.w);
 }
 
-__global__ void IlistForceAndPotKernel(
+__global__ void IlistForceAndPot(
     const PMass *xm,
     const int32_t *isplit,
     const int2 *interactions,
@@ -262,6 +262,103 @@ __global__ void IlistForceAndPotKernel(
                 atomicAdd(&fphi[iAstart + ioffA].force.y, fphi_i.force.y);
                 atomicAdd(&fphi[iAstart + ioffA].force.z, fphi_i.force.z);
                 atomicAdd(&fphi[iAstart + ioffA].pot, fphi_i.pot);    
+            }
+        }
+    }
+}
+
+__forceinline__ __device__ void accumulateGradients(float4 xmi, float4 xmj, float4 gi, float4 gj, float epsilon2, float4 &gxmi) {
+    // calculates the vector jacobian product of the interaction between xmi and xmj
+    // gi and gj are the final gradient vectors of fphi_i and fphi_j, respectively.
+    // we have to back propagate the gradient towards a gradient with respect to xmi
+    // for understanding the maths, please consider the corresponding .ipynb notebook
+    float dx = xmj.x - xmi.x;
+    float dy = xmj.y - xmi.y;
+    float dz = xmj.z - xmi.z;
+    float mi = xmi.w;
+    float mj = xmj.w;
+
+    float r2 = dx*dx + dy*dy + dz*dz;
+    // Mask self-interaction. (It would have a very large contribution here, so subtracting it later is numerically bad.):
+    float rinv = r2 > 1e-10f ? rsqrtf(r2 + epsilon2) : 0.f; // 1e-30
+    float rinv2 = rinv*rinv;
+
+    float f1 = -rinv*rinv2;
+    float f2 = 3*rinv*rinv2*rinv2;
+
+    float3 gm_diff = {gi.x*mj - gj.x*mi, gi.y*mj - gj.y*mi, gi.z*mj - gj.z*mi};
+    float fgdiff = f2*(gm_diff.x * dx + gm_diff.y * dy + gm_diff.z * dz);
+    // This line handles the potential gradient:
+    fgdiff += f1 * (gi.w * mj + gj.w * mi);
+
+    gxmi.x += f1 * gm_diff.x + dx * fgdiff;
+    gxmi.y += f1 * gm_diff.y + dy * fgdiff;
+    gxmi.z += f1 * gm_diff.z + dz * fgdiff;
+
+    float dx_dot_gj = dx * gj.x + dy * gj.y + dz * gj.z;
+    gxmi.w += f1 * dx_dot_gj - rinv * gj.w; // first part for force, second for potential
+}
+
+__global__ void BwdIlistForceAndPot(
+    const float4 *gfphi,
+    const float4 *xm,
+    const int32_t *isplit,
+    const int2 *interactions,
+    const int *iminmax,
+    float4 *gxm,
+    size_t interactions_per_block,
+    float epsilon
+) {
+    const int blocksize = blockDim.x;
+    float epsilon2 = epsilon * epsilon;
+
+    int imin = iminmax[0], imax = iminmax[1];
+
+    extern __shared__ float4 shared_memory[];
+
+    float4* xmj_shared     = shared_memory;
+    float4* gfphi_j_shared = &shared_memory[blocksize];
+
+    for (int iint = 0; iint < interactions_per_block; iint++) {
+        int int_id = imin + blockIdx.x * interactions_per_block + iint;
+        if (int_id >= imax) {
+            return;
+        }
+
+        int2 interaction = interactions[int_id];
+        int iAstart = isplit[interaction.x], iAend = isplit[interaction.x + 1];
+        int iBstart = isplit[interaction.y], iBend = isplit[interaction.y + 1];
+
+        /* We have to have interactions between all particles of x[IAstart:IAend] with x[IBstart:IBend]*/
+        /* These may be larger than our warp's blocksize so that we have to loop individual parts of A and B */
+        int nA = iAend - iAstart, nB = iBend - iBstart;
+        for (int i = 0; i < nA; i += blocksize) {
+            float4 xmi = {0.f, 0.f, 0.f, 0.f};
+            float4 gxm_i = {0.f, 0.f, 0.f, 0.f};
+            float4 gfphi_i = {0.f, 0.f, 0.f, 0.f};
+            int ioffA = i + threadIdx.x;
+
+            if(ioffA  < nA) {
+                xmi = xm[iAstart + ioffA];
+                gfphi_i = gfphi[iAstart + ioffA];
+            }
+
+            for (int j = 0; j < nB; j += blocksize) {
+                int joffB = j + threadIdx.x;
+                if(joffB < nB) {
+                    xmj_shared[threadIdx.x] = xm[iBstart + joffB];
+                    gfphi_j_shared[threadIdx.x] = gfphi[iBstart + joffB];
+                }
+                __syncthreads();
+
+                for (int k = 0; k < min(nB - j, blocksize); k++) {
+                    accumulateGradients(xmi, xmj_shared[k], gfphi_i, gfphi_j_shared[k], epsilon2, gxm_i);
+                }
+                __syncthreads();
+            }
+
+            if(ioffA < nA) {
+                atomicAddFloat4(&gxm[iAstart + ioffA], gxm_i);
             }
         }
     }
