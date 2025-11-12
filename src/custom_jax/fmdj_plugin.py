@@ -9,17 +9,6 @@ variants = VariantManager()
 import custom_jax as cj
 import custom_jax.cj_new_tree as cnt
 
-# This decorator helps to convert config parameters to keyword arguments for the functions,
-# reducing boilerplate code when connecting the variants as below.
-def cfg_to_kwargs(func, kwargnames=()):
-    def wrapper(*args, cfg=None, **kwargs):
-        if cfg is not None:
-            for name in kwargnames:
-                if name not in kwargs:
-                    kwargs[name] = getattr(cfg, name)
-        return func(*args, **kwargs)
-    return wrapper
-
 # This function has a different signature, so we need to connect it manually.
 def _ilist_leaf_to_leaf_cj(xpart, mpart, leaf_bounds, interactions, irange, cfg : config.Config):
     xm = jnp.concatenate([xpart, mpart[:, None]], axis=-1)
@@ -31,15 +20,12 @@ def direct_summation_force_cj(xpart, mpart, cfg : config.Config):
     fphi = cj.forces.ilist_fphi.jit(xm, ispl, ilist, softening=cfg.softening, block_size=64, interactions_per_block=16)
     fphi = cfg.G() * fphi
 
-    if cfg.get_potential:
-        return fphi[..., :3], fphi[..., 3]
-    else:
-        return fphi[..., :3]
+    return fphi[..., :3]
 
 def register():
     if has_gpu():
-        variants[V.ilist_node_to_node][TAG] = Variant(cfg_to_kwargs(cj.multipoles.ilist_node_to_node, ("p", "softening")))
-        variants[V.ilist_leaf_to_node][TAG] = Variant(cfg_to_kwargs(cj.multipoles.ilist_leaf_to_node, ("p", "softening")))
+        variants[V.ilist_node_to_node][TAG] = Variant(cj.multipoles.ilist_node_to_node)
+        variants[V.ilist_leaf_to_node][TAG] = Variant(cj.multipoles.ilist_leaf_to_node)
         variants[V.ilist_leaf_to_leaf][TAG] = Variant(_ilist_leaf_to_leaf_cj)
         variants[V.direct_summation_force][TAG] = Variant(direct_summation_force_cj)
         variants[V.multipoles_from_particles][TAG] = Variant(cnt.multipoles_from_particles)

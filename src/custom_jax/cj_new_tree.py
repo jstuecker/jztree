@@ -3,7 +3,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from fmdj.config import Config, TreeConfig
+from fmdj.config import Config, FMMConfig
 from fmdj.new_tree import dense_interaction_list
 from fmdj.multipoles import shift_local_to_local
 
@@ -24,7 +24,7 @@ from fmdj.new_tree import TreePlane, Multipoles, Particles, InteractionList
 
 
 def multipoles_from_particles(tp: TreePlane, part: Particles, *, cfg: Config) -> Multipoles:
-    cfg_tree: TreeConfig = cfg.tree
+    cfg_tree: FMMConfig = cfg.fmm
 
     assert cfg_tree.multipoles_around_com
 
@@ -94,7 +94,7 @@ def cj_evaluate_tree_plane(
         spl_nodes = plane_lr.ispl
         node_range = jnp.array([0, plane_lr.nnodes], dtype=jnp.int32)
     
-    cfg_tree: TreeConfig = cfg.tree
+    cfg_tree: FMMConfig = cfg.fmm
     nint_out = cfg_tree.ilist_alloc_fac * plane.size()
 
     children = jnp.concatenate((plane.mp.center(), plane.lvl.view(jnp.float32)[...,None]), axis=-1)
@@ -111,7 +111,7 @@ def cj_evaluate_tree_plane(
         node_range, spl_nodes, ilist_lr.ispl, ilist_lr.iother, children, plane.mp.values,
         p=np.int32(cfg_tree.p),
         softening=np.float32(cfg.softening),
-        opening_angle=np.float32(cfg.opening.opening_angle)
+        opening_angle=np.float32(cfg.fmm.opening_angle)
     )
 
     # Insert interactions
@@ -123,7 +123,7 @@ def cj_evaluate_tree_plane(
         (out_child_ilist,)
     )(
         node_range, spl_nodes, ilist_lr.ispl, ilist_lr.iother, children, ispl_child,
-        opening_angle=np.float32(cfg.opening.opening_angle)
+        opening_angle=np.float32(cfg.fmm.opening_angle)
     )[0]
 
     # Create interaction list from outputs
@@ -154,8 +154,8 @@ def cj_new_force_and_pot(particles: Particles,
         jax.ShapeDtypeStruct((particles.pos.shape[0], 4), jnp.float32),
     ))(
         node_range, plane.ispl, ilist.ispl, ilist.iother, particles.posm(),
-        softening=np.float32(cfg.softening), max_leaf_size=np.int32(cfg.tree.max_leaf_size),
-        kahan=bool(cfg.tree.kahan_summation)
+        softening=np.float32(cfg.softening), max_leaf_size=np.int32(cfg.fmm.max_leaf_size),
+        kahan=bool(cfg.fmm.kahan_summation)
     )[0]
 
     fphi = fphi.at[...,3].add(particles.mass/cfg.softening) # Remove self-interaction from potential
