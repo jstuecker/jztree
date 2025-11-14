@@ -11,19 +11,16 @@ jax.ffi.register_ffi_target("IlistForceAndPot", ffi_forces.IlistForceAndPot(), p
 jax.ffi.register_ffi_target("BwdIlistForceAndPot", ffi_forces.BwdIlistForceAndPot(), platform="CUDA")
 jax.ffi.register_ffi_target("ForceAndPotential", ffi_forces.ForceAndPotential(), platform="CUDA")
 
-def force_and_potential(x, mass=1., block_size=64, softening=1e-2, kahan=False):
-    assert x.dtype == jnp.float32
-    assert x.shape[-1] == 3
-    assert x.ndim >= 2
+def force_and_potential(xm, block_size=64, softening=1e-2, kahan=False):
+    assert xm.dtype == jnp.float32
+    assert xm.shape[-1] == 4
+    assert xm.ndim >= 2
     
     assert softening > 0, "Epsilon must be positive to deal with self-interaction."
 
-    # Reading on GPU will be more efficient if we read pos and mass together as single float4 values
-    xm = jnp.concatenate([x, jnp.broadcast_to(mass, x.shape[:-1])[:,None]], axis=-1)
-
     out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
-    fphi = jax.ffi.ffi_call("ForceAndPotential", (out_type,))(xm, block_size=np.uint64(block_size), epsilon=np.float32(softening),
-                                                              kahan=kahan)[0]
+    fphi = jax.ffi.ffi_call("ForceAndPotential", (out_type,))(
+        xm, block_size=np.uint64(block_size), epsilon=np.float32(softening), kahan=kahan)[0]
     return fphi
 force_and_potential.jit = jax.jit(force_and_potential, static_argnames=("block_size", "softening", "kahan"))
 
