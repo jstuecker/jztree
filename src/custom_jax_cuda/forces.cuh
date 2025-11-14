@@ -60,7 +60,12 @@ __forceinline__ __device__ void accumulateForceAndPotKahan(
 /* ---------------------------------------------------------------------------------------------- */
 
 template <bool kahan>
-__global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float epsilon) {
+__global__ void ForceAndPotential(
+    const PMass *xm,
+    ForcePot *fphi,
+    int n,
+    float epsilon
+) {
     const int steps = div_ceil(n, blockDim.x);
     float epsilon2 = epsilon * epsilon;
 
@@ -90,6 +95,45 @@ __global__ void ForceAndPotential(const PMass *xm, ForcePot *fphi, int n, float 
     fphi_i.pot += xmi.mass / epsilon; // remove self-interaction from potential
 
     fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
+}
+
+template <bool kahan>
+__global__ void BwdForceAndPotential(
+    const float4 *gfphi,
+    const PMass *xm,
+    float4 *gxm,
+    int n,
+    float epsilon
+) {
+    // const int steps = div_ceil(n, blockDim.x);
+    // float epsilon2 = epsilon * epsilon;
+
+    // PMass xmi = xm[blockIdx.x * blockDim.x + threadIdx.x];
+
+    // extern __shared__ PMass xmj_shared[];
+
+    // ForcePot fphi_i = {0.f, 0.f, 0.f, 0.f};
+    // ForcePot fphi_kahan = {0.f, 0.f, 0.f, 0.f};
+
+    // for (int jblock = 0; jblock < steps; jblock += 1) {
+    //     int num = min(blockDim.x, n - blockDim.x * jblock);
+
+    //     __syncthreads();
+    //     if(threadIdx.x < num)
+    //         xmj_shared[threadIdx.x] = xm[jblock * blockDim.x + threadIdx.x];
+    //     __syncthreads();
+
+    //     for (int j = 0; j < num; j++) {
+    //         if(kahan)
+    //             accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
+    //         else
+    //             accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+    //     }
+    // }
+
+    // fphi_i.pot += xmi.mass / epsilon; // remove self-interaction from potential
+
+    // fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
 }
 
 /* ---------------------------------------------------------------------------------------------- */

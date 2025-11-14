@@ -93,6 +93,81 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: BwdForceAndPotential                      */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error BwdForceAndPotentialFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer gfphi,
+    ffi::AnyBuffer xm,
+    ffi::Result<ffi::AnyBuffer> gxm,
+    float epsilon,
+    bool kahan,
+    size_t block_size
+) {
+    int n = xm.element_count()/4;
+    dim3 blockDim(block_size);
+    dim3 gridDim(div_ceil(xm.element_count()/4, block_size));
+    size_t smem = blockDim.x * sizeof(float4);
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    float4* gfphi_val = reinterpret_cast<float4*>(gfphi.untyped_data());
+    PMass* xm_val = reinterpret_cast<PMass*>(xm.untyped_data());
+    float4* gxm_val = reinterpret_cast<float4*>(gxm->untyped_data());
+
+    void* args[] = {
+        &gfphi_val,
+        &xm_val,
+        &gxm_val,
+        &n,
+        &epsilon
+    };
+    
+    // We have template parameters, so we need to instantiate all valid templates
+    // For this we select a function pointer through a map
+    using TTuple = std::tuple<bool>;
+    using TFunctionType = decltype(BwdForceAndPotential<true>);
+
+    std::map<TTuple, TFunctionType*> instance_map;
+    instance_map[{true}] = BwdForceAndPotential<true>;
+    instance_map[{false}] = BwdForceAndPotential<false>;
+
+    auto it = instance_map.find({kahan});
+
+    if(it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (kahan)"\
+            " in BwdForceAndPotentialFFIHost -- Only supporting:\n"\
+            "(true), (false)"
+        );
+    }
+
+    TFunctionType* instance = it->second;
+    
+    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    BwdForceAndPotentialFFI, BwdForceAndPotentialFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // gfphi
+        .Arg<ffi::AnyBuffer>() // xm
+        .Ret<ffi::AnyBuffer>() // gxm
+        .Attr<float>("epsilon")
+        .Attr<bool>("kahan")
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: GroupedForceAndPot                        */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -317,6 +392,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 NB_MODULE(ffi_forces, m) {
     m.def("ForceAndPotential", []() { return EncapsulateFfiCall(&ForceAndPotentialFFI); });
+    m.def("BwdForceAndPotential", []() { return EncapsulateFfiCall(&BwdForceAndPotentialFFI); });
     m.def("GroupedForceAndPot", []() { return EncapsulateFfiCall(&GroupedForceAndPotFFI); });
     m.def("IlistForceAndPot", []() { return EncapsulateFfiCall(&IlistForceAndPotFFI); });
     m.def("BwdIlistForceAndPot", []() { return EncapsulateFfiCall(&BwdIlistForceAndPotFFI); });
