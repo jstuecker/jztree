@@ -11,7 +11,7 @@ struct NodeWithExt {
     float3 extent;
 };
 
-struct __align__(16) PMass {
+struct __align__(16) PosMass {
     union {
         struct {
             union {
@@ -24,11 +24,6 @@ struct __align__(16) PMass {
         };
         float4 f4;
     };
-};
-
-// redundant... get rid of it later!
-struct __align__(16) PosMass {
-    float x, y, z, mass;
 };
 
 struct __align__(16) PosId {

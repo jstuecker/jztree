@@ -10,8 +10,8 @@
 /* ---------------------------------------------------------------------------------------------- */
 
 __forceinline__ __device__ ForcePot GetForceAndPot(
-    PMass xmi, 
-    PMass xmj, 
+    PosMass xmi, 
+    PosMass xmj, 
     float softening2
 ) {
     float3 dx = xmj.pos - xmi.pos;
@@ -26,8 +26,8 @@ __forceinline__ __device__ ForcePot GetForceAndPot(
     return fphi;
 }
 
-__forceinline__ __device__ PMass VJP_GFPhiToGXM(
-    const PMass xmi, const PMass xmj, 
+__forceinline__ __device__ PosMass VJP_GFPhiToGXM(
+    const PosMass xmi, const PosMass xmj, 
     const ForcePot gi, const ForcePot gj, 
     float epsilon2
 ) {
@@ -46,7 +46,7 @@ __forceinline__ __device__ PMass VJP_GFPhiToGXM(
     float3 gm_diff = xmj.mass * gi.force - xmi.mass * gj.force;
     float fgdiff = f2*dot(gm_diff, dx) + f1 * (gi.pot * xmj.mass + gj.pot * xmi.mass);
 
-    PMass gxmi;
+    PosMass gxmi;
 
     gxmi.pos = f1 * gm_diff + fgdiff * dx;
     gxmi.mass = f1 * dot(dx, gj.force) - rinv * gj.pot;
@@ -60,7 +60,7 @@ __forceinline__ __device__ PMass VJP_GFPhiToGXM(
 
 template <bool kahan>
 __global__ void ForceAndPotential(
-    const PMass *xm,
+    const PosMass *xm,
     ForcePot *fphi,
     int n,
     float epsilon
@@ -69,11 +69,11 @@ __global__ void ForceAndPotential(
     float epsilon2 = epsilon * epsilon;
 
     int ipart = blockIdx.x * blockDim.x + threadIdx.x;
-    PMass xmi;
+    PosMass xmi;
     if(ipart < n)
         xmi = xm[ipart];
 
-    extern __shared__ PMass xmj_shared[];
+    extern __shared__ PosMass xmj_shared[];
 
     ForcePot fphi_i = {0.f, 0.f, 0.f, 0.f};
     ForcePot fphi_kahan = {0.f, 0.f, 0.f, 0.f};
@@ -104,15 +104,15 @@ __global__ void ForceAndPotential(
 template <bool kahan>
 __global__ void BwdForceAndPotential(
     const ForcePot *gfphi,
-    const PMass *xm,
-    PMass *gxm,
+    const PosMass *xm,
+    PosMass *gxm,
     int n,
     float epsilon
 ) {
     const int steps = div_ceil(n, blockDim.x);
     float epsilon2 = epsilon * epsilon;
 
-    PMass xmi;
+    PosMass xmi;
     ForcePot gfphi_i;
 
     int ipart = blockIdx.x * blockDim.x + threadIdx.x;
@@ -121,11 +121,11 @@ __global__ void BwdForceAndPotential(
         gfphi_i = gfphi[ipart];
     }
 
-    extern __shared__ PMass xmj_shared[];
+    extern __shared__ PosMass xmj_shared[];
     ForcePot* gfphi_j_shared = (ForcePot*) &xmj_shared[blockDim.x];
 
-    PMass gxm_i = {0.f, 0.f, 0.f, 0.f};
-    PMass gxm_i_kahan = {0.f, 0.f, 0.f, 0.f};
+    PosMass gxm_i = {0.f, 0.f, 0.f, 0.f};
+    PosMass gxm_i_kahan = {0.f, 0.f, 0.f, 0.f};
 
     for (int jblock = 0; jblock < steps; jblock += 1) {
         int num = min(blockDim.x, n - blockDim.x * jblock);
@@ -138,7 +138,7 @@ __global__ void BwdForceAndPotential(
         __syncthreads();
 
         for (int j = 0; j < num; j++) {
-            PMass gxm_inc = VJP_GFPhiToGXM(
+            PosMass gxm_inc = VJP_GFPhiToGXM(
                 xmi, xmj_shared[j],
                 gfphi_i, gfphi_j_shared[j],
                 epsilon2
@@ -165,7 +165,7 @@ __global__ void GroupedForceAndPot(
     const int* spl_nodes,
     const int* spl_ilist,
     const int* ilist_nodes,
-    const PMass* posm,
+    const PosMass* posm,
     // outputs:
     ForcePot* fphi,
     // attributes:
@@ -194,7 +194,7 @@ __global__ void GroupedForceAndPot(
     //  but later discard their result)
     int valid = threadIdx.x < num * n_write;
 
-    PMass xaWrite = posm[prange.x + a_write];
+    PosMass xaWrite = posm[prange.x + a_write];
 
     __shared__ int2 segments[32];
     SegmentManager seg_mgr(
@@ -209,7 +209,7 @@ __global__ void GroupedForceAndPot(
     ForcePot fphi_a = {0.f,0.f,0.f,0.f};
     ForcePot fphi_a_kahan = {0.f,0.f,0.f,0.f};
 
-    extern __shared__ PMass xm_b[];
+    extern __shared__ PosMass xm_b[];
 
     while(!seg_mgr.finished()) {
         int id = seg_mgr.next();
@@ -266,7 +266,7 @@ __device__ inline void atomicAddFloat4(float4* addr, const float4 val) {
 }
 
 __global__ void IlistForceAndPot(
-    const PMass *xm,
+    const PosMass *xm,
     const int32_t *isplit,
     const int2 *interactions,
     const int *iminmax,
@@ -279,7 +279,7 @@ __global__ void IlistForceAndPot(
 
     int imin = iminmax[0], imax = iminmax[1];
 
-    extern __shared__ PMass xmj_shared[];
+    extern __shared__ PosMass xmj_shared[];
 
     for (int iint = 0; iint < interactions_per_block; iint++) {
         int int_id = imin + blockIdx.x * interactions_per_block + iint;
@@ -296,7 +296,7 @@ __global__ void IlistForceAndPot(
         int nA = iAend - iAstart, nB = iBend - iBstart;
         for (int i = 0; i < nA; i += blocksize) {
             ForcePot fphi_i = {0.f, 0.f, 0.f, 0.f};
-            PMass xmi = {0.f, 0.f, 0.f, 0.f};
+            PosMass xmi = {0.f, 0.f, 0.f, 0.f};
             int ioffA = i + threadIdx.x;
 
             if(ioffA  < nA) {
@@ -316,12 +316,8 @@ __global__ void IlistForceAndPot(
                 __syncthreads();
             }
 
-            if(ioffA < nA) {
-                // atomicAddFloat4(&fphi[iAstart + ioffA], fphi_i);
-                atomicAdd(&fphi[iAstart + ioffA].force.x, fphi_i.force.x);
-                atomicAdd(&fphi[iAstart + ioffA].force.y, fphi_i.force.y);
-                atomicAdd(&fphi[iAstart + ioffA].force.z, fphi_i.force.z);
-                atomicAdd(&fphi[iAstart + ioffA].pot, fphi_i.pot);    
+            if(ioffA < nA) {    
+                atomicAddFloat4(&fphi[iAstart + ioffA].f4, fphi_i.f4);
             }
         }
     }
