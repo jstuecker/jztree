@@ -108,7 +108,7 @@ ffi::Error BwdForceAndPotentialFFIHost(
     int n = xm.element_count()/4;
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(xm.element_count()/4, block_size));
-    size_t smem = blockDim.x * sizeof(float4);
+    size_t smem = 2 * blockDim.x * sizeof(float4);
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer

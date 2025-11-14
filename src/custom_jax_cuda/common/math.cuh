@@ -17,6 +17,56 @@ __device__ __forceinline__ float norm2(float3 a) {
     return a.x * a.x + a.y * a.y + a.z * a.z;
 }
 
+__host__ __device__ __forceinline__
+float4 operator+(float4 a, float4 b) {
+    return make_float4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
+}
+
+__host__ __device__ __forceinline__
+float3 operator+(float3 a, float3 b) {
+    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
+}
+
+__host__ __device__ __forceinline__
+float3 operator-(float3 a, float3 b) {
+    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+__host__ __device__ __forceinline__
+float4 operator-(float4 a, float4 b) {
+    return make_float4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w);
+}
+
+__host__ __device__ __forceinline__
+float3 operator*(float a, float3 b) {
+    return make_float3(a * b.x, a * b.y, a * b.z);
+}
+
+__host__ __device__ __forceinline__
+float4 operator*(float a, float4 b) {
+    return make_float4(a * b.x, a * b.y, a * b.z, a * b.w);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                                         Kahan Summation                                        */
+/* ---------------------------------------------------------------------------------------------- */
+
+__forceinline__ __device__ void kahan_add(float &sum, float add, float &c) {
+    // Cancels summation error with an extra variable c, that needs to start at 0
+    // https://en.wikipedia.org/wiki/Kahan_summation_algorithm
+    float y = add - c;
+    float t = sum + y;
+    c = (t - sum) - y;
+    sum = t;
+}
+
+__forceinline__ __device__ void kahan_add_f4(float4 &sum, float4 add, float4 &c) {
+    kahan_add(sum.x, add.x, c.x);
+    kahan_add(sum.y, add.y, c.y);
+    kahan_add(sum.z, add.z, c.z);
+    kahan_add(sum.w, add.w, c.w);
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                          Integer Math                                          */
 /* ---------------------------------------------------------------------------------------------- */

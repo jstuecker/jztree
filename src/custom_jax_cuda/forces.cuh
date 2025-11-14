@@ -9,59 +9,21 @@
 /*                                        Helper Functions                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-__forceinline__ __device__ void kahan_add(float &sum, float add, float &c) {
-    // Cancels summation error with an extra variable c, that needs to start at 0
-    // https://en.wikipedia.org/wiki/Kahan_summation_algorithm
-    float y = add - c;
-    float t = sum + y;
-    c = (t - sum) - y;
-    sum = t;
-}
-
 __forceinline__ __device__ ForcePot GetForceAndPot(
     PMass xmi, 
     PMass xmj, 
     float softening2
 ) {
-    float3 dx = float3diff(xmj.pos, xmi.pos);
+    float3 dx = xmj.pos - xmi.pos;
     float rinv = rsqrtf(norm2(dx) + softening2);
-
     float minvr = xmj.mass * rinv;
-    float minvr3 = minvr * rinv * rinv;
 
     ForcePot fphi = {
-        {minvr3 * dx.x, minvr3 * dx.y, minvr3 * dx.z},
+        (minvr * rinv * rinv) * dx,
         -minvr
     };
 
     return fphi;
-}
-
-__forceinline__ __device__ void accumulateForceAndPot(
-    PMass xmi, 
-    PMass xmj, 
-    float softening2, 
-    ForcePot &fphi_i
-) {
-    ForcePot fphi = GetForceAndPot(xmi, xmj, softening2);
-    fphi_i.force.x += fphi.force.x;
-    fphi_i.force.y += fphi.force.y;
-    fphi_i.force.z += fphi.force.z;
-    fphi_i.pot     += fphi.pot;
-}
-
-__forceinline__ __device__ void accumulateForceAndPotKahan(
-    PMass xmi, 
-    PMass xmj, 
-    float softening2, 
-    ForcePot &fphi_i,
-    ForcePot &fphi_kahan
-) {
-    ForcePot fphi = GetForceAndPot(xmi, xmj, softening2);
-    kahan_add(fphi_i.force.x, fphi.force.x, fphi_kahan.force.x);
-    kahan_add(fphi_i.force.y, fphi.force.y, fphi_kahan.force.y);
-    kahan_add(fphi_i.force.z, fphi.force.z, fphi_kahan.force.z);
-    kahan_add(fphi_i.pot,     fphi.pot,     fphi_kahan.pot);
 }
 
 __forceinline__ __device__ float4 VJP_GFPhiToGXM(
@@ -73,7 +35,7 @@ __forceinline__ __device__ float4 VJP_GFPhiToGXM(
     // gi and gj are the final gradient vectors of fphi_i and fphi_j, respectively.
     // we have to back propagate the gradient towards a gradient with respect to xmi
     // for understanding the maths, please consider the corresponding .ipynb notebook
-    float3 dx = float3diff(xmj.pos, xmi.pos);
+    float3 dx = xmj.pos - xmi.pos;
     float r2 = norm2(dx);
     float rinv = r2 > 1e-10f * epsilon2 ? rsqrtf(r2 + epsilon2) : 0.f;
     float rinv2 = rinv*rinv;
@@ -148,10 +110,11 @@ __global__ void ForceAndPotential(
         __syncthreads();
 
         for (int j = 0; j < num; j++) {
+            ForcePot fphi_new = GetForceAndPot(xmi, xmj_shared[j], epsilon2);
             if(kahan)
-                accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
+                kahan_add_f4(fphi_i.f4, fphi_new.f4, fphi_kahan.f4);
             else
-                accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
+                fphi_i.f4 = fphi_i.f4 + fphi_new.f4;
         }
     }
 
@@ -198,10 +161,6 @@ __global__ void BwdForceAndPotential(
         __syncthreads();
 
         for (int j = 0; j < num; j++) {
-            // if(kahan)
-            //     accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
-            // else
-
             accumulateVJP_GFPhiToGXM(
                 xmi, xmj_shared[j],
                 gfphi_i, gfphi_j_shared[j],
@@ -270,8 +229,8 @@ __global__ void GroupedForceAndPot(
         32
     );
 
-    ForcePot fphi_a = {{0.f,0.f,0.f}, 0.f};
-    ForcePot fphi_a_kahan = {{0.f,0.f,0.f}, 0.f};
+    ForcePot fphi_a = {0.f,0.f,0.f,0.f};
+    ForcePot fphi_a_kahan = {0.f,0.f,0.f,0.f};
 
     extern __shared__ PMass xm_b[];
 
@@ -286,10 +245,11 @@ __global__ void GroupedForceAndPot(
 
         // Now compute interactions
         for(int ib=read_b_offset; ib < seg_mgr.num_loaded; ib += n_write) {
+            ForcePot fphi_new = GetForceAndPot(xaWrite, xm_b[ib], softening2);
             if(kahan)
-                accumulateForceAndPotKahan(xaWrite, xm_b[ib], softening2, fphi_a, fphi_a_kahan);
+                kahan_add_f4(fphi_a.f4, fphi_new.f4, fphi_a_kahan.f4);
             else
-                accumulateForceAndPot(xaWrite, xm_b[ib], softening2, fphi_a);
+                fphi_a.f4 = fphi_a.f4 + fphi_new.f4;
         }
 
         __syncthreads();
@@ -374,7 +334,7 @@ __global__ void IlistForceAndPot(
                 __syncthreads();
 
                 for (int k = 0; k < min(nB - j, blocksize); k++) {
-                    accumulateForceAndPot(xmi, xmj_shared[k], epsilon2, fphi_i);
+                    fphi_i.f4 = fphi_i.f4 + GetForceAndPot(xmi, xmj_shared[k], epsilon2).f4;
                 }
                 __syncthreads();
             }

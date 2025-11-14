@@ -12,8 +12,18 @@ struct NodeWithExt {
 };
 
 struct __align__(16) PMass {
-    float3 pos;
-    float mass;
+    union {
+        struct {
+            union {
+                struct {
+                    float x, y, z;
+                };
+                float3 pos;
+            };
+            float mass;
+        };
+        float4 f4;
+    };
 };
 
 // redundant... get rid of it later!
@@ -27,8 +37,14 @@ struct __align__(16) PosId {
 };
 
 struct __align__(16) ForcePot {
-    float3 force;
-    float  pot;
+    union {
+        struct {
+            float3 force;
+            float  pot;
+        };
+
+        float4 f4;
+    };
 };
 
 #endif // COMMON_DATA_H
