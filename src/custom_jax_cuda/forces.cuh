@@ -9,24 +9,6 @@
 /*                                        Helper Functions                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-__forceinline__ __device__ void accumulateForceAndPot(
-    PMass xmi, 
-    PMass xmj, 
-    float softening2, 
-    ForcePot &fphi_i
-) {
-    float3 dx = float3diff(xmj.pos, xmi.pos);
-    float rinv = rsqrtf(norm2(dx) + softening2);
-
-    float minvr = xmj.mass * rinv;
-    float minvr3 = minvr * rinv * rinv;
-
-    fphi_i.force.x += minvr3 * dx.x;
-    fphi_i.force.y += minvr3 * dx.y;
-    fphi_i.force.z += minvr3 * dx.z;
-    fphi_i.pot += -minvr;
-}
-
 __forceinline__ __device__ void kahan_add(float &sum, float add, float &c) {
     // Cancels summation error with an extra variable c, that needs to start at 0
     // https://en.wikipedia.org/wiki/Kahan_summation_algorithm
@@ -36,6 +18,38 @@ __forceinline__ __device__ void kahan_add(float &sum, float add, float &c) {
     sum = t;
 }
 
+__forceinline__ __device__ ForcePot GetForceAndPot(
+    PMass xmi, 
+    PMass xmj, 
+    float softening2
+) {
+    float3 dx = float3diff(xmj.pos, xmi.pos);
+    float rinv = rsqrtf(norm2(dx) + softening2);
+
+    float minvr = xmj.mass * rinv;
+    float minvr3 = minvr * rinv * rinv;
+
+    ForcePot fphi = {
+        {minvr3 * dx.x, minvr3 * dx.y, minvr3 * dx.z},
+        -minvr
+    };
+
+    return fphi;
+}
+
+__forceinline__ __device__ void accumulateForceAndPot(
+    PMass xmi, 
+    PMass xmj, 
+    float softening2, 
+    ForcePot &fphi_i
+) {
+    ForcePot fphi = GetForceAndPot(xmi, xmj, softening2);
+    fphi_i.force.x += fphi.force.x;
+    fphi_i.force.y += fphi.force.y;
+    fphi_i.force.z += fphi.force.z;
+    fphi_i.pot     += fphi.pot;
+}
+
 __forceinline__ __device__ void accumulateForceAndPotKahan(
     PMass xmi, 
     PMass xmj, 
@@ -43,23 +57,17 @@ __forceinline__ __device__ void accumulateForceAndPotKahan(
     ForcePot &fphi_i,
     ForcePot &fphi_kahan
 ) {
-    float3 dx = float3diff(xmj.pos, xmi.pos);
-    float rinv = rsqrtf(norm2(dx) + softening2);
-
-    float minvr = xmj.mass * rinv;
-    float minvr3 = minvr * rinv * rinv;
-    
-    kahan_add(fphi_i.force.x, minvr3 * dx.x, fphi_kahan.force.x);
-    kahan_add(fphi_i.force.y, minvr3 * dx.y, fphi_kahan.force.y);
-    kahan_add(fphi_i.force.z, minvr3 * dx.z, fphi_kahan.force.z);
-    kahan_add(fphi_i.pot, -minvr, fphi_kahan.pot);
+    ForcePot fphi = GetForceAndPot(xmi, xmj, softening2);
+    kahan_add(fphi_i.force.x, fphi.force.x, fphi_kahan.force.x);
+    kahan_add(fphi_i.force.y, fphi.force.y, fphi_kahan.force.y);
+    kahan_add(fphi_i.force.z, fphi.force.z, fphi_kahan.force.z);
+    kahan_add(fphi_i.pot,     fphi.pot,     fphi_kahan.pot);
 }
 
-__forceinline__ __device__ void accumulateGradientsGFPhiToGXM(
+__forceinline__ __device__ float4 VJP_GFPhiToGXM(
     const PMass xmi, const PMass xmj, 
     const float4 gi, const float4 gj, 
-    float epsilon2, 
-    float4 &gxmi
+    float epsilon2
 ) {
     // calculates the vector jacobian product of the interaction between xmi and xmj
     // gi and gj are the final gradient vectors of fphi_i and fphi_j, respectively.
@@ -82,12 +90,29 @@ __forceinline__ __device__ void accumulateGradientsGFPhiToGXM(
     // This line handles the potential gradient:
     fgdiff += f1 * (gi.w * xmj.mass + gj.w * xmi.mass);
 
-    gxmi.x += f1 * gm_diff.x + dx.x * fgdiff;
-    gxmi.y += f1 * gm_diff.y + dx.y * fgdiff;
-    gxmi.z += f1 * gm_diff.z + dx.z * fgdiff;
+    float4 gxmi;
+
+    gxmi.x = f1 * gm_diff.x + dx.x * fgdiff;
+    gxmi.y = f1 * gm_diff.y + dx.y * fgdiff;
+    gxmi.z = f1 * gm_diff.z + dx.z * fgdiff;
 
     float dx_dot_gj = dx.x * gj.x + dx.y * gj.y + dx.z * gj.z;
-    gxmi.w += f1 * dx_dot_gj - rinv * gj.w; // first part for force, second for potential
+    gxmi.w = f1 * dx_dot_gj - rinv * gj.w; // first part for force, second for potential
+
+    return gxmi;
+}
+
+__forceinline__ __device__ void accumulateVJP_GFPhiToGXM(
+    const PMass xmi, const PMass xmj, 
+    const float4 gi, const float4 gj, 
+    float epsilon2, 
+    float4 &gxmi
+) {
+    float4 gxmi_inc = VJP_GFPhiToGXM(xmi, xmj, gi, gj, epsilon2);
+    gxmi.x += gxmi_inc.x;
+    gxmi.y += gxmi_inc.y;
+    gxmi.z += gxmi_inc.z;
+    gxmi.w += gxmi_inc.w;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -177,7 +202,7 @@ __global__ void BwdForceAndPotential(
             //     accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
             // else
 
-            accumulateGradientsGFPhiToGXM(
+            accumulateVJP_GFPhiToGXM(
                 xmi, xmj_shared[j],
                 gfphi_i, gfphi_j_shared[j],
                 epsilon2,
