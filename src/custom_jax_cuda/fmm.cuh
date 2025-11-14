@@ -15,9 +15,8 @@ __device__ __forceinline__ bool OpeningCriterion(
     NodeWithExt nodeB,
     float opening_angle
 ) {
-    float r2 = norm2(float3diff(nodeA.center, nodeB.center));
-    // float L2 = norm2(float3sum(nodeA.extent, nodeB.extent));
-    float3 Ltot = float3sum(nodeA.extent, nodeB.extent);
+    float r2 = norm2(nodeA.center - nodeB.center);
+    float3 Ltot = nodeA.extent + nodeB.extent;
     float Lmax = fmaxf(fmaxf(Ltot.x, Ltot.y), Ltot.z);
     float L2 = Lmax * Lmax;
 
@@ -211,7 +210,7 @@ __global__ void CountInteractionsAndM2L(
                     mp[k] = mpB[k][b_read];
                 }
 
-                float3 dx = float3diff(posB[b_read], xaWrite);
+                float3 dx = posB[b_read] - xaWrite;
 
                 m2l_translator<p>(dx, mp, LocA, softening*softening);
             }

@@ -5,14 +5,6 @@
 /*                                           Vector Math                                          */
 /* ---------------------------------------------------------------------------------------------- */
 
-__device__ __forceinline__ float3 float3sum(float3 a, float3 b) {
-    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
-__device__ __forceinline__ float3 float3diff(float3 a, float3 b) {
-    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
 __device__ __forceinline__ float norm2(float3 a) {
     return a.x * a.x + a.y * a.y + a.z * a.z;
 }
