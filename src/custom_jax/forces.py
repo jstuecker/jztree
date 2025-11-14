@@ -88,7 +88,6 @@ def dense_ilist(n, bls):
 
 # ======= Some reference implemetations that can be used for testing =======
 
-
 def potential_pure_jax(x, m=1., softening=1e-2):
     rij2 = jnp.sum((x[:, None, :] - x[None, :, :]) ** 2, axis=-1)
     rinv = jnp.where(rij2 > 0, 1. / jnp.sqrt(rij2 + softening**2), 0.)
@@ -103,3 +102,10 @@ def force_pure_jax(x, m=1., softening=1e-2):
     
     return -jnp.sum(dx * rinv**3 * jnp.broadcast_to(m, x.shape[:-1])[None,:,None], axis=1)
 force_pure_jax.jit = jax.jit(force_pure_jax)
+
+def force_and_potential_pure_jax(x, m=1., softening=1e-2):
+    phi = potential_pure_jax(x, m, softening)
+    f = force_pure_jax(x, m, softening)
+    
+    return jnp.concatenate([f, phi[:,None]], axis=-1)
+force_and_potential_pure_jax.jit = jax.jit(force_and_potential_pure_jax)
