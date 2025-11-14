@@ -11,7 +11,6 @@ jax.ffi.register_ffi_target("ForceAndPotential", ffi_forces.ForceAndPotential(),
 jax.ffi.register_ffi_target("BwdForceAndPotential", ffi_forces.BwdForceAndPotential(), platform="CUDA")
 
 jax.ffi.register_ffi_target("IlistForceAndPot", ffi_forces.IlistForceAndPot(), platform="CUDA")
-jax.ffi.register_ffi_target("BwdIlistForceAndPot", ffi_forces.BwdIlistForceAndPot(), platform="CUDA")
 
 def force_and_potential_fwd(xm, block_size=64, softening=1e-2, kahan=False):
     assert xm.dtype == jnp.float32
@@ -41,7 +40,7 @@ force_and_potential.jit = jax.jit(force_and_potential, static_argnames=("block_s
 #                                Old Kernels (will be removed later)                               #
 # ------------------------------------------------------------------------------------------------ #
 
-def ilist_fphi_fwd(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None):
+def ilist_fphi(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None):
     """
     Calculates forces and potential through an interaction list.
     isplit: offsets in the particle array that defines different nodes. Each node goes from isplit[i] to isplit[i+1], so len(isplit) = nnodes + 1
@@ -77,24 +76,7 @@ def ilist_fphi_fwd(xm, isplit, interactions=None, irange=None, softening=1e-2, b
 
     fphi = fphi.at[...,3].add(xm[...,3]/softening) # Remove self-interaction from potential
     
-    return fphi, (xm, isplit, interactions, irange)
-
-def ilist_fphi_bwd(softening, block_size, interactions_per_block, res, g):
-    xm, isplit, interactions, iminmax = res
-    if interactions_per_block is None:
-        interactions_per_block = np.clip(len(interactions) // 8096, 4, 256)
-    out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
-
-    gxm = jax.ffi.ffi_call("BwdIlistForceAndPot", (out_type,))(g, xm, isplit, interactions, iminmax, block_size=np.uint64(block_size), interactions_per_block=np.uint64(interactions_per_block), epsilon=np.float32(softening))[0]
-
-    return (gxm, None, None, None)
-
-@partial(jax.custom_vjp, nondiff_argnames=("softening", "block_size", "interactions_per_block"))
-def ilist_fphi(xm, isplit, interactions=None, irange=None, softening=1e-2, block_size=32, interactions_per_block=None):
-    fphi, res = ilist_fphi_fwd(xm, isplit, interactions, irange, softening, block_size, interactions_per_block)
     return fphi
-ilist_fphi.defvjp(ilist_fphi_fwd, ilist_fphi_bwd)
-
 ilist_fphi.jit = jax.jit(ilist_fphi, static_argnames=("softening", "block_size", "interactions_per_block"))
 
 def dense_ilist(n, bls):
