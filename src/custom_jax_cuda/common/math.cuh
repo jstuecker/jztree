@@ -5,8 +5,12 @@
 /*                                           Vector Math                                          */
 /* ---------------------------------------------------------------------------------------------- */
 
+__device__ __forceinline__ float dot(float3 a, float3 b) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
 __device__ __forceinline__ float norm2(float3 a) {
-    return a.x * a.x + a.y * a.y + a.z * a.z;
+    return dot(a, a);
 }
 
 __host__ __device__ __forceinline__

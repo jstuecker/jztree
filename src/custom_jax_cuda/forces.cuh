@@ -26,9 +26,9 @@ __forceinline__ __device__ ForcePot GetForceAndPot(
     return fphi;
 }
 
-__forceinline__ __device__ float4 VJP_GFPhiToGXM(
+__forceinline__ __device__ PMass VJP_GFPhiToGXM(
     const PMass xmi, const PMass xmj, 
-    const float4 gi, const float4 gj, 
+    const ForcePot gi, const ForcePot gj, 
     float epsilon2
 ) {
     // calculates the vector jacobian product of the interaction between xmi and xmj
@@ -43,38 +43,15 @@ __forceinline__ __device__ float4 VJP_GFPhiToGXM(
     float f1 = -rinv*rinv2;
     float f2 = 3*rinv*rinv2*rinv2;
 
-    float3 gm_diff = {
-        gi.x*xmj.mass - gj.x*xmi.mass,
-        gi.y*xmj.mass - gj.y*xmi.mass, 
-        gi.z*xmj.mass - gj.z*xmi.mass
-    };
-    float fgdiff = f2*(gm_diff.x * dx.x + gm_diff.y * dx.y + gm_diff.z * dx.z);
-    // This line handles the potential gradient:
-    fgdiff += f1 * (gi.w * xmj.mass + gj.w * xmi.mass);
+    float3 gm_diff = xmj.mass * gi.force - xmi.mass * gj.force;
+    float fgdiff = f2*dot(gm_diff, dx) + f1 * (gi.pot * xmj.mass + gj.pot * xmi.mass);
 
-    float4 gxmi;
+    PMass gxmi;
 
-    gxmi.x = f1 * gm_diff.x + dx.x * fgdiff;
-    gxmi.y = f1 * gm_diff.y + dx.y * fgdiff;
-    gxmi.z = f1 * gm_diff.z + dx.z * fgdiff;
-
-    float dx_dot_gj = dx.x * gj.x + dx.y * gj.y + dx.z * gj.z;
-    gxmi.w = f1 * dx_dot_gj - rinv * gj.w; // first part for force, second for potential
+    gxmi.pos = f1 * gm_diff + fgdiff * dx;
+    gxmi.mass = f1 * dot(dx, gj.force) - rinv * gj.pot;
 
     return gxmi;
-}
-
-__forceinline__ __device__ void accumulateVJP_GFPhiToGXM(
-    const PMass xmi, const PMass xmj, 
-    const float4 gi, const float4 gj, 
-    float epsilon2, 
-    float4 &gxmi
-) {
-    float4 gxmi_inc = VJP_GFPhiToGXM(xmi, xmj, gi, gj, epsilon2);
-    gxmi.x += gxmi_inc.x;
-    gxmi.y += gxmi_inc.y;
-    gxmi.z += gxmi_inc.z;
-    gxmi.w += gxmi_inc.w;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -126,9 +103,9 @@ __global__ void ForceAndPotential(
 
 template <bool kahan>
 __global__ void BwdForceAndPotential(
-    const float4 *gfphi,
+    const ForcePot *gfphi,
     const PMass *xm,
-    float4 *gxm,
+    PMass *gxm,
     int n,
     float epsilon
 ) {
@@ -136,7 +113,7 @@ __global__ void BwdForceAndPotential(
     float epsilon2 = epsilon * epsilon;
 
     PMass xmi;
-    float4 gfphi_i;
+    ForcePot gfphi_i;
 
     int ipart = blockIdx.x * blockDim.x + threadIdx.x;
     if(ipart < n) {
@@ -145,10 +122,10 @@ __global__ void BwdForceAndPotential(
     }
 
     extern __shared__ PMass xmj_shared[];
-    float4* gfphi_j_shared = (float4*) &xmj_shared[blockDim.x];
+    ForcePot* gfphi_j_shared = (ForcePot*) &xmj_shared[blockDim.x];
 
-    float4 gxm_i = {0.f, 0.f, 0.f, 0.f};
-    float4 gxm_i_kahan = {0.f, 0.f, 0.f, 0.f};
+    PMass gxm_i = {0.f, 0.f, 0.f, 0.f};
+    PMass gxm_i_kahan = {0.f, 0.f, 0.f, 0.f};
 
     for (int jblock = 0; jblock < steps; jblock += 1) {
         int num = min(blockDim.x, n - blockDim.x * jblock);
@@ -161,12 +138,15 @@ __global__ void BwdForceAndPotential(
         __syncthreads();
 
         for (int j = 0; j < num; j++) {
-            accumulateVJP_GFPhiToGXM(
+            PMass gxm_inc = VJP_GFPhiToGXM(
                 xmi, xmj_shared[j],
                 gfphi_i, gfphi_j_shared[j],
-                epsilon2,
-                gxm_i
+                epsilon2
             );
+            if(kahan)
+                kahan_add_f4(gxm_i.f4, gxm_inc.f4, gxm_i_kahan.f4);
+            else
+                gxm_i.f4 = gxm_i.f4 + gxm_inc.f4;
         }
     }
 
@@ -192,9 +172,6 @@ __global__ void GroupedForceAndPot(
     float softening,
     int max_leaf_size
 ) {
-    // Note: I should try to add Khan summation option
-    //       I think the numerical error might be dominated by the summation in this kernel
-
     float softening2 = softening * softening;
 
     int2 nrange = node_range[0];
