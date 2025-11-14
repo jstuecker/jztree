@@ -55,6 +55,41 @@ __forceinline__ __device__ void accumulateForceAndPotKahan(
     kahan_add(fphi_i.pot, -minvr, fphi_kahan.pot);
 }
 
+__forceinline__ __device__ void accumulateGradientsGFPhiToGXM(
+    const PMass xmi, const PMass xmj, 
+    const float4 gi, const float4 gj, 
+    float epsilon2, 
+    float4 &gxmi
+) {
+    // calculates the vector jacobian product of the interaction between xmi and xmj
+    // gi and gj are the final gradient vectors of fphi_i and fphi_j, respectively.
+    // we have to back propagate the gradient towards a gradient with respect to xmi
+    // for understanding the maths, please consider the corresponding .ipynb notebook
+    float3 dx = float3diff(xmj.pos, xmi.pos);
+    float r2 = norm2(dx);
+    float rinv = r2 > 1e-10f * epsilon2 ? rsqrtf(r2 + epsilon2) : 0.f;
+    float rinv2 = rinv*rinv;
+
+    float f1 = -rinv*rinv2;
+    float f2 = 3*rinv*rinv2*rinv2;
+
+    float3 gm_diff = {
+        gi.x*xmj.mass - gj.x*xmi.mass,
+        gi.y*xmj.mass - gj.y*xmi.mass, 
+        gi.z*xmj.mass - gj.z*xmi.mass
+    };
+    float fgdiff = f2*(gm_diff.x * dx.x + gm_diff.y * dx.y + gm_diff.z * dx.z);
+    // This line handles the potential gradient:
+    fgdiff += f1 * (gi.w * xmj.mass + gj.w * xmi.mass);
+
+    gxmi.x += f1 * gm_diff.x + dx.x * fgdiff;
+    gxmi.y += f1 * gm_diff.y + dx.y * fgdiff;
+    gxmi.z += f1 * gm_diff.z + dx.z * fgdiff;
+
+    float dx_dot_gj = dx.x * gj.x + dx.y * gj.y + dx.z * gj.z;
+    gxmi.w += f1 * dx_dot_gj - rinv * gj.w; // first part for force, second for potential
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                       Simple Force Kernel                                      */
 /* ---------------------------------------------------------------------------------------------- */
@@ -69,7 +104,10 @@ __global__ void ForceAndPotential(
     const int steps = div_ceil(n, blockDim.x);
     float epsilon2 = epsilon * epsilon;
 
-    PMass xmi = xm[blockIdx.x * blockDim.x + threadIdx.x];
+    int ipart = blockIdx.x * blockDim.x + threadIdx.x;
+    PMass xmi;
+    if(ipart < n)
+        xmi = xm[ipart];
 
     extern __shared__ PMass xmj_shared[];
 
@@ -94,7 +132,8 @@ __global__ void ForceAndPotential(
 
     fphi_i.pot += xmi.mass / epsilon; // remove self-interaction from potential
 
-    fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
+    if(ipart < n)
+        fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
 }
 
 template <bool kahan>
@@ -105,35 +144,50 @@ __global__ void BwdForceAndPotential(
     int n,
     float epsilon
 ) {
-    // const int steps = div_ceil(n, blockDim.x);
-    // float epsilon2 = epsilon * epsilon;
+    const int steps = div_ceil(n, blockDim.x);
+    float epsilon2 = epsilon * epsilon;
 
-    // PMass xmi = xm[blockIdx.x * blockDim.x + threadIdx.x];
+    PMass xmi;
+    float4 gfphi_i;
 
-    // extern __shared__ PMass xmj_shared[];
+    int ipart = blockIdx.x * blockDim.x + threadIdx.x;
+    if(ipart < n) {
+        xmi = xm[ipart];
+        gfphi_i = gfphi[ipart];
+    }
 
-    // ForcePot fphi_i = {0.f, 0.f, 0.f, 0.f};
-    // ForcePot fphi_kahan = {0.f, 0.f, 0.f, 0.f};
+    extern __shared__ PMass xmj_shared[];
+    float4* gfphi_j_shared = (float4*) &xmj_shared[blockDim.x];
 
-    // for (int jblock = 0; jblock < steps; jblock += 1) {
-    //     int num = min(blockDim.x, n - blockDim.x * jblock);
+    float4 gxm_i = {0.f, 0.f, 0.f, 0.f};
+    float4 gxm_i_kahan = {0.f, 0.f, 0.f, 0.f};
 
-    //     __syncthreads();
-    //     if(threadIdx.x < num)
-    //         xmj_shared[threadIdx.x] = xm[jblock * blockDim.x + threadIdx.x];
-    //     __syncthreads();
+    for (int jblock = 0; jblock < steps; jblock += 1) {
+        int num = min(blockDim.x, n - blockDim.x * jblock);
 
-    //     for (int j = 0; j < num; j++) {
-    //         if(kahan)
-    //             accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
-    //         else
-    //             accumulateForceAndPot(xmi, xmj_shared[j], epsilon2, fphi_i);
-    //     }
-    // }
+        __syncthreads();
+        if(threadIdx.x < num) {
+            xmj_shared[threadIdx.x] = xm[jblock * blockDim.x + threadIdx.x];
+            gfphi_j_shared[threadIdx.x] = gfphi[jblock * blockDim.x + threadIdx.x];
+        }
+        __syncthreads();
 
-    // fphi_i.pot += xmi.mass / epsilon; // remove self-interaction from potential
+        for (int j = 0; j < num; j++) {
+            // if(kahan)
+            //     accumulateForceAndPotKahan(xmi, xmj_shared[j], epsilon2, fphi_i, fphi_kahan);
+            // else
 
-    // fphi[blockIdx.x * blockDim.x + threadIdx.x] = fphi_i;
+            accumulateGradientsGFPhiToGXM(
+                xmi, xmj_shared[j],
+                gfphi_i, gfphi_j_shared[j],
+                epsilon2,
+                gxm_i
+            );
+        }
+    }
+
+    if(ipart < n)
+        gxm[ipart] = gxm_i;
 }
 
 /* ---------------------------------------------------------------------------------------------- */

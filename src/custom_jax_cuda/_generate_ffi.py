@@ -64,7 +64,7 @@ kernels["ForceAndPotential"].smem_size_expression = "blockDim.x * sizeof(float4)
 kernels["ForceAndPotential"].par["n"].expression = "xm.element_count()/4"
 
 kernels["BwdForceAndPotential"].grid_size_expression = "div_ceil(xm.element_count()/4, block_size)"
-kernels["BwdForceAndPotential"].smem_size_expression = "blockDim.x * sizeof(float4)"
+kernels["BwdForceAndPotential"].smem_size_expression = "2 * blockDim.x * sizeof(float4)"
 kernels["BwdForceAndPotential"].par["n"].expression = "xm.element_count()/4"
 
 
