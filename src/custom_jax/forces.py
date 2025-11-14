@@ -11,7 +11,7 @@ jax.ffi.register_ffi_target("IlistForceAndPot", ffi_forces.IlistForceAndPot(), p
 jax.ffi.register_ffi_target("BwdIlistForceAndPot", ffi_forces.BwdIlistForceAndPot(), platform="CUDA")
 jax.ffi.register_ffi_target("ForceAndPotential", ffi_forces.ForceAndPotential(), platform="CUDA")
 
-def force_and_potential(xm, block_size=64, softening=1e-2, kahan=False):
+def force_and_potential_fwd(xm, block_size=64, softening=1e-2, kahan=False):
     assert xm.dtype == jnp.float32
     assert xm.shape[-1] == 4
     assert xm.ndim >= 2
@@ -21,7 +21,15 @@ def force_and_potential(xm, block_size=64, softening=1e-2, kahan=False):
     out_type = jax.ShapeDtypeStruct(xm.shape, xm.dtype)
     fphi = jax.ffi.ffi_call("ForceAndPotential", (out_type,))(
         xm, block_size=np.uint64(block_size), epsilon=np.float32(softening), kahan=kahan)[0]
-    return fphi
+    return fphi, xm
+
+def force_and_potential_bwd(block_size, softening, kahan, xm, g):
+    return jnp.zeros_like(xm),
+
+@partial(jax.custom_vjp, nondiff_argnames=("block_size", "softening", "kahan"))
+def force_and_potential(xm, block_size=64, softening=1e-2, kahan=False):
+    return force_and_potential_fwd(xm, block_size, softening, kahan)[0]
+force_and_potential.defvjp(force_and_potential_fwd, force_and_potential_bwd)
 force_and_potential.jit = jax.jit(force_and_potential, static_argnames=("block_size", "softening", "kahan"))
 
 # ------------------------------------------------------------------------------------------------ #
