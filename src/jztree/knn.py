@@ -1,11 +1,11 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jztree_cuda import ffi_knn as ffi_knn
+from jztree_cuda import ffi_knn, ffi_new_knn
 from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort, search_sorted_z
 from .common import conditional_callback
 
-jax.ffi.register_ffi_target("IlistKNNSearch", ffi_knn.IlistKNNSearch(), platform="CUDA")
+jax.ffi.register_ffi_target("IlistKNN", ffi_new_knn.IlistKNN(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")
 
@@ -27,9 +27,9 @@ def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  ispli
     x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)
 
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
-    knn = jax.ffi.ffi_call("IlistKNNSearch", (out_type, ))(
+    knn = jax.ffi.ffi_call("IlistKNN", (out_type, ))(
         x4a, x4b, isplitT, isplitQ, ilist, ir2list, ilist_splitsB,
-        boxsize=np.float32(boxsize)
+        boxsize=np.float32(boxsize), k=np.int32(k)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
  

@@ -6,7 +6,7 @@ import fmdj_utils.generator as gen
 
 HERE = Path(__file__).resolve().parent
 
-p_instance_values = (1, 2, 3, 4, 5)
+k_instance_values = (4, 8, 12, 16, 32, 64)
 default_includes = ["../common/math.cuh"]
 
 # ------------------------------------------------------------------------------------------------ #
@@ -39,4 +39,27 @@ gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tree.cu"), 
     functions = functions, 
     includes = default_includes + ["../tree.cuh"]
+)
+
+# ------------------------------------------------------------------------------------------------ #
+#                                              knn.cuh                                             #
+# ------------------------------------------------------------------------------------------------ #
+
+functions = parse.get_functions_from_file(
+    str(HERE / "knn.cuh"),
+    names=["IlistKNN"],
+    only_kernels=False
+)
+
+print(list(functions.keys()))
+
+functions["IlistKNN"].template_par["k"].instances = k_instance_values
+functions["IlistKNN"].block_size_expression = 32
+functions["IlistKNN"].smem_size_expression = "blockDim.x * sizeof(PosId)"
+functions["IlistKNN"].grid_size_expression = "isplitQ.element_count() - 1"
+
+gen.generate_ffi_module_file(
+    output_file = str(HERE / "generated/ffi_new_knn.cu"), 
+    functions = functions, 
+    includes = default_includes + ["../knn.cuh"]
 )
