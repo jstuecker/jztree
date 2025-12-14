@@ -236,7 +236,8 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
         alloc_fac_nodes=cfg.alloc_fac_nodes,
         max_leaf_size=cfg.max_leaf_size,
         coarse_fac=cfg.rfac,
-        stop_coarsen=cfg.stop_coarsen
+        stop_coarsen=cfg.stop_coarsen,
+        multipoles_around_com=False
     ))
     posmassz = fmdj.data.PosMass(posz, jnp.ones((len(posz),), dtype=jnp.float32))
     th = fmdj.ztree.build_tree_hierarchy(posmassz, cfg_fmdj)
@@ -256,7 +257,7 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
         )
 
         # Node2Node relation for next level
-        spl = th.ispl_n2n.get(i)
+        spl = th.ispl_n2n.get(i, size+1)
 
     data = KNNData(
         k=k,
