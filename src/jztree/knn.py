@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_knn
-from .tree import summarize_leaves, pos_zorder_sort, search_sorted_z
+from .tree import pos_zorder_sort, search_sorted_z
 # from fmdj.ztree import summarize_leaves, pos_zorder_sort, search_sorted_z
 from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
 from .data import KNNData, KNNConfig
@@ -132,38 +132,6 @@ def dense_ilist(nleaves, leaf_mask=None, ngroup=32, size=None, size_ilist=None):
 
     return spl, ilist.flatten(), ir2list.flatten(), isplits
 
-def build_ilist_recursive(xleaf, lvleaf, nleaf, k=16, boxsize=0., max_size=48, num_part=None, 
-                          refine_fac=8, stop_coarsen=2048, alloc_fac=128., alloc_fac_nodes=1.):
-    """Recursively builds an interaction list for kNN search. This is done by recursively:
-    (1) Coarsen the leaves
-    (2) Get the interaction list for the coarsened leaves (recursively)
-    (3) Use the interaction list of the coarsened leaves to build the finer interaction list
-    """
-    max_ref = (2 * num_part / max_size) / stop_coarsen
-
-    if max_ref <= 2.: 
-        # We are very close to the target level, don't coarsen any more and instead use
-        # a dens interaction list
-        spl2, il_c, ir2l_c, ispl_c = dense_ilist(len(xleaf), nleaf > 0, ngroup=32)
-    else:
-        refine_fac = min(refine_fac, max_ref)
-
-        spl2, nleaf2, lvleaf2, xleaf2, numleaves2 = summarize_leaves(
-            xleaf, max_size=max_size*refine_fac, nleaf=nleaf, num_part=num_part, 
-            ref_fac=refine_fac, alloc_fac_nodes=alloc_fac_nodes)
-        il_c, ir2l_c, ispl_c = build_ilist_recursive(
-            xleaf2, lvleaf2, nleaf2, k=k, boxsize=boxsize, max_size=max_size*refine_fac, 
-            num_part=num_part, refine_fac=refine_fac, stop_coarsen=stop_coarsen, 
-            alloc_fac=alloc_fac*np.sqrt(refine_fac), alloc_fac_nodes=alloc_fac_nodes)
-    
-    il, ir2l, ispl = build_ilist_knn(
-        xleaf, lvleaf, nleaf, spl2, il_c, ir2l_c, ispl_c, k=k, boxsize=boxsize, alloc_fac=alloc_fac)
-    
-    return il, ir2l, ispl
-build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
-    'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize', 'alloc_fac'])
-
-
 # ------------------------------------------------------------------------------------------------ #
 #                                      User Exposed Functions                                      #
 # ------------------------------------------------------------------------------------------------ #
@@ -208,37 +176,6 @@ def evaluate_knn(d : KNNData, pos_query=None):
         return rnn, inn
 evaluate_knn.jit = jax.jit(evaluate_knn)
 
-def prepare_knn_z(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
-    """Prepares an instance of KNNData for a given set of positions posz
-    posz is assumed to be sorted in z-order (use prepare_knn if it is not)
-
-    if idz is given it is assumed that posz = pos0[idz] for some original pos0
-    and output indices will be mapped back to original indices
-    """
-    boxsize = 0. if boxsize is None else boxsize
-
-    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(
-        posz, max_size=cfg.max_leaf_size, alloc_fac_nodes=cfg.alloc_fac_nodes)
-    
-    il, ir2l, ispl = build_ilist_recursive(
-        xleaf, llvl, nleaf, num_part=len(posz), k=k, boxsize=boxsize,
-        max_size=cfg.max_leaf_size, refine_fac=cfg.rfac, alloc_fac=cfg.alloc_fac_ilist, 
-        stop_coarsen=cfg.stop_coarsen, alloc_fac_nodes=cfg.alloc_fac_nodes)
-    
-    data = KNNData(
-        k=k,
-        boxsize=boxsize,
-        posz=posz,
-        idz=idz,
-        spl=spl,
-        ilist=il,
-        ir2list=ir2l,
-        ilist_spl=ispl
-    )
-    
-    return data
-prepare_knn_z.jit = jax.jit(prepare_knn_z, static_argnames=["k", "boxsize", "cfg"])
-
 def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions posz
     posz is assumed to be sorted in z-order (use prepare_knn if it is not)
@@ -263,7 +200,6 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
 
     size = th.plane_sizes[0]
     size_ilist = int(size * cfg.alloc_fac_ilist)
-    print("sizes:", size, size_ilist)
 
     spl, il, ir2l, ispl = dense_ilist(
         th.plane_sizes[-1], valid, ngroup=32 #, size=size, size_ilist=size_ilist
@@ -313,7 +249,7 @@ def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData
 
     posz, idz = pos_zorder_sort(pos0)
 
-    data = prepare_knn_z(posz, k, boxsize=boxsize, cfg=cfg, idz=idz)
+    data = prepare_knn_z_new(posz, k, boxsize=boxsize, cfg=cfg, idz=idz)
 
     return data
 prepare_knn.jit = jax.jit(prepare_knn, static_argnames=["k", "boxsize", "cfg"])
@@ -322,7 +258,7 @@ def knn_z(posz, k=16, boxsize=0., cfg : KNNConfig = KNNConfig(), posz_query=None
     """Finds the k nearest neighbors of posz using a kNN search with interaction list
     posz is assumed to be sorted in z-order (use "knn" if it is not)
     """
-    data = prepare_knn_z(posz, k, boxsize=boxsize, cfg=cfg)
+    data = prepare_knn_z_new(posz, k, boxsize=boxsize, cfg=cfg)
     rknn, iknn = evaluate_knn_z(data, posz_query=posz_query)
     return rknn, iknn
 knn_z.jit = jax.jit(knn_z, static_argnames=["k", "boxsize", "cfg"])

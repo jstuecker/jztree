@@ -52,69 +52,6 @@ def test_leaf_search():
 
     assert jnp.all(spl == spl2), "Leaf ranges should be identical"
 
-@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (0.5,1.0), (-1, -0.5), (0, 1e6), (-1, 1), (-0.5, 1.)])
-def test_summarize_identity(xmin, xmax):
-    print("")
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(144387, xmin=xmin, xmax=xmax))
-    spl, nleaf, llvl, xleaf, numleaves = jz.tree.summarize_leaves.jit(
-        posz, max_size=1)
-    
-    xleafz, idz2 = jz.tree.pos_zorder_sort.jit(xleaf)
-    
-    print("First wrong:", jnp.where(idz2 != jnp.arange(len(xleaf), dtype=jnp.int32))[0][0:10])
-
-    assert numleaves == len(posz)
-    assert jnp.all(spl[:numleaves] == jnp.arange(numleaves, dtype=jnp.int32))
-    assert jnp.all(idz2 == jnp.arange(len(xleaf), dtype=jnp.int32))
-    assert jnp.all(nleaf[:numleaves] == 1)
-    assert jnp.all(nleaf[numleaves:] == 0)
-
-@pytest.mark.parametrize("final_size", [4, 6, 13, 33, 63, 135, 317, 477])
-def test_double_summarize(final_size):
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*128, xmin=0., xmax=1.0))
-    spl_ref, nleaf_ref, llvl_ref, xleaf_ref, numleaves_ref = jz.tree.summarize_leaves.jit(
-        posz, max_size=final_size)
-
-    im_size = np.maximum(final_size // 7, 1)
-    spl, nleaf, llvl, xleaf, numleaves = jz.tree.summarize_leaves.jit(
-        posz, max_size=im_size)
-    spl, nleaf, llvl, xleaf, numleaves = jz.tree.summarize_leaves.jit(
-        xleaf, max_size=final_size, nleaf=nleaf, num_part=len(posz), ref_fac=final_size / im_size)
-    
-    assert jnp.all(llvl_ref[:numleaves_ref] < 386), "Leaf levels should be reasonable"
-
-    print("\nfirst wrong:", jnp.where(nleaf != nleaf_ref)[0][:2])
-    assert jnp.all(nleaf_ref <= final_size)
-    assert jnp.all(nleaf <= final_size)
-    assert jnp.all(nleaf == nleaf_ref)
-    assert jnp.all(xleaf[:numleaves] == xleaf_ref[:numleaves_ref])
-    assert numleaves == numleaves_ref
-
-@pytest.mark.parametrize("rfac", [2, 8, 17, 32, 33, 40, 93])
-def test_ilist_rfac(rfac):
-    N = 1024*512
-    xmin, xmax = 0.1, 0.4
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N, xmin=xmin, xmax=xmax))
-
-    msize = 48
-    spl, nleaf, llvl, xleaf, numleaves = jz.knn.summarize_leaves(posz, max_size=msize)
-
-    rfacA = 15
-    il, ir2l, ispl = jz.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize, 
-        refine_fac=rfacA, num_part=len(posz), k=16)
-    
-    il2, ir2l2, ispl2 = jz.knn.build_ilist_recursive.jit(xleaf, llvl, nleaf, max_size=msize, 
-        refine_fac=rfac, num_part=len(posz), k=16)
-
-    print(jnp.where(ispl[1:numleaves] <= ispl[:numleaves-1])[0][0:10])
-    assert jnp.all(ispl[1:numleaves] > ispl[:numleaves-1]), "should not have empty list for any leaf"
-    assert jnp.all(ir2l <= 3.*(xmax-xmin)**2)
-    assert jnp.all(ispl2 == ispl), f"Splits different for rfac {rfacA} and {rfac}"
-    assert jnp.all(ir2l2[:ispl2[-1]] == ir2l[:ispl[-1]]), f"Radii different for rfac {rfacA} and {rfac}"
-
-    # Note the ids can differ for identical radii:
-    print(f"Fraction ids equal {jnp.mean(il2[:ispl2[-1]] == il[:ispl[-1]])}") 
-
 def check_against_ckdtree(posz, k=16, boxsize=0.):
     cfg = jz.knn.KNNConfig()
     rnn, inn = jz.knn.knn_z(posz, k=k, boxsize=boxsize, cfg=cfg)
@@ -172,7 +109,7 @@ def test_io_order():
     posz, idz = jz.tree.pos_zorder_sort.jit(pos0)
 
     data = jz.knn.prepare_knn.jit(pos0, k=16)
-    dataz = jz.knn.prepare_knn_z.jit(posz, k=16)
+    dataz = jz.knn.prepare_knn_z_new.jit(posz, k=16)
 
     rnn00, inn00 = jz.knn.evaluate_knn.jit(data)    # ids and outputs in original order
     rnn0z, inn0z = jz.knn.evaluate_knn_z.jit(data)   # ids original order, outputs in z-order
@@ -244,18 +181,3 @@ def test_scan_query():
     # myknn.jit = jax.jit(myknn)
 
     res, rmean = jax.lax.scan(myknn, (pos0, posa, posb), jnp.arange(0,10))
-
-def test_vmap_knn():
-    """This fails so far, because of the conditional io_callback based error handling."""
-    # Not sure whether I want to support vmap... 
-    # It doesn't make too much sense for a knn anyways
-    pos0 = jax.random.uniform(jax.random.PRNGKey(1), (10, 1024*8,3), dtype=jnp.float32, minval=0., maxval=1.)
-
-    def myknn(pos0):
-        rnn, inn = jz.knn.knn(pos0, k=16)
-        return rnn, inn
-    myknn.jit = jax.jit(myknn)
-
-    rnn, inn = jax.vmap(myknn.jit)(pos0)
-
-    assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"

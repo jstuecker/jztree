@@ -14,8 +14,7 @@ def bench_knn_steps(jax_bench, pos):
     posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
 
     data = jb.measure(fn_jit=jz.knn.prepare_knn.jit, pos0=pos, k=k, tag="prepare")[1]
-    data2 = jb.measure(fn_jit=jz.knn.prepare_knn_z.jit, posz=posz, k=k, tag="prepare_z")[1]
-    data3 = jb.measure(fn_jit=jz.knn.prepare_knn_z_new.jit, posz=posz, k=k, tag="prepare_z_new")[1]
+    data2 = jb.measure(fn_jit=jz.knn.prepare_knn_z_new.jit, posz=posz, k=k, tag="prepare_z_new")[1]
 
     jb.measure(fn_jit=jz.knn.evaluate_knn.jit, d=data, tag="eval")
         
