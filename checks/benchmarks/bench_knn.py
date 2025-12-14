@@ -27,3 +27,9 @@ def bench_knn_steps(jax_bench, pos):
 
     jb.measure(fn_jit=jz.knn.evaluate_knn_z.jit, d=data2, posz_query=pos_qz, tag="eval_q_z")
     jb.measure(fn_jit=jz.knn.knn.jit, pos0=pos_q, k=k, pos_query=pos_q, tag="total_q_z")
+
+@pytest.mark.parametrize("k", [4,8,12,16,32,64])
+def bench_knn_k(jax_bench, pos, k):
+    jb = jax_bench(jit_rounds=40, jit_warmup=10)
+
+    jb.measure(fn_jit=jz.knn.knn.jit, pos0=pos, k=k)
