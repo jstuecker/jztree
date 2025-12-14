@@ -47,7 +47,7 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "knn.cuh"),
-    names=["IlistKNN"],
+    names=["IlistKNN", "ConstructIlist"],
     only_kernels=False
 )
 
@@ -57,6 +57,10 @@ functions["IlistKNN"].template_par["k"].instances = k_instance_values
 functions["IlistKNN"].block_size_expression = 32
 functions["IlistKNN"].smem_size_expression = "blockDim.x * sizeof(PosId)"
 functions["IlistKNN"].grid_size_expression = "isplitQ.element_count() - 1"
+
+functions["ConstructIlist"].par["nnodes"].expression = "isplit.element_count() - 1"
+functions["ConstructIlist"].par["nleaves"].expression = "leaves_npart.element_count()"
+functions["ConstructIlist"].par["leaf_ilist_size"].expression = "leaf_ilist->element_count()"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_new_knn.cu"), 

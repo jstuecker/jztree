@@ -6,7 +6,7 @@ from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort, s
 from .common import conditional_callback
 
 jax.ffi.register_ffi_target("IlistKNN", ffi_new_knn.IlistKNN(), platform="CUDA")
-jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
+jax.ffi.register_ffi_target("ConstructIlist", ffi_new_knn.ConstructIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")
 
 def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
