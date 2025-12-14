@@ -266,7 +266,7 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     print("sizes:", size, size_ilist)
 
     spl, il, ir2l, ispl = dense_ilist(
-        th.plane_sizes[-1], valid, ngroup=32, size=size, size_ilist=size_ilist
+        th.plane_sizes[-1], valid, ngroup=32 #, size=size, size_ilist=size_ilist
     )
     
     def handle_level(i, carry):
@@ -282,7 +282,8 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
         spl = th.ispl_n2n.get(level, size+1)
         return spl, il, ir2l, ispl
     
-    # Need to fix initialization size to use this:
+    # This works, but it seemed to be slightly slower in tests...
+    # Probably, because it requires us to use a larger list at the lowest level
     # spl, il, ir2l, ispl = jax.lax.fori_loop(
     #     0, nplanes, handle_level, (spl, il, ir2l, ispl)
     # )
