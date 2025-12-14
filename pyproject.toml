@@ -16,7 +16,7 @@ cmake.version = ">=3.24"
 build-dir = "build"
 logging.level = "INFO"
 build.requires = ["jax[cuda13]", "nvidia-cuda-cccl>=13.0.0"]
-editable.rebuild = true
+# editable.rebuild = true
 
 [[tool.scikit-build.overrides]]
 # When the environment variable CUDA_LOCAL is set to true, we assume that CUDA is installed
@@ -25,8 +25,8 @@ if.env.CUDA_LOCAL = true
 # if installed with -e, we want to rebuild on each import
 if.state = "editable"
 build.requires = ["jax"]
-editable.rebuild = true
-editable.verbose = true
+# editable.rebuild = true
+# editable.verbose = true
 
 [project.optional-dependencies]
 cuda13 = [

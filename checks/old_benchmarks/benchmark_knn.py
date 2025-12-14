@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import jztree as jz
 import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree
-from fmdj.utility import Tee, Timer
+from fmdj_utils.utility import Tee, Timer
 import sys
 import numpy as np
 
