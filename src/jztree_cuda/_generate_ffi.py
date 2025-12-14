@@ -51,8 +51,6 @@ functions = parse.get_functions_from_file(
     only_kernels=False
 )
 
-print(list(functions.keys()))
-
 functions["IlistKNN"].template_par["k"].instances = k_instance_values
 functions["IlistKNN"].block_size_expression = 32
 functions["IlistKNN"].smem_size_expression = "blockDim.x * sizeof(PosId)"
@@ -66,7 +64,7 @@ functions["SegmentSort"].par["nkeys"].expression = "key.element_count()"
 functions["SegmentSort"].par["nsegs"].expression = "isplit.element_count() - 1"
 
 gen.generate_ffi_module_file(
-    output_file = str(HERE / "generated/ffi_new_knn.cu"), 
+    output_file = str(HERE / "generated/ffi_knn.cu"), 
     functions = functions, 
     includes = default_includes + ["../knn.cuh"]
 )

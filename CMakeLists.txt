@@ -119,27 +119,7 @@ message(STATUS "XLA include directory: ${XLA_DIR}")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 # set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -L${_cuda_lib} -Xlinker -rpath,${_cuda_lib}")
 
-# Define a list of modules and their source files
-set(MODULES ffi_knn)
-set(MODULE_PATHS 
-  src/jztree_cuda/knn.cu
-)
-
 include_directories(SYSTEM ${XLA_DIR})
-
-
-foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
-    set(MODULE_NAME ${var_0})
-    set(MODULE_SOURCE ${var_1})
-
-    nanobind_add_module(${MODULE_NAME} ${MODULE_SOURCE})
-
-    target_compile_options(${MODULE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
-    target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
-
-  install(TARGETS ${MODULE_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME}_cuda)
-endforeach()
-
 
 # ----------------------------------------------------------------------------------------------- #
 # Auto-add all modules from src/jztree_cuda/generated
