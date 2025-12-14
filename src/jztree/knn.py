@@ -7,7 +7,7 @@ from .common import conditional_callback
 
 jax.ffi.register_ffi_target("IlistKNN", ffi_new_knn.IlistKNN(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", ffi_new_knn.ConstructIlist(), platform="CUDA")
-jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")
+jax.ffi.register_ffi_target("SegmentSort", ffi_new_knn.SegmentSort(), platform="CUDA")
 
 def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
@@ -143,7 +143,7 @@ def segment_sort(key, val, isplit, smem_size=512):
 
     out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
     key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
-        key, val, isplit, smem_size=np.int32(smem_size)
+        key, val, isplit, smem_size=np.uint64(smem_size)
     )
     return key_sorted, val_sorted
 

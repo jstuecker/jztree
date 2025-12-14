@@ -524,4 +524,36 @@ ffi::Error ConstructIlist(
     return ffi::Error::Success();
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                           SegmentSort                                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error SegmentSort(
+    cudaStream_t stream,
+    const float* key,
+    const int32_t* val,
+    const int32_t* isplit,
+    float* key_out,
+    int32_t* val_out,
+    const int32_t nkeys,
+    const int32_t nsegs,
+    const size_t smem_size
+) {
+    int blocksize = 64;
+    size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int32_t));
+
+    cudaMemcpyAsync(key_out, key, nkeys*sizeof(float), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(val_out, val, nkeys*sizeof(int32_t), cudaMemcpyDeviceToDevice, stream);
+
+    segmented_bitonic_sort_kv<<< nsegs, blocksize, smem_bytes, stream>>>(
+        key_out, val_out, isplit, nsegs, smem_size
+    );
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
 #endif // KNN_H
