@@ -5,6 +5,13 @@ import pytest
 import numpy as np
 from scipy.spatial import cKDTree
 
+def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
+    pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)
+    if duplicate:
+        pos0 = jnp.concatenate((pos0, pos0, pos0, pos0))
+    
+    return pos0
+
 def test_segment_sort():
     spl = jnp.insert(jnp.sort(jax.random.randint(jax.random.PRNGKey(0), (5000,), 0, 1000000)), 0, 0)
     print(f"\n max seg: {jnp.max(spl[1:] - spl[:-1])}, mean seg: {jnp.mean(spl[1:] - spl[:-1])}")
@@ -21,36 +28,6 @@ def test_segment_sort():
 
     print(f"Ids different {jnp.sum(inew != inew2)}/{len(inew)} (this is ok, if radii are identical):")
     assert jnp.all(rnew == r[inew2])
-
-def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
-    pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)
-    if duplicate:
-        pos0 = jnp.concatenate((pos0, pos0, pos0, pos0))
-    
-    return pos0
-
-def test_search_sorted_z():
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(1387, xmin=0.1, xmax=0.4))
-    posz2, idz2 = jz.tree.pos_zorder_sort.jit(get_pos(2222, xmin=0.1, xmax=0.4))
-
-    iself = jz.tree.search_sorted_z.jit(posz, posz)
-    assert jnp.all(iself == jnp.arange(len(posz), dtype=jnp.int32))
-
-    i2 = jz.tree.search_sorted_z.jit(posz, posz2)
-    pos_ins = jnp.insert(posz, i2, posz2, axis=0)
-    pos_ins_ref = jz.tree.pos_zorder_sort.jit(pos_ins)[0]
-    assert jnp.all(pos_ins == pos_ins_ref), "If indices were right, we should already be in z-order"
-
-def test_leaf_search():
-    posz = jz.tree.pos_zorder_sort(get_pos(144387))[0]
-    # Create some reduced leaves
-    spl, nleaf, llvl, xleaf, numleaves = jz.tree.summarize_leaves.jit(posz, max_size=32)
-
-    # Check whether we can learn the right leaf numbers just from the leaf positions
-    ileaf = jz.tree.search_sorted_z(xleaf, posz, leaf_search=True)
-    spl2 = jnp.searchsorted(ileaf, jnp.arange(len(xleaf)+1), side="left")
-
-    assert jnp.all(spl == spl2), "Leaf ranges should be identical"
 
 def check_against_ckdtree(posz, k=16, boxsize=0.):
     cfg = jz.knn.KNNConfig()

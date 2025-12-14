@@ -1,7 +1,3 @@
-import numpy as np
-import jax
-import jax.numpy as jnp
 
-from jztree_cuda import ffi_tree
-
+# We reference this from here, so we can later rearange modules easier:
 from fmdj.ztree import pos_zorder_sort, search_sorted_z
