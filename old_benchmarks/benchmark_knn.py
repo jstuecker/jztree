@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-import custom_jax as cj
+import jztree as jz
 import matplotlib.pyplot as plt
 from scipy.spatial import cKDTree
 from fmdj.utility import Tee, Timer
@@ -20,15 +20,15 @@ for N in (1e5,3e5,1e6,2e6,4e6,7e6,1e7):
     N = int(N)
     timer.set_tag(N=N)
     pos0 = jax.random.uniform(jax.random.PRNGKey(0), (N,3), minval=0, maxval=1, dtype=jnp.float32).block_until_ready()
-    posz, idz = timer.timeit_jit(cj.tree.pos_zorder_sort.jit, pos0)
+    posz, idz = timer.timeit_jit(jz.tree.pos_zorder_sort.jit, pos0)
 
-    timer.timeit_jit(cj.knn.knn.jit, pos0, k=k, name="total (unsorted)")
-    data = timer.timeit_jit(cj.knn.prepare_knn.jit, pos0, k=k, name="prepare (unsorted)")
-    timer.timeit_jit(cj.knn.evaluate_knn_z.jit, data, name="evaluate (unsorted)")
+    timer.timeit_jit(jz.knn.knn.jit, pos0, k=k, name="total (unsorted)")
+    data = timer.timeit_jit(jz.knn.prepare_knn.jit, pos0, k=k, name="prepare (unsorted)")
+    timer.timeit_jit(jz.knn.evaluate_knn_z.jit, data, name="evaluate (unsorted)")
 
-    timer.timeit_jit(cj.knn.knn_z.jit, posz, k=k, name="total (sorted)")
-    data = timer.timeit_jit(cj.knn.prepare_knn_z.jit, posz, k=k, name="prepare (sorted)")
-    timer.timeit_jit(cj.knn.evaluate_knn_z.jit, data, name="evaluate (sorted)")
+    timer.timeit_jit(jz.knn.knn_z.jit, posz, k=k, name="total (sorted)")
+    data = timer.timeit_jit(jz.knn.prepare_knn_z.jit, posz, k=k, name="prepare (sorted)")
+    timer.timeit_jit(jz.knn.evaluate_knn_z.jit, data, name="evaluate (sorted)")
 
 timer.plot_timings("N")
 plt.savefig("logs/knn.pdf")
@@ -43,15 +43,15 @@ for N in (1e5,3e5,1e6,2e6,4e6,7e6,1e7):
     N = int(N)
     timer.set_tag(Nquery=N)
     posQ = jax.random.uniform(jax.random.PRNGKey(1), (N//10,3), minval=0, maxval=1, dtype=jnp.float32).block_until_ready()
-    poszQ, idz = cj.tree.pos_zorder_sort.jit(posQ)
+    poszQ, idz = jz.tree.pos_zorder_sort.jit(posQ)
 
     for Nbuild in 2e5, 1e6, 5e6:
         Nbuild = int(Nbuild)
         pos0 = jax.random.uniform(jax.random.PRNGKey(0), (Nbuild,3), minval=0, maxval=1, dtype=jnp.float32).block_until_ready()
-        posz = cj.tree.pos_zorder_sort.jit(pos0)[0]
-        data = cj.knn.prepare_knn.jit(posz, k=k)
+        posz = jz.tree.pos_zorder_sort.jit(pos0)[0]
+        data = jz.knn.prepare_knn.jit(posz, k=k)
 
-        timer.timeit_jit(cj.knn.evaluate_knn_z.jit, data, posz_query=poszQ, name=f"Nbuild={Nbuild:.1e}")
+        timer.timeit_jit(jz.knn.evaluate_knn_z.jit, data, posz_query=poszQ, name=f"Nbuild={Nbuild:.1e}")
 
 timer.plot_timings("Nquery")
 plt.title(f"Query Timings (k={k})")

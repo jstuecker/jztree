@@ -34,8 +34,8 @@ bash Miniforge3-Linux-x86_64.sh -b
 rm Miniforge3-Linux-x86_64.sh
 eval "$(/root/miniforge3/bin/conda shell.bash hook)"
 conda init
-conda create --name cjtest -y
-conda activate cjtest
+conda create --name jztest -y
+conda activate jztest
 ```
 Install prequisites via conda
 ```bash
@@ -70,13 +70,13 @@ pip install nvidia-cuda-cccl>=13.0.0 scikit-build-core nanobind jax[cuda13]
 or similar, depending on your setup. Also a system or conda installed version of cmake may be required.
 
 ### Automatic Generation of FFI .cu files
-Jax's foreign function interface uses a lot of boiler-plate code. Have a look at `src/custom_jax_cuda/generated` to see it. I wrote a little tool to autogenerate these, so that we only need to focus on writing CUDA kernels and the python interface. Therefore, if you modify one of the `.cuh` files in `src/custom_jax_cuda`, you should regenerate the ffi bindings. You can do this by executing the `src/custom_jax_cuda/_generate_ffi.py` file (from any directory). Alternatively you can also pass the environment variable `CJ_GENERATE=1` to pip, e.g.
+Jax's foreign function interface uses a lot of boiler-plate code. Have a look at `src/jztree_cuda/generated` to see it. I wrote a little tool to autogenerate these, so that we only need to focus on writing CUDA kernels and the python interface. Therefore, if you modify one of the `.cuh` files in `src/jztree_cuda`, you should regenerate the ffi bindings. You can do this by executing the `src/jztree_cuda/_generate_ffi.py` file (from any directory). Alternatively you can also pass the environment variable `CJ_GENERATE=1` to pip, e.g.
 ```
 CJ_GENERATE=1 uv pip install -e . --no-build-isolation
 ```
 and the script will get automatically executed. 
 
-However, if you want to modify kernels, it is best that you have a look at `src/custom_jax_cuda/_generate_ffi.py` and adapt it to your needs. Most of the code in the ffi files can be mapped trivially from the kernel definitions, but some more involved apsects (e.g. automatically evaluated launch parameters or template instantiation) require your input.
+However, if you want to modify kernels, it is best that you have a look at `src/jztree_cuda/_generate_ffi.py` and adapt it to your needs. Most of the code in the ffi files can be mapped trivially from the kernel definitions, but some more involved apsects (e.g. automatically evaluated launch parameters or template instantiation) require your input.
 
 For now, we'll keep all generated ffi files under version control. This helps monitoring whether the autogeneration is working fine.
 

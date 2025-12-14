@@ -1,7 +1,7 @@
 # To create a container:
-# docker run --gpus all --name leancj -it ubuntu:latest bash
+# docker run --gpus all --name leanjz -it ubuntu:latest bash
 # To restart it:
-# docker start -ia leancj
+# docker start -ia leanjz
 
 FROM ubuntu:latest
 WORKDIR /custom-jax
@@ -19,15 +19,15 @@ RUN uv sync
 # eval "$(/root/miniforge3/bin/conda shell.bash hook)"
 # conda init
 # ... follow installation isntructions
-# conda create --name cjtest -y
-# conda activate cjtest
+# conda create --name jztest -y
+# conda activate jztest
 # conda install "jaxlib=0.7=*cuda12*" jax cuda-nvcc -c conda-forge
 # conda install pip
 # pip install .
 
 
 # System CUDA installation:
-# docker run --gpus all --name cjnv -it nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04
+# docker run --gpus all --name jznv -it nvidia/cuda:13.0.1-cudnn-devel-ubuntu24.04
 # apt install nvidia-cuda-toolkit
 # ...
 # uv pip install --upgrade "jax[cuda13-local]"

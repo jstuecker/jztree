@@ -3,7 +3,7 @@ from jax.experimental import checkify, io_callback
 import functools
 import jax.numpy as jnp
 
-def cjit(f, enable: bool = True, errors = checkify.user_checks, **jit_kwargs):
+def jzit(f, enable: bool = True, errors = checkify.user_checks, **jit_kwargs):
     """
     Decorate a function so that:
       - checks inside it (via checkify.check) are made jit-safe, and

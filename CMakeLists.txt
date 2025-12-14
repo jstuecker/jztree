@@ -122,16 +122,11 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xptxas=-v")
 # Define a list of modules and their source files
 set(MODULES ffi_knn)
 set(MODULE_PATHS 
-  src/custom_jax_cuda/knn.cu
+  src/jztree_cuda/knn.cu
 )
 
 include_directories(SYSTEM ${XLA_DIR})
 
-# Build multipoles CUDA implementation separately as an object library so it can be
-# compiled once and linked into the ffi module. This speeds up iterative builds.
-# add_library(multipoles_cuda OBJECT src/custom_jax_cuda/multipoles.cu)
-# target_compile_options(multipoles_cuda PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
-# target_compile_features(multipoles_cuda PRIVATE cxx_std_17)
 
 foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
     set(MODULE_NAME ${var_0})
@@ -142,17 +137,12 @@ foreach(var IN ZIP_LISTS MODULES MODULE_PATHS)
     target_compile_options(${MODULE_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
     target_compile_features(${MODULE_NAME} PRIVATE cxx_std_17)
 
-  # If this is the multipoles FFI module, link in the separately compiled CUDA object
-  # if (${MODULE_NAME} STREQUAL "ffi_multipoles")
-  #   target_link_libraries(${MODULE_NAME} PRIVATE $<TARGET_OBJECTS:multipoles_cuda>)
-  # endif()
-
   install(TARGETS ${MODULE_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME}_cuda)
 endforeach()
 
 
 # ----------------------------------------------------------------------------------------------- #
-# Auto-add all modules from src/custom_jax_cuda/generated
+# Auto-add all modules from src/jztree_cuda/generated
 # ----------------------------------------------------------------------------------------------- #
 
 # Build-time toggle: only generate sources when explicitly requested
@@ -170,7 +160,7 @@ endforeach()
 if(DEFINED ENV{CJ_GENERATE} AND ( "$ENV{CJ_GENERATE}" STREQUAL "1" OR "$ENV{CJ_GENERATE}" STREQUAL "ON" OR "$ENV{CJ_GENERATE}" STREQUAL "TRUE") )
   message(STATUS "CJ_GENERATE=ON: Running CUDA FFI generator script")
   execute_process(
-    COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/src/custom_jax_cuda/_generate_ffi.py"
+    COMMAND "${Python_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/src/jztree_cuda/_generate_ffi.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMAND_ERROR_IS_FATAL ANY
   )
@@ -180,7 +170,7 @@ endif()
 
 # Pick up all generated .cu files; re-scan on re-configure
 file(GLOB GEN_FFI_CU CONFIGURE_DEPENDS
-  "${CMAKE_CURRENT_SOURCE_DIR}/src/custom_jax_cuda/generated/*.cu"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/jztree_cuda/generated/*.cu"
 )
 
 foreach(GEN_SRC IN LISTS GEN_FFI_CU)

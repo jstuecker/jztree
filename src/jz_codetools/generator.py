@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 import os
 
 env = Environment(
-    loader=PackageLoader("cj_codetools", "templates"),
+    loader=PackageLoader("jz_codetools", "templates"),
     autoescape=select_autoescape()
 )
 

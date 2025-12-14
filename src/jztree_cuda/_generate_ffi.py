@@ -1,8 +1,8 @@
 from pathlib import Path
 import os
 
-import cj_codetools.parse as parse
-import cj_codetools.generator as gen
+import jz_codetools.parse as parse
+import jz_codetools.generator as gen
 
 HERE = Path(__file__).resolve().parent
 

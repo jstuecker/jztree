@@ -1,5 +1,5 @@
-#ifndef CUSTOM_JAX_SEGMENT_SORT_CUH
-#define CUSTOM_JAX_SEGMENT_SORT_CUH
+#ifndef SEGMENT_SORT_CUH
+#define SEGMENT_SORT_CUH
 
 #define INFTY  INFINITY //__int_as_float(0x7f800000)
 

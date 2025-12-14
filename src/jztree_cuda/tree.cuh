@@ -1,5 +1,5 @@
-#ifndef CUSTOM_JAX_TREE_H
-#define CUSTOM_JAX_TREE_H
+#ifndef TREE_H
+#define TREE_H
 
 #include <cub/cub.cuh>
 #include <math_constants.h>
@@ -360,4 +360,4 @@ __global__ void SearchSortedZ(
     indices[idx] = iout;
 }
 
-#endif // CUSTOM_JAX_TREE_H
+#endif // TREE_H
