@@ -3,7 +3,6 @@ import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_knn
 from .tree import pos_zorder_sort, search_sorted_z
-# from fmdj.ztree import summarize_leaves, pos_zorder_sort, search_sorted_z
 from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
 from .data import KNNData, KNNConfig
 
