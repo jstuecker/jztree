@@ -9,6 +9,10 @@ jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")
 
+# ------------------------------------------------------------------------------------------------ #
+#                                             FFI Calls                                            #
+# ------------------------------------------------------------------------------------------------ #
+
 def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
@@ -62,6 +66,25 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
 
     return il, ir2l, ispl
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac"])
+
+def segment_sort(key, val, isplit, smem_size=512):
+    """Sorts key/val pairs within segments defined by isplit"""
+    assert key.dtype == jnp.float32
+    assert val.dtype == jnp.int32
+    assert isplit.dtype == jnp.int32
+    assert key.shape == val.shape
+    assert isplit.ndim == 1
+    assert smem_size >= 64
+
+    out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
+    key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
+        key, val, isplit, smem_size=np.uint64(smem_size)
+    )
+    return key_sorted, val_sorted
+
+# ------------------------------------------------------------------------------------------------ #
+#                                         Helper Functions                                         #
+# ------------------------------------------------------------------------------------------------ #
 
 def offset_sum(num):
     cs = jnp.cumsum(num, axis=0)
@@ -131,21 +154,6 @@ def build_ilist_recursive(xleaf, lvleaf, nleaf, k=16, boxsize=0., max_size=48, n
     return il, ir2l, ispl
 build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize', 'alloc_fac'])
-
-def segment_sort(key, val, isplit, smem_size=512):
-    """Sorts key/val pairs within segments defined by isplit"""
-    assert key.dtype == jnp.float32
-    assert val.dtype == jnp.int32
-    assert isplit.dtype == jnp.int32
-    assert key.shape == val.shape
-    assert isplit.ndim == 1
-    assert smem_size >= 64
-
-    out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
-    key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
-        key, val, isplit, smem_size=np.uint64(smem_size)
-    )
-    return key_sorted, val_sorted
 
 
 # =================================== User exposed functions ===================================== #
