@@ -1,130 +1,13 @@
 from pathlib import Path
 import os
 
-import jz_codetools.parse as parse
-import jz_codetools.generator as gen
+import fmdj_utils.parse as parse
+import fmdj_utils.generator as gen
 
 HERE = Path(__file__).resolve().parent
 
 p_instance_values = (1, 2, 3, 4, 5)
 default_includes = ["../common/math.cuh"]
-
-# ------------------------------------------------------------------------------------------------ #
-#                                            ffi_example                                           #
-# ------------------------------------------------------------------------------------------------ #
-
-funcs = parse.get_functions_from_file(
-    str(HERE / "ffi_example.cuh"),
-    only_kernels=False,
-    names=["SimpleArange", "SetToConstantCall", "NestedTemplate"]
-)
-
-funcs["SimpleArange"].grid_size_expression = "div_ceil(output->element_count(), block_size)"
-funcs["SimpleArange"].template_par["p"].instances = p_instance_values
-funcs["SetToConstantCall"].template_par["tpar"].instances = (16, 32, 64)
-funcs["SetToConstantCall"].par["size"].expression = "output->element_count()"
-
-funcs["NestedTemplate"].grid_size_expression = "div_ceil(output->element_count(), block_size)"
-funcs["NestedTemplate"].par["size"].expression = "output->element_count()"
-# Can define template instances as an outer product over individual parameter instances:
-funcs["NestedTemplate"].template_par["p1"].instances = (0, 1)
-funcs["NestedTemplate"].template_par["p2"].instances = (22,33)
-funcs["NestedTemplate"].template_par["flag"].instances = ("true", "false")
-# Or directly as a manual list:
-# funcs["NestedTemplate"].template_instances = [(0, 11, "true"), (3, 4, "false")]
-
-print(funcs["NestedTemplate"].template_values_str()[0])
-
-for kernel in funcs.values():
-    print(kernel.name, kernel.is_kernel)
-
-gen.generate_ffi_module_file(
-    output_file = str(HERE / "generated/ffi_example.cu"), 
-    functions = funcs, 
-    includes = default_includes + ["../ffi_example.cuh"]
-)
-
-
-# ------------------------------------------------------------------------------------------------ #
-#                                            forces.cuh                                            #
-# ------------------------------------------------------------------------------------------------ #
-
-kernels = parse.get_functions_from_file(
-    str(HERE / "forces.cuh"), 
-    only_kernels=True
-)
-
-kernels["GroupedForceAndPot"].grid_size_expression = "spl_nodes.element_count() - 1"
-kernels["GroupedForceAndPot"].block_size_expression = "128" #"max_leaf_size"
-kernels["GroupedForceAndPot"].smem_size_expression = "blockDim.x * sizeof(float4)"
-kernels["GroupedForceAndPot"].init_outputs_zero = True
-
-kernels["ForceAndPotential"].grid_size_expression = "div_ceil(xm.element_count()/4, block_size)"
-kernels["ForceAndPotential"].smem_size_expression = "blockDim.x * sizeof(float4)"
-kernels["ForceAndPotential"].par["n"].expression = "xm.element_count()/4"
-
-kernels["BwdForceAndPotential"].grid_size_expression = "div_ceil(xm.element_count()/4, block_size)"
-kernels["BwdForceAndPotential"].smem_size_expression = "2 * blockDim.x * sizeof(float4)"
-kernels["BwdForceAndPotential"].par["n"].expression = "xm.element_count()/4"
-
-
-kernels["IlistForceAndPot"].grid_size_expression = "div_ceil(interactions.element_count()/2, interactions_per_block)"
-kernels["IlistForceAndPot"].init_outputs_zero = True
-
-gen.generate_ffi_module_file(
-    output_file = str(HERE / "generated/ffi_forces.cu"), 
-    functions = kernels, 
-    includes = default_includes + ["../forces.cuh"]
-)
-
-# ------------------------------------------------------------------------------------------------ #
-#                                              fmm.cuh                                             #
-# ------------------------------------------------------------------------------------------------ #
-
-kernels = parse.get_functions_from_file(
-    str(HERE / "fmm.cuh"), 
-    only_kernels=True
-)
-
-kernels["CountInteractionsAndM2L"].grid_size_expression = "spl_nodes.element_count() - 1"
-kernels["CountInteractionsAndM2L"].init_outputs_zero = True
-kernels["CountInteractionsAndM2L"].block_size_expression = 32
-kernels["CountInteractionsAndM2L"].template_par["p"].instances = p_instance_values
-
-kernels["InsertInteractions"].grid_size_expression = "spl_nodes.element_count() - 1"
-# kernels["InsertInteractions"].init_outputs_zero = True # this is actually expensive and not needed
-kernels["InsertInteractions"].block_size_expression = 32
-
-gen.generate_ffi_module_file(
-    output_file = str(HERE / "generated/ffi_fmm.cu"), 
-    functions = kernels, 
-    includes = default_includes + ["../fmm.cuh"]
-)
-
-# ------------------------------------------------------------------------------------------------ #
-#                                          multipoles.cuh                                          #
-# ------------------------------------------------------------------------------------------------ #
-
-kernels = parse.get_functions_from_file(
-    str(HERE / "multipoles.cuh"), 
-    only_kernels=True
-)
-
-print(list(kernels.keys()))
-for kernel in kernels.values():
-    kernel.template_par["p"].instances = p_instance_values
-    kernel.init_outputs_zero = True
-
-kernels["IlistM2L"].grid_size_expression = "div_ceil(interactions.element_count() / 2, block_size*interactions_per_block)"
-kernels["IlistLeaf2NodeM2L"].grid_size_expression = "div_ceil(interactions.element_count() / 2, interactions_per_block)"
-kernels["MultipolesFromParticles"].grid_size_expression = "isplit.element_count() - 1"
-kernels["CoarsenMultipoles"].grid_size_expression = "isplit.element_count() - 1"
-
-gen.generate_ffi_module_file(
-    output_file = str(HERE / "generated/ffi_multipoles.cu"), 
-    functions = kernels, 
-    includes = default_includes + ["../multipoles.cuh"]
-)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                             tree.cuh                                             #
