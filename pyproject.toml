@@ -40,7 +40,3 @@ dev = [
     "pytest>=8.4.2",
     "jax[cuda13]"
 ]
-
-
-[project.entry-points."fmdj.plugins"]
-custom_jax = "custom_jax.fmdj_plugin:register"
