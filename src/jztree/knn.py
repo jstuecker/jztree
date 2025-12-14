@@ -244,20 +244,31 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     
     nplanes = th.num_planes()
     valid = jnp.arange(th.plane_sizes[-1], dtype=jnp.int32) < th.lvl.num(nplanes-1)
-    spl, il, ir2l, ispl = dense_ilist(th.plane_sizes[-1], valid, ngroup=32)
 
-    for i in reversed(range(th.num_planes())):
-        size = th.plane_sizes[0]
-        node_x = th.geom_cent.get(i, size)
-        node_lvl = th.lvl.get(i, size)
-        node_npart = th.npart(i, size)
+    size = th.plane_sizes[0]
+
+    spl, il, ir2l, ispl = dense_ilist(th.plane_sizes[-1], valid, ngroup=32)
+    
+    def handle_level(i, carry):
+        level = nplanes - i - 1 # have to do manual reversed loop with jax
+        spl, il, ir2l, ispl = carry
+        node_x = th.geom_cent.get(level, size)
+        node_lvl = th.lvl.get(level, size)
+        node_npart = th.npart(level, size)
         il, ir2l, ispl = build_ilist_knn(
             node_x, node_lvl, node_npart,
             spl, il, ir2l, ispl, k=k, boxsize=boxsize, alloc_fac=cfg.alloc_fac_ilist
         )
+        spl = th.ispl_n2n.get(level, size+1)
+        return spl, il, ir2l, ispl
+    
+    # Need to fix initialization size to use this:
+    # spl, il, ir2l, ispl = jax.lax.fori_loop(
+    #     0, nplanes, handle_level, (spl, il, ir2l, ispl)
+    # )
 
-        # Node2Node relation for next level
-        spl = th.ispl_n2n.get(i, size+1)
+    for i in reversed(range(th.num_planes())):
+        spl, il, ir2l, ispl = handle_level(i, (spl, il, ir2l, ispl))
 
     data = KNNData(
         k=k,
