@@ -2,8 +2,9 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_knn
-from .tree import summarize_leaves, lvl_to_ext, get_node_box, pos_zorder_sort, search_sorted_z
-from .common import conditional_callback
+from .tree import summarize_leaves, pos_zorder_sort, search_sorted_z
+from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
+from .data import KNNData, KNNConfig
 
 jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
@@ -85,18 +86,6 @@ def segment_sort(key, val, isplit, smem_size=512):
 # ------------------------------------------------------------------------------------------------ #
 #                                         Helper Functions                                         #
 # ------------------------------------------------------------------------------------------------ #
-
-def offset_sum(num):
-    cs = jnp.cumsum(num, axis=0)
-    return cs - num, cs[-1]
-
-def cumsum_starting_with_zero(num):
-    return jnp.pad(jnp.cumsum(num), (1, 0))
-
-def masked_prefix_sum(mask):
-    off, _ = offset_sum(mask)
-    off_masked = jnp.where(mask, off, len(mask))
-    return off_masked
     
 def dense_ilist(nleaves, leaf_mask=None, ngroup=32):
     num = (nleaves + ngroup - 1) // ngroup
@@ -156,50 +145,9 @@ build_ilist_recursive.jit = jax.jit(build_ilist_recursive, static_argnames=[
     'max_size', 'num_part', 'refine_fac', 'k', 'stop_coarsen', 'boxsize', 'alloc_fac'])
 
 
-# =================================== User exposed functions ===================================== #
-
-def knn_old(posz, k=16, boxsize=0., alloc_fac=256., max_leaf_size=48):
-    spl, nleaf, llvl, xleaf, numleaves = summarize_leaves(posz, max_size=max_leaf_size)
-
-    il, ir2l, ispl = build_ilist_recursive(xleaf, llvl, nleaf, max_size=max_leaf_size, refine_fac=15,
-                                          num_part=len(posz), k=k, boxsize=boxsize, alloc_fac=alloc_fac)
-
-    rknn, iknn = ilist_knn_search(posz, spl, il, ir2l, ispl, k=k, boxsize=boxsize)
-
-    return rknn, iknn
-knn_old.jit = jax.jit(knn_old, static_argnames=["k", "boxsize", "alloc_fac", "max_leaf_size"])
-
-def inverse_indices(iargsort):
-    """Given the indices that would sort an array, return the indices that would unsort it"""
-    iunsort = jnp.zeros_like(iargsort)
-    iunsort = iunsort.at[iargsort].set(jnp.arange(len(iargsort), dtype=iargsort.dtype))
-    return iunsort
-
-from dataclasses import dataclass
-from functools import partial
-
-@dataclass(frozen=True)
-class KNNConfig:
-    max_leaf_size: int = 48
-    rfac : float = 8.
-    alloc_fac_ilist: float = 256.
-    alloc_fac_nodes: float = 1.
-    stop_coarsen: int = 2048
-
-@partial(jax.tree_util.register_dataclass, 
-         meta_fields=["k", "boxsize"],
-         data_fields=["posz", "idz", "spl", "ilist", "ir2list", "ilist_spl"])
-@dataclass
-class KNNData:
-    k : int
-    boxsize : float
-
-    posz: jnp.ndarray       # z-sorted positions
-    idz: jnp.ndarray        # ids so that posz = pos0[idz]
-    spl: jnp.ndarray        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
-    ilist: jnp.ndarray      # interaction list (leaf indices)
-    ir2list: jnp.ndarray    # interaction r2 list (lower bound leaf-leaf distances squared)
-    ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
+# ------------------------------------------------------------------------------------------------ #
+#                                      User Exposed Functions                                      #
+# ------------------------------------------------------------------------------------------------ #
 
 def evaluate_knn_z(d : KNNData, posz_query=None):
     """Evaluates the kNN for a given set of positions and precomputed interaction list

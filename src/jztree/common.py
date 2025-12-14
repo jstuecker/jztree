@@ -3,27 +3,6 @@ from jax.experimental import checkify, io_callback
 import functools
 import jax.numpy as jnp
 
-def jzit(f, enable: bool = True, errors = checkify.user_checks, **jit_kwargs):
-    """
-    Decorate a function so that:
-      - checks inside it (via checkify.check) are made jit-safe, and
-      - any failure raises on the host after execution.
-    If enable=False, it becomes a plain jitted function (fast path).
-    """
-    
-    if not enable:
-        return jax.jit(f, **jit_kwargs)
-
-    cf = checkify.checkify(f, errors=errors)
-    jf = jax.jit(cf, **jit_kwargs)
-
-    @functools.wraps(f)
-    def wrapped(*args, **kwargs):
-        err, out = jf(*args, **kwargs)
-        err.throw()   # materializes + raises if any check failed
-        return out
-    return wrapped
-
 def conditional_callback(flag, f, *args, **kwargs):
     """Calls a device function f, only if the flag is True. Useful for raising exceptions that 
     truly stop the execution of a jitted program
@@ -39,3 +18,21 @@ def conditional_callback(flag, f, *args, **kwargs):
     )
 
     return res
+
+def offset_sum(num):
+    cs = jnp.cumsum(num, axis=0)
+    return cs - num, cs[-1]
+
+def cumsum_starting_with_zero(num):
+    return jnp.pad(jnp.cumsum(num), (1, 0))
+
+def masked_prefix_sum(mask):
+    off, _ = offset_sum(mask)
+    off_masked = jnp.where(mask, off, len(mask))
+    return off_masked
+
+def inverse_indices(iargsort):
+    """Given the indices that would sort an array, return the indices that would unsort it"""
+    iunsort = jnp.zeros_like(iargsort)
+    iunsort = iunsort.at[iargsort].set(jnp.arange(len(iargsort), dtype=iargsort.dtype))
+    return iunsort
