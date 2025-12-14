@@ -3,8 +3,11 @@ import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_knn
 from .tree import summarize_leaves, pos_zorder_sort, search_sorted_z
+# from fmdj.ztree import summarize_leaves, pos_zorder_sort, search_sorted_z
 from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
 from .data import KNNData, KNNConfig
+
+import fmdj
 
 jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
@@ -219,6 +222,55 @@ def prepare_knn_z(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None
     
     return data
 prepare_knn_z.jit = jax.jit(prepare_knn_z, static_argnames=["k", "boxsize", "cfg"])
+
+def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
+    """Prepares an instance of KNNData for a given set of positions posz
+    posz is assumed to be sorted in z-order (use prepare_knn if it is not)
+
+    if idz is given it is assumed that posz = pos0[idz] for some original pos0
+    and output indices will be mapped back to original indices
+    """
+    boxsize = 0. if boxsize is None else boxsize
+
+    cfg_fmdj = fmdj.Config(fmm = fmdj.config.FMMConfig(
+        alloc_fac_nodes=cfg.alloc_fac_nodes,
+        max_leaf_size=cfg.max_leaf_size,
+        coarse_fac=cfg.rfac,
+        stop_coarsen=cfg.stop_coarsen
+    ))
+    posmassz = fmdj.data.PosMass(posz, jnp.ones((len(posz),), dtype=jnp.float32))
+    th = fmdj.ztree.build_tree_hierarchy(posmassz, cfg_fmdj)
+    
+    nplanes = th.num_planes()
+    valid = jnp.arange(th.plane_sizes[-1], dtype=jnp.int32) < th.lvl.num(nplanes-1)
+    spl, il, ir2l, ispl = dense_ilist(th.plane_sizes[-1], valid, ngroup=32)
+
+    for i in reversed(range(th.num_planes())):
+        size = th.plane_sizes[0]
+        node_x = th.geom_cent.get(i, size)
+        node_lvl = th.lvl.get(i, size)
+        node_npart = th.npart(i, size)
+        il, ir2l, ispl = build_ilist_knn(
+            node_x, node_lvl, node_npart,
+            spl, il, ir2l, ispl, k=k, boxsize=boxsize, alloc_fac=cfg.alloc_fac_ilist
+        )
+
+        # Node2Node relation for next level
+        spl = th.ispl_n2n.get(i)
+
+    data = KNNData(
+        k=k,
+        boxsize=boxsize,
+        posz=posz,
+        idz=idz,
+        spl=spl,
+        ilist=il,
+        ir2list=ir2l,
+        ilist_spl=ispl
+    )
+    
+    return data
+prepare_knn_z_new.jit = jax.jit(prepare_knn_z_new, static_argnames=["k", "boxsize", "cfg"])
 
 def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions pos0
