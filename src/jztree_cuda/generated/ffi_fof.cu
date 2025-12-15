@@ -33,7 +33,6 @@ ffi::Error NodeFofAndIlistFFIHost(
     ffi::AnyBuffer isplit,
     ffi::AnyBuffer leaves,
     ffi::Result<ffi::AnyBuffer> leaf_igroup_out,
-    ffi::Result<ffi::AnyBuffer> interaction_count,
     ffi::Result<ffi::AnyBuffer> ilist_out_splits,
     ffi::Result<ffi::AnyBuffer> ilist_out,
     float r2link,
@@ -53,7 +52,6 @@ ffi::Error NodeFofAndIlistFFIHost(
         reinterpret_cast<int*>(isplit.untyped_data()),
         reinterpret_cast<Node*>(leaves.untyped_data()),
         reinterpret_cast<int*>(leaf_igroup_out->untyped_data()),
-        reinterpret_cast<int*>(interaction_count->untyped_data()),
         reinterpret_cast<int*>(ilist_out_splits->untyped_data()),
         reinterpret_cast<int*>(ilist_out->untyped_data()),
         r2link,
@@ -81,7 +79,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // isplit
         .Arg<ffi::AnyBuffer>() // leaves
         .Ret<ffi::AnyBuffer>() // leaf_igroup_out
-        .Ret<ffi::AnyBuffer>() // interaction_count
         .Ret<ffi::AnyBuffer>() // ilist_out_splits
         .Ret<ffi::AnyBuffer>() // ilist_out
         .Attr<float>("r2link")
