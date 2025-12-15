@@ -51,9 +51,9 @@ node_fof_and_ilist.jit = jax.jit(
 def contract_links(igroup):
     def body(carry):
         igroup, _ = carry
-        igroup_new = igroup[igroup]
+        igroup_new = igroup[abs(igroup)]
         jax.debug.print("diff: {}", jnp.sum(igroup_new != igroup))
-        return igroup_new, jnp.any(igroup_new != igroup)
+        return igroup_new, jnp.any(abs(igroup_new) != abs(igroup))
     
     igroup_new = jax.lax.while_loop(lambda carry: carry[1], body, (igroup, True))[0]
 
@@ -81,7 +81,7 @@ def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, alloc_fac_ilist: int = 1
         igroup, ispl, il = node_fof_and_ilist(
             igroup, ispl, il, spl, xleaf, lvl_leaf, rlink=rlink, alloc_fac=alloc_fac_ilist
         )
-        igroup = contract_links(igroup)
+        # igroup = contract_links(igroup)
 
         spl = th.ispl_n2n.get(level, size+1)
         
