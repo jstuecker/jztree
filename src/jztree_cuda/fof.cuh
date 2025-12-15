@@ -118,6 +118,9 @@ __global__ void NodeFof_Link_Count_Insert(
         while(!pf_ilist.finished()) {
             int nodeT = pf_ilist.next();
 
+            if(nodeT < nodeQ)
+                continue; // each interaction needs to be evaluated only once
+
             int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
             float3* xT = reinterpret_cast<float3*>(smem);
@@ -309,6 +312,9 @@ __global__ void ParticleFofLink(
 
         while(!pf_ilist.finished()) {
             int nodeT = pf_ilist.next();
+
+            if(nodeT < nodeQ)
+                continue; // each interaction needs to be evaluated only once
 
             int ipartT_start = isplit[nodeT], ipartT_end = isplit[nodeT + 1];
 
