@@ -102,7 +102,7 @@ particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rli
 # ------------------------------------------------------------------------------------------------ #
 
 def prepare_fof_z(posz: jnp.ndarray, rlink: float, boxsize: float | None = None, 
-                  cfg: FofConfig = FofConfig(), idz=None) -> FofData:
+                  cfg: FofConfig = FofConfig()) -> FofData:
     cfg_fmdj = fmdj.Config(fmm = fmdj.config.FMMConfig(
         alloc_fac_nodes=cfg.alloc_fac_nodes,
         max_leaf_size=cfg.max_leaf_size,
@@ -118,7 +118,6 @@ def prepare_fof_z(posz: jnp.ndarray, rlink: float, boxsize: float | None = None,
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
 
-    # posz, idz, 
     return FofData(rlink, boxsize, posz, igroup, ispl, il, spl)
 prepare_fof_z.jit = jax.jit(prepare_fof_z, static_argnames=["rlink", "boxsize", "cfg"])
 
