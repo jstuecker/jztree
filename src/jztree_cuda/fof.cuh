@@ -140,7 +140,7 @@ __global__ void NodeFof_Link_Count_Insert(
                         break;
                     ileafT = itoff+j;
 
-                    if(leafQ_igroup == igroupT[j]) { 
+                    if((leafQ_igroup == igroupT[j]) && (ileafQ != ileafT)) { 
                         // already linked -> skip
                         // Note: on pass 0 this check doesn't guarantee that we are not linked,
                         //       since leaf_igroup might have changed in the mean-time
@@ -160,7 +160,7 @@ __global__ void NodeFof_Link_Count_Insert(
                     if(r2max <= r2link) {
                         if(pass == 0)
                             link_roots(leaf_igroup, ileafQ, ileafT);
-                        else if((pass == 2) && (ileafQ == ileafT) && (leaf_igroup[ileafQ] == ileafT))
+                        else if((pass == 2) && (ileafQ == ileafT) && (abs(leaf_igroup[ileafQ]) == ileafQ))
                             leaf_igroup[ileafQ] = -ileafQ; // flag self-interaction
                     }
                     else if((pass >= 1) && (r2min <= r2link)) {
@@ -236,8 +236,9 @@ ffi::Error NodeFofAndIlist(
         r2link, boxsize, ilist_out_size
     );
 
-    // contract links so that each leaf's parent points to its root
-    KernelContractLinks<<< nleaves, block_size, 0, stream >>>(leaf_igroup, nleaves);
+    // contract links so that each leaf points to its root
+    int contract_blocks = (nleaves + block_size - 1) / block_size;
+    KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(leaf_igroup, nleaves);
 
     // pass 1: count interactions
     NodeFof_Link_Count_Insert<1><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
@@ -357,7 +358,7 @@ ffi::Error ParticleFof(
     cudaMemsetAsync(particle_igroup, 0, sizeof(int)*npart, stream);
 
     // Initialize particle group pointers from nodes
-    NodeToChildLabel<<< npart, block_size, 0, stream >>>(
+    NodeToChildLabel<<< nnodes, block_size, 0, stream >>>(
         node_igroup, isplit, particle_igroup
     );
 
@@ -368,6 +369,10 @@ ffi::Error ParticleFof(
         particle_igroup,
         r2link, boxsize
     );
+
+    // contract links so that each particle points to its root
+    int contract_blocks = (npart + block_size - 1) / block_size;
+    KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(particle_igroup, npart);
     
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

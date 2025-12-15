@@ -74,7 +74,6 @@ def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc
     igroup = jnp.arange(len(spl)-1, dtype=jnp.int32)
 
     for level in reversed(range(nplanes)):
-        print("lv", level)
         size = th.plane_sizes[level]
         xleaf = th.geom_cent.get(level, size)
         lvl_leaf = th.lvl.get(level, size)
@@ -83,7 +82,6 @@ def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc
             igroup, ispl, il, spl, xleaf, lvl_leaf, 
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
-        # igroup = contract_links(igroup)
 
         spl = th.ispl_n2n.get(level, size+1)
         
