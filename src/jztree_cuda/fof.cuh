@@ -281,6 +281,64 @@ ffi::Error NodeFofAndIlist(
 /*                              Kernels for particle-particle linking                             */
 /* ---------------------------------------------------------------------------------------------- */
 
+__global__ void ParticleFofLink(
+    const int* node_ilist_splits,
+    const int* node_ilist,
+    const int* isplit,
+    const float3* pos,
+    int* part_igroup,
+    // Parameters:
+    float r2link,
+    float boxsize
+) {
+    extern __shared__ unsigned char smem[];
+
+    int nodeQ = blockIdx.x;
+
+    int ipartQ_start = isplit[nodeQ], ipartQ_end = isplit[nodeQ + 1];
+    for(int iqoff = ipartQ_start; iqoff < ipartQ_end; iqoff += blockDim.x) {
+        // we set overhead threads to the last leaf to avoid adding many conditionals
+        int ipartQ = min(iqoff + threadIdx.x, ipartQ_end - 1); 
+        bool valid = iqoff + threadIdx.x < ipartQ_end;
+        
+        PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        
+        float3 xQ = pos[ipartQ];
+        int igroupQ = abs(part_igroup[ipartQ]);
+
+        while(!pf_ilist.finished()) {
+            int nodeT = pf_ilist.next();
+
+            int ipartT_start = isplit[nodeT], ipartT_end = isplit[nodeT + 1];
+
+            float3* xT = reinterpret_cast<float3*>(smem);
+            int* igroupT = reinterpret_cast<int*>(xT + blockDim.x);
+
+            for(int itoff=ipartT_start; itoff < ipartT_end; itoff += blockDim.x) {
+                int ipartT = itoff + threadIdx.x;
+
+                if(ipartT < ipartT_end) {
+                    xT[threadIdx.x] = pos[ipartT];
+                    igroupT[threadIdx.x] = abs(part_igroup[ipartT]);
+                }
+                __syncthreads();
+                
+                for(int j = 0; j < min(ipartT_end - itoff, blockDim.x); j++) {
+                    if(!valid)
+                        break;
+                    ipartT = itoff+j;
+                    
+                    float r2 = distance_squared(xQ, xT[j], boxsize);
+                    
+                    if((igroupQ != igroupT[j]) && (r2 <= r2link))
+                        link_roots(part_igroup, ipartQ, ipartT);
+                }
+                __syncthreads();
+            }
+        }
+    }
+}
+
 ffi::Error ParticleFof(
     cudaStream_t stream,
     const int* node_igroup,
@@ -296,13 +354,19 @@ ffi::Error ParticleFof(
     int npart,
     int block_size
 ) {
-    size_t smem_alloc_bytes = block_size * (2*sizeof(float3));
-
     cudaMemsetAsync(particle_igroup, 0, sizeof(int)*npart, stream);
 
     // Initialize particle group pointers from nodes
-    NodeToChildLabel<<< nnodes, block_size, 0, stream >>>(
+    NodeToChildLabel<<< npart, block_size, 0, stream >>>(
         node_igroup, isplit, particle_igroup
+    );
+
+    // Now do particle-particle linking
+    size_t smem = block_size * (sizeof(float3) + sizeof(int));
+    ParticleFofLink<<< nnodes, block_size, smem, stream >>> (
+        node_ilist_splits, node_ilist, isplit, pos,
+        particle_igroup,
+        r2link, boxsize
     );
     
     cudaError_t last_error = cudaGetLastError();
