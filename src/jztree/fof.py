@@ -9,6 +9,7 @@ from .data import KNNData, KNNConfig
 import fmdj
 
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
+jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                             FFI Calls                                            #
@@ -61,7 +62,7 @@ def contract_links(igroup):
 
 from .knn import dense_ilist
 
-def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, alloc_fac_ilist: int = 128):
+def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
     nplanes = th.num_planes()
     nnodes = th.lvl.num(nplanes-1)
 
@@ -79,11 +80,20 @@ def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, alloc_fac_ilist: int = 1
         lvl_leaf = th.lvl.get(level, size)
 
         igroup, ispl, il = node_fof_and_ilist(
-            igroup, ispl, il, spl, xleaf, lvl_leaf, rlink=rlink, alloc_fac=alloc_fac_ilist
+            igroup, ispl, il, spl, xleaf, lvl_leaf, 
+            rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
         # igroup = contract_links(igroup)
 
         spl = th.ispl_n2n.get(level, size+1)
         
-    return igroup, ispl, il
+    return igroup, ispl, il, spl
 tree_fof.jit = jax.jit(tree_fof, static_argnames=["rlink", "alloc_fac_ilist"])
+
+def evaluate_fof(node_igroup, ispl, il, spl, pos, rlink: float, boxsize: float = 0., block_size=32):
+    igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(pos),), node_igroup.dtype),))(
+        node_igroup, ispl, il, spl, pos,
+        r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
+    )[0]
+
+    return igroup

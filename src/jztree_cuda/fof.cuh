@@ -40,6 +40,10 @@ __device__ __forceinline__ void link_roots(int* igroup, int a, int b) {
     }
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                  Kernels for node-node linking                                 */
+/* ---------------------------------------------------------------------------------------------- */
+
 __global__ void NodeToChildLabel(
     const int* node_igroup,
     const int* isplit,
@@ -212,7 +216,7 @@ ffi::Error NodeFofAndIlist(
     size_t ilist_out_size,
     int block_size
 ) {
-    size_t smem_alloc_bytes = block_size * (2*sizeof(float3));
+    size_t smem_alloc_bytes = block_size * (2*sizeof(float3) + sizeof(int));
 
     cudaMemsetAsync(ilist_out_splits, 0, sizeof(int)*(nleaves+1), stream);
     cudaMemsetAsync(leaf_igroup, 0, sizeof(int)*(nleaves), stream);
@@ -264,6 +268,41 @@ ffi::Error NodeFofAndIlist(
         node_ilist_splits, node_ilist, isplit, leaves, ilist_out_splits,
         leaf_igroup, nullptr, ilist_out,
         r2link, boxsize, ilist_out_size
+    );
+    
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/*                              Kernels for particle-particle linking                             */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error ParticleFof(
+    cudaStream_t stream,
+    const int* node_igroup,
+    const int* node_ilist_splits,
+    const int* node_ilist,
+    const int* isplit,
+    const float3* pos,
+    int* particle_igroup,
+    // Parameters:
+    float r2link,
+    float boxsize,
+    int nnodes,
+    int npart,
+    int block_size
+) {
+    size_t smem_alloc_bytes = block_size * (2*sizeof(float3));
+
+    cudaMemsetAsync(particle_igroup, 0, sizeof(int)*npart, stream);
+
+    // Initialize particle group pointers from nodes
+    NodeToChildLabel<<< nnodes, block_size, 0, stream >>>(
+        node_igroup, isplit, particle_igroup
     );
     
     cudaError_t last_error = cudaGetLastError();

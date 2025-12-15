@@ -88,9 +88,68 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: ParticleFof                               */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error ParticleFofFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer node_igroup,
+    ffi::AnyBuffer node_ilist_splits,
+    ffi::AnyBuffer node_ilist,
+    ffi::AnyBuffer isplit,
+    ffi::AnyBuffer pos,
+    ffi::Result<ffi::AnyBuffer> particle_igroup,
+    float r2link,
+    float boxsize,
+    int block_size
+) {
+    int nnodes = isplit.element_count() - 1;
+    int npart = particle_igroup->element_count();
+
+    // Now call our function
+    ffi::Error result = ParticleFof(
+        stream,
+        reinterpret_cast<int*>(node_igroup.untyped_data()),
+        reinterpret_cast<int*>(node_ilist_splits.untyped_data()),
+        reinterpret_cast<int*>(node_ilist.untyped_data()),
+        reinterpret_cast<int*>(isplit.untyped_data()),
+        reinterpret_cast<float3*>(pos.untyped_data()),
+        reinterpret_cast<int*>(particle_igroup->untyped_data()),
+        r2link,
+        boxsize,
+        nnodes,
+        npart,
+        block_size
+    );
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    ParticleFofFFI, ParticleFofFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // node_igroup
+        .Arg<ffi::AnyBuffer>() // node_ilist_splits
+        .Arg<ffi::AnyBuffer>() // node_ilist
+        .Arg<ffi::AnyBuffer>() // isplit
+        .Arg<ffi::AnyBuffer>() // pos
+        .Ret<ffi::AnyBuffer>() // particle_igroup
+        .Attr<float>("r2link")
+        .Attr<float>("boxsize")
+        .Attr<int>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_fof, m) {
     m.def("NodeFofAndIlist", []() { return EncapsulateFfiCall(&NodeFofAndIlistFFI); });
+    m.def("ParticleFof", []() { return EncapsulateFfiCall(&ParticleFofFFI); });
 }
