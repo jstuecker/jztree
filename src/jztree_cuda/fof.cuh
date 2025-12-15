@@ -40,10 +40,10 @@ __device__ __forceinline__ void link_roots(int* igroup, int a, int b) {
     }
 }
 
-__global__ void KernelNodeFoFInit(
+__global__ void NodeToChildLabel(
     const int* node_igroup,
     const int* isplit,
-    int* leaf_igroup_out
+    int* leaf_igroup
 ) {
     int node = blockIdx.x;
     int node_root = node_igroup[node];
@@ -51,20 +51,19 @@ __global__ void KernelNodeFoFInit(
     int ileaf_start = isplit[node], ileaf_end = isplit[node + 1];
     for(int ileaf = ileaf_start + threadIdx.x; ileaf < ileaf_end; ileaf += blockDim.x) {
         if(node_root == node) { // node points to self, it was not linked anywhere
-            leaf_igroup_out[ileaf] = ileaf;
+            leaf_igroup[ileaf] = ileaf;
         }
         else { 
             // If our node is linked, then we inherit the label of the first child of its root
             // Self-linked nodes are indicated through a negative self-pointer and this will 
             // be triggered for them, too!
-            leaf_igroup_out[ileaf] = isplit[abs(node_root)];
+            leaf_igroup[ileaf] = isplit[abs(node_root)];
         }
     }
 }
 
 template<int pass>
-__global__ void KernelNodeFoFEvalAndCount(
-    const int* node_igroup,
+__global__ void NodeFof_Link_Count_Insert(
     const int* node_ilist_splits,
     const int* node_ilist,
     const int* isplit,
@@ -78,21 +77,18 @@ __global__ void KernelNodeFoFEvalAndCount(
     float boxsize,
     int ilist_out_size
 ) {
-    // The goal of this kernel is to find for each leaf in our node the lowest leaf that is 
-    // completely contained within the linking and to add uncertain leaves into an interaction
-    // list
+    // Does a node based FoF, by evaluating guaranteed links and building an interaction list for
+    // possible links at the child level
     //
-    // Depending on mode_insert it does the following:
-    // mode_insert == false:
-    //     (1a) determine the minimum leaf index of those that are completely in the linking length
-    //     (1b) and count the number of interactions that need to be evaluated at a finer level
-    // mode_insert == true:
-    //     (2)  insert the interactions into a list
+    // pass 0: Link together leaf nodes base on the interaction list
+    //   (step 0b: Contract links in another kernel)
+    // pass 1: Count the number of uncertain interactions
+    //   (step 1b: Prefix sum)
+    // pass 2: Insert the uncertain interactions into a list
 
     extern __shared__ unsigned char smem[];
 
     int nodeQ = blockIdx.x;
-    // int nodeQ_igroup = node_igroup[nodeQ];
 
     int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
     for(int iqoff = ileafQ_start; iqoff < ileafQ_end; iqoff += blockDim.x) {
@@ -117,9 +113,6 @@ __global__ void KernelNodeFoFEvalAndCount(
 
         while(!pf_ilist.finished()) {
             int nodeT = pf_ilist.next();
-            // int nodeT_igroup = node_igroup[nodeT];
-            // if((nodeQ != nodeT) && (nodeT_igroup == nodeQ_igroup))
-            //     continue; // Nodes were already linked at parent level --> skip
 
             int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
@@ -228,13 +221,13 @@ ffi::Error NodeFofAndIlist(
     int* interaction_count = ilist_out_splits + 1; // use the ilist_out_splits as temporary storage
 
     // Initialize childs leaf pointers
-    KernelNodeFoFInit<<< nnodes, block_size, 0, stream >>>(
+    NodeToChildLabel<<< nnodes, block_size, 0, stream >>>(
         node_igroup, isplit, leaf_igroup
     );
 
     // pass 0: link
-    KernelNodeFoFEvalAndCount<0><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
-        node_igroup, node_ilist_splits, node_ilist, isplit, leaves, nullptr,
+    NodeFof_Link_Count_Insert<0><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
+        node_ilist_splits, node_ilist, isplit, leaves, nullptr,
         leaf_igroup, nullptr, nullptr,
         r2link, boxsize, ilist_out_size
     );
@@ -243,8 +236,8 @@ ffi::Error NodeFofAndIlist(
     KernelContractLinks<<< nleaves, block_size, 0, stream >>>(leaf_igroup, nleaves);
 
     // pass 1: count interactions
-    KernelNodeFoFEvalAndCount<1><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
-        node_igroup, node_ilist_splits, node_ilist, isplit, leaves, nullptr,
+    NodeFof_Link_Count_Insert<1><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
+        node_ilist_splits, node_ilist, isplit, leaves, nullptr,
         leaf_igroup, interaction_count, nullptr,
         r2link, boxsize, ilist_out_size
     );
@@ -267,8 +260,8 @@ ffi::Error NodeFofAndIlist(
     );
 
     // pass 2: insert interactions
-    KernelNodeFoFEvalAndCount<2><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
-        node_igroup, node_ilist_splits, node_ilist, isplit, leaves, ilist_out_splits,
+    NodeFof_Link_Count_Insert<2><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
+        node_ilist_splits, node_ilist, isplit, leaves, ilist_out_splits,
         leaf_igroup, nullptr, ilist_out,
         r2link, boxsize, ilist_out_size
     );

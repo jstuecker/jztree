@@ -32,7 +32,7 @@ ffi::Error NodeFofAndIlistFFIHost(
     ffi::AnyBuffer node_ilist,
     ffi::AnyBuffer isplit,
     ffi::AnyBuffer leaves,
-    ffi::Result<ffi::AnyBuffer> leaf_igroup_out,
+    ffi::Result<ffi::AnyBuffer> leaf_igroup,
     ffi::Result<ffi::AnyBuffer> ilist_out_splits,
     ffi::Result<ffi::AnyBuffer> ilist_out,
     float r2link,
@@ -40,7 +40,7 @@ ffi::Error NodeFofAndIlistFFIHost(
     int block_size
 ) {
     int nnodes = isplit.element_count() - 1;
-    int nleaves = leaf_igroup_out->element_count();
+    int nleaves = leaf_igroup->element_count();
     size_t ilist_out_size = ilist_out->element_count();
 
     // Now call our function
@@ -51,7 +51,7 @@ ffi::Error NodeFofAndIlistFFIHost(
         reinterpret_cast<int*>(node_ilist.untyped_data()),
         reinterpret_cast<int*>(isplit.untyped_data()),
         reinterpret_cast<Node*>(leaves.untyped_data()),
-        reinterpret_cast<int*>(leaf_igroup_out->untyped_data()),
+        reinterpret_cast<int*>(leaf_igroup->untyped_data()),
         reinterpret_cast<int*>(ilist_out_splits->untyped_data()),
         reinterpret_cast<int*>(ilist_out->untyped_data()),
         r2link,
@@ -78,7 +78,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // node_ilist
         .Arg<ffi::AnyBuffer>() // isplit
         .Arg<ffi::AnyBuffer>() // leaves
-        .Ret<ffi::AnyBuffer>() // leaf_igroup_out
+        .Ret<ffi::AnyBuffer>() // leaf_igroup
         .Ret<ffi::AnyBuffer>() // ilist_out_splits
         .Ret<ffi::AnyBuffer>() // ilist_out
         .Attr<float>("r2link")

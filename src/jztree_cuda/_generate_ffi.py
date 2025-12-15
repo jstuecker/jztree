@@ -49,7 +49,7 @@ functions = parse.get_functions_from_file(
 )
 
 functions["NodeFofAndIlist"].par["nnodes"].expression = "isplit.element_count() - 1"
-functions["NodeFofAndIlist"].par["nleaves"].expression = "leaf_igroup_out->element_count()"
+functions["NodeFofAndIlist"].par["nleaves"].expression = "leaf_igroup->element_count()"
 functions["NodeFofAndIlist"].par["ilist_out_size"].expression = "ilist_out->element_count()"
 
 gen.generate_ffi_module_file(
