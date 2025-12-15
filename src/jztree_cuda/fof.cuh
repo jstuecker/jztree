@@ -16,7 +16,7 @@
 
 namespace ffi = xla::ffi;
 
-__device__ __forceinline__ int find_root(const int* igroup, int x) {
+__device__ __forceinline__ int find_root(const int* __restrict__ igroup, int x) {
     while (true) {
         int p = abs(igroup[x]);
         if (p == x) return x;
@@ -24,7 +24,7 @@ __device__ __forceinline__ int find_root(const int* igroup, int x) {
     }
 }
 
-__device__ __forceinline__ void link_roots(int* igroup, int a, int b) {
+__device__ __forceinline__ void link_roots(int* __restrict__ igroup, int a, int b) {
     while (true) {
         int ra = find_root(igroup, a);
         int rb = find_root(igroup, b);
@@ -45,9 +45,9 @@ __device__ __forceinline__ void link_roots(int* igroup, int a, int b) {
 /* ---------------------------------------------------------------------------------------------- */
 
 __global__ void NodeToChildLabel(
-    const int* node_igroup,
-    const int* isplit,
-    int* leaf_igroup
+    const int* __restrict__ node_igroup,
+    const int* __restrict__ isplit,
+    int* __restrict__ leaf_igroup
 ) {
     int node = blockIdx.x;
     int node_root = node_igroup[node];
@@ -68,14 +68,14 @@ __global__ void NodeToChildLabel(
 
 template<int pass>
 __global__ void NodeFof_Link_Count_Insert(
-    const int* node_ilist_splits,
-    const int* node_ilist,
-    const int* isplit,
-    const Node* leaves,
-    const int* ilist_out_splits, // Input (pass 2)
-    int* leaf_igroup, // Output (pass 0) and Input (pass 0-2)
-    int* interaction_count, // Output (pass 1)
-    int* ilist_out, // Output (pass 2)
+    const int* __restrict__ node_ilist_splits,
+    const int* __restrict__ node_ilist,
+    const int* __restrict__ isplit,
+    const Node* __restrict__ leaves,
+    const int* __restrict__ ilist_out_splits, // Input (pass 2)
+    int* __restrict__ leaf_igroup, // Output (pass 0) and Input (pass 0-2)
+    int* __restrict__ interaction_count, // Output (pass 1)
+    int* __restrict__ ilist_out, // Output (pass 2)
     // Parameters:
     float r2link,
     float boxsize,
@@ -183,7 +183,7 @@ __global__ void NodeFof_Link_Count_Insert(
 }
 
 __global__ void KernelContractLinks(
-    int* igroup,
+    int* __restrict__ igroup,
     int num,
     int max_iter=100000
 ) {
@@ -203,14 +203,14 @@ __global__ void KernelContractLinks(
 
 ffi::Error NodeFofAndIlist(
     cudaStream_t stream,
-    const int* node_igroup,
-    const int* node_ilist_splits,
-    const int* node_ilist,
-    const int* isplit,
-    const Node* leaves,
-    int* leaf_igroup,
-    int* ilist_out_splits,
-    int* ilist_out,
+    const int* __restrict__ node_igroup,
+    const int* __restrict__ node_ilist_splits,
+    const int* __restrict__ node_ilist,
+    const int* __restrict__ isplit,
+    const Node* __restrict__ leaves,
+    int* __restrict__ leaf_igroup,
+    int* __restrict__ ilist_out_splits,
+    int* __restrict__ ilist_out,
     // Parameters:
     float r2link,
     float boxsize,
@@ -286,11 +286,11 @@ ffi::Error NodeFofAndIlist(
 /* ---------------------------------------------------------------------------------------------- */
 
 __global__ void ParticleFofLink(
-    const int* node_ilist_splits,
-    const int* node_ilist,
-    const int* isplit,
-    const float3* pos,
-    int* part_igroup,
+    const int* __restrict__ node_ilist_splits,
+    const int* __restrict__ node_ilist,
+    const int* __restrict__ isplit,
+    const float3* __restrict__ pos,
+    int* __restrict__ part_igroup,
     // Parameters:
     float r2link,
     float boxsize
@@ -348,12 +348,12 @@ __global__ void ParticleFofLink(
 
 ffi::Error ParticleFof(
     cudaStream_t stream,
-    const int* node_igroup,
-    const int* node_ilist_splits,
-    const int* node_ilist,
-    const int* isplit,
-    const float3* pos,
-    int* particle_igroup,
+    const int* __restrict__ node_igroup,
+    const int* __restrict__ node_ilist_splits,
+    const int* __restrict__ node_ilist,
+    const int* __restrict__ isplit,
+    const float3* __restrict__ pos,
+    int* __restrict__ particle_igroup,
     // Parameters:
     float r2link,
     float boxsize,
