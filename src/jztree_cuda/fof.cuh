@@ -16,6 +16,12 @@
 
 namespace ffi = xla::ffi;
 
+ __align__(16) 
+struct PosAndIgroup {
+    float3 pos;
+    int igroup;
+};
+
 __device__ __forceinline__ int find_root(const int* __restrict__ igroup, int x) {
     while (true) {
         int p = abs(igroup[x]);
@@ -99,9 +105,7 @@ __global__ void NodeFof_Link_Count_Insert(
         // we set overhead threads to the last leaf to avoid adding many conditionals
         int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1); 
         bool valid = iqoff + threadIdx.x < ileafQ_end;
-        Node leafQ = leaves[ileafQ];
-        float3 xQ = leafQ.center;
-        float3 extQ = LvlToHalfExt(leafQ.level);
+        NodeWithExt leafQ = NodeLvlToHalfExt(leaves[ileafQ]);
         
         PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
 
@@ -123,17 +127,14 @@ __global__ void NodeFof_Link_Count_Insert(
 
             int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
 
-            float3* xT = reinterpret_cast<float3*>(smem);
-            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
-            int* igroupT = reinterpret_cast<int*>(extT + blockDim.x);
+            NodeWithExt* leafT = reinterpret_cast<NodeWithExt*>(smem);
+            int* igroupT = reinterpret_cast<int*>(leafT + blockDim.x);
 
             for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
                 int ileafT = itoff + threadIdx.x;
 
                 if(ileafT < ileafT_end) {
-                    Node leafT = leaves[ileafT];
-                    xT[threadIdx.x] = leafT.center;
-                    extT[threadIdx.x] = LvlToHalfExt(leafT.level);
+                    leafT[threadIdx.x] = NodeLvlToHalfExt(leaves[ileafT]);
                     igroupT[threadIdx.x] = abs(leaf_igroup[ileafT]);
                 }
                 __syncthreads();
@@ -157,8 +158,9 @@ __global__ void NodeFof_Link_Count_Insert(
                     // (3) The other leaf is outside the linking length -> do noting
 
                     // Upper and lower bound to the distance between any two particles in A and B:
-                    float r2max = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
-                    float r2min = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                    NodeWithExt lT = leafT[j];
+                    float r2max = maxdist2(lT.center, leafQ.center, sumf3(leafQ.extent, lT.extent), boxsize);
+                    float r2min = mindist2(lT.center, leafQ.center, sumf3(leafQ.extent, lT.extent), boxsize);
                     
                     if(r2max <= r2link) {
                         if(pass == 0)
@@ -219,7 +221,7 @@ ffi::Error NodeFofAndIlist(
     size_t ilist_out_size,
     int block_size
 ) {
-    size_t smem_alloc_bytes = block_size * (2*sizeof(float3) + sizeof(int));
+    size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt) + sizeof(int));
 
     cudaMemsetAsync(ilist_out_splits, 0, sizeof(int)*(nleaves+1), stream);
     cudaMemsetAsync(leaf_igroup, 0, sizeof(int)*(nleaves), stream);
@@ -285,6 +287,7 @@ ffi::Error NodeFofAndIlist(
 /*                              Kernels for particle-particle linking                             */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 __global__ void ParticleFofLink(
     const int* __restrict__ node_ilist_splits,
     const int* __restrict__ node_ilist,
@@ -318,27 +321,25 @@ __global__ void ParticleFofLink(
 
             int ipartT_start = isplit[nodeT], ipartT_end = isplit[nodeT + 1];
 
-            float3* xT = reinterpret_cast<float3*>(smem);
-            int* igroupT = reinterpret_cast<int*>(xT + blockDim.x);
+            PosAndIgroup* tileT = reinterpret_cast<PosAndIgroup*>(smem);
 
             for(int itoff=ipartT_start; itoff < ipartT_end; itoff += blockDim.x) {
                 int ipartT = itoff + threadIdx.x;
 
                 if(ipartT < ipartT_end) {
-                    xT[threadIdx.x] = pos[ipartT];
-                    igroupT[threadIdx.x] = abs(part_igroup[ipartT]);
+                    tileT[threadIdx.x].pos = pos[ipartT];
+                    tileT[threadIdx.x].igroup = abs(part_igroup[ipartT]);
                 }
                 __syncthreads();
                 
                 for(int j = 0; j < min(ipartT_end - itoff, blockDim.x); j++) {
                     if(!valid)
                         break;
-                    ipartT = itoff+j;
-                    
-                    float r2 = distance_squared(xQ, xT[j], boxsize);
-                    
-                    if((igroupQ != igroupT[j]) && (r2 <= r2link))
-                        link_roots(part_igroup, ipartQ, ipartT);
+
+                    float r2 = distance_squared(xQ, tileT[j].pos, boxsize);
+
+                    if((igroupQ != tileT[j].igroup) && (r2 <= r2link))
+                        link_roots(part_igroup, ipartQ, itoff+j);
                 }
                 __syncthreads();
             }
@@ -369,7 +370,8 @@ ffi::Error ParticleFof(
     );
 
     // Now do particle-particle linking
-    size_t smem = block_size * (sizeof(float3) + sizeof(int));
+    // use packed PartTile for shared positions
+    size_t smem = block_size * sizeof(PosAndIgroup);
     ParticleFofLink<<< nnodes, block_size, smem, stream >>> (
         node_ilist_splits, node_ilist, isplit, pos,
         particle_igroup,

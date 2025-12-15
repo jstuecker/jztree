@@ -39,6 +39,13 @@ __device__ __forceinline__ float3 LvlToHalfExt(int level) {
     return make_float3(ldexpf(1.0f, lx-1), ldexpf(1.0f, ly-1), ldexpf(1.0f, lz-1));
 }
 
+__device__ __forceinline__ NodeWithExt NodeLvlToHalfExt(Node node) {
+    NodeWithExt node_ext;
+    node_ext.center = node.center;
+    node_ext.extent = LvlToHalfExt(node.level);
+    return node_ext;
+}
+
 __device__ __forceinline__ float mindist2(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
     float dx =  max(fabsf(wrap(x1.x-x2.x, boxsize)) - width_half.x, 0.0f);
     float dy =  max(fabsf(wrap(x1.y-x2.y, boxsize)) - width_half.y, 0.0f);
