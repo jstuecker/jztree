@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jztree_cuda import ffi_fof
 from .tree import pos_zorder_sort, search_sorted_z
 from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
-from .data import KNNData, KNNConfig
+from .data import  FofConfig, FofData
 
 import fmdj
 
@@ -62,7 +62,7 @@ def contract_links(igroup):
 
 from .knn import dense_ilist
 
-def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
+def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
     nplanes = th.num_planes()
     nnodes = th.lvl.num(nplanes-1)
 
@@ -86,12 +86,60 @@ def tree_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc
         spl = th.ispl_n2n.get(level, size+1)
         
     return igroup, ispl, il, spl
-tree_fof.jit = jax.jit(tree_fof, static_argnames=["rlink", "alloc_fac_ilist"])
+node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
-def evaluate_fof(node_igroup, ispl, il, spl, pos, rlink: float, boxsize: float = 0., block_size=32):
-    igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(pos),), node_igroup.dtype),))(
-        node_igroup, ispl, il, spl, pos,
+def particle_particle_fof(node_igroup, ispl, il, spl, posz, rlink: float, boxsize: float = 0., block_size=32):
+    igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), node_igroup.dtype),))(
+        node_igroup, ispl, il, spl, posz,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
     return igroup
+particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
+
+# ------------------------------------------------------------------------------------------------ #
+#                                          User Interface                                          #
+# ------------------------------------------------------------------------------------------------ #
+
+def prepare_fof_z(posz: jnp.ndarray, rlink: float, boxsize: float | None = None, 
+                  cfg: FofConfig = FofConfig(), idz=None) -> FofData:
+    cfg_fmdj = fmdj.Config(fmm = fmdj.config.FMMConfig(
+        alloc_fac_nodes=cfg.alloc_fac_nodes,
+        max_leaf_size=cfg.max_leaf_size,
+        coarse_fac=cfg.coarse_fac,
+        stop_coarsen=cfg.stop_coarsen,
+        multipoles_around_com=False
+    ))
+
+    posmass_z = fmdj.data.PosMass(posz, jnp.ones((len(posz),), dtype=jnp.float32))
+    th: fmdj.data.TreeHierarchy = fmdj.ztree.build_tree_hierarchy(posmass_z, cfg=cfg_fmdj)
+
+    igroup, ispl, il, spl = node_node_fof(
+        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
+    )
+
+    # posz, idz, 
+    return FofData(rlink, boxsize, posz, igroup, ispl, il, spl)
+prepare_fof_z.jit = jax.jit(prepare_fof_z, static_argnames=["rlink", "boxsize", "cfg"])
+
+def evaluate_fof_z(d: FofData):
+    # Could in principle support switching out the particle data at this point.
+    return particle_particle_fof(
+        d.igroup, d.ilist_spl, d.ilist, d.spl, d.posz, rlink=d.rlink, boxsize=d.boxsize
+    )
+evaluate_fof_z.jit = jax.jit(evaluate_fof_z)
+
+def fof_z(posz: jnp.ndarray, rlink: float, boxsize: float, cfg: FofConfig = FofConfig()) -> jnp.ndarray:
+    data = prepare_fof_z(posz, rlink, boxsize, cfg)
+    return evaluate_fof_z(data)
+fof_z.jit = jax.jit(fof_z, static_argnames=["rlink", "boxsize", "cfg"])
+
+def fof(pos: jnp.ndarray, rlink: float, boxsize: float, cfg: FofConfig = FofConfig()) -> jnp.ndarray:
+    posz, idz = pos_zorder_sort(pos)
+    
+    igroupz = fof_z(posz, rlink, boxsize=boxsize, cfg=cfg)
+
+    igroup = igroupz.at[idz].set(igroupz)
+
+    return igroup
+fof.jit = jax.jit(fof, static_argnames=["rlink", "boxsize", "cfg"])

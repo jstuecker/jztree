@@ -11,6 +11,14 @@ class KNNConfig:
     alloc_fac_nodes: float = 1.
     stop_coarsen: int = 2048
 
+@dataclass(frozen=True)
+class FofConfig:
+    max_leaf_size: int = 48
+    coarse_fac : float = 8.
+    alloc_fac_ilist: float = 64.
+    alloc_fac_nodes: float = 1.
+    stop_coarsen: int = 2048
+
 @partial(jax.tree_util.register_dataclass, 
          meta_fields=["k", "boxsize"],
          data_fields=["posz", "idz", "spl", "ilist", "ir2list", "ilist_spl"])
@@ -25,3 +33,18 @@ class KNNData:
     ilist: jnp.ndarray      # interaction list (leaf indices)
     ir2list: jnp.ndarray    # interaction r2 list (lower bound leaf-leaf distances squared)
     ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
+
+@partial(jax.tree_util.register_dataclass, 
+         meta_fields=["rlink", "boxsize"],
+         data_fields=["posz", "igroup", "ilist_spl", "ilist", "spl"])
+@dataclass
+class FofData:
+    rlink : float
+    boxsize : float
+
+    posz: jnp.ndarray       # z-sorted positions
+    # idz: jnp.ndarray        # ids so that posz = pos0[idz]
+    igroup: jnp.ndarray     # group labels
+    ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
+    ilist: jnp.ndarray      # interaction list (leaf indices)
+    spl: jnp.ndarray        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
