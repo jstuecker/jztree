@@ -128,12 +128,12 @@ def evaluate_fof_z(d: FofData):
     )
 evaluate_fof_z.jit = jax.jit(evaluate_fof_z)
 
-def fof_z(posz: jnp.ndarray, rlink: float, boxsize: float, cfg: FofConfig = FofConfig()) -> jnp.ndarray:
+def fof_z(posz: jnp.ndarray, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jnp.ndarray:
     data = prepare_fof_z(posz, rlink, boxsize, cfg)
     return evaluate_fof_z(data)
 fof_z.jit = jax.jit(fof_z, static_argnames=["rlink", "boxsize", "cfg"])
 
-def fof(pos: jnp.ndarray, rlink: float, boxsize: float, cfg: FofConfig = FofConfig()) -> jnp.ndarray:
+def fof(pos: jnp.ndarray, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jnp.ndarray:
     posz, idz = pos_zorder_sort(pos)
     
     igroupz = fof_z(posz, rlink, boxsize=boxsize, cfg=cfg)
