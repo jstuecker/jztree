@@ -17,10 +17,9 @@ def bench_fof_steps(jax_bench, pos, N):
     posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
 
     cfg = jz.fof.FofConfig()
-    posmass_z = fmdj.data.PosMass(posz, jnp.ones((len(posz),), dtype=jnp.float32))
     jb.measure(
         fn_jit=fmdj.ztree.build_tree_hierarchy.jit, 
-        part=posmass_z, cfg_tree=cfg.tree, tag="tree"
+        part=posz, cfg_tree=cfg.tree, tag="tree"
     )
 
     d = jb.measure(fn_jit=jz.fof.prepare_fof_z.jit, 
