@@ -103,16 +103,11 @@ particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rli
 
 def prepare_fof_z(posz: jnp.ndarray, rlink: float, boxsize: float | None = None, 
                   cfg: FofConfig = FofConfig()) -> FofData:
-    cfg_fmdj = fmdj.Config(fmm = fmdj.config.FMMConfig(
-        alloc_fac_nodes=cfg.alloc_fac_nodes,
-        max_leaf_size=cfg.max_leaf_size,
-        coarse_fac=cfg.coarse_fac,
-        stop_coarsen=cfg.stop_coarsen,
-        multipoles_around_com=False
-    ))
 
     posmass_z = fmdj.data.PosMass(posz, jnp.ones((len(posz),), dtype=jnp.float32))
-    th: fmdj.data.TreeHierarchy = fmdj.ztree.build_tree_hierarchy(posmass_z, cfg=cfg_fmdj)
+    th: fmdj.data.TreeHierarchy = fmdj.ztree.build_tree_hierarchy(
+        posmass_z, cfg_tree=cfg.tree
+    )
 
     igroup, ispl, il, spl = node_node_fof(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist

@@ -184,15 +184,8 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     """
     boxsize = 0. if boxsize is None else boxsize
 
-    cfg_fmdj = fmdj.Config(fmm = fmdj.config.FMMConfig(
-        alloc_fac_nodes=cfg.alloc_fac_nodes,
-        max_leaf_size=cfg.max_leaf_size,
-        coarse_fac=cfg.rfac,
-        stop_coarsen=cfg.stop_coarsen,
-        multipoles_around_com=False
-    ))
     posmassz = fmdj.data.PosMass(posz, jnp.ones((len(posz),), dtype=jnp.float32))
-    th = fmdj.ztree.build_tree_hierarchy(posmassz, cfg_fmdj)
+    th = fmdj.ztree.build_tree_hierarchy(posmassz, cfg.tree)
     
     nplanes = th.num_planes()
     valid = jnp.arange(th.plane_sizes[-1], dtype=jnp.int32) < th.lvl.num(nplanes-1)

@@ -2,22 +2,31 @@ import jax
 import jax.numpy as jnp
 from dataclasses import dataclass
 from functools import partial
+from fmdj.config import TreeConfig
 
 @dataclass(frozen=True)
 class KNNConfig:
-    max_leaf_size: int = 48
-    rfac : float = 8.
     alloc_fac_ilist: float = 256.
-    alloc_fac_nodes: float = 1.
-    stop_coarsen: int = 2048
+
+    tree: TreeConfig = TreeConfig(
+        max_leaf_size = 48,
+        coarse_fac = 8.,       
+        alloc_fac_nodes = 1.,
+        stop_coarsen = 2048,
+        mass_centered = False
+    )
 
 @dataclass(frozen=True)
 class FofConfig:
-    max_leaf_size: int = 48
-    coarse_fac : float = 8.
-    alloc_fac_ilist: float = 64.
-    alloc_fac_nodes: float = 1.
-    stop_coarsen: int = 2048
+    alloc_fac_ilist: float = 64.   
+
+    tree: TreeConfig = TreeConfig(
+        max_leaf_size = 48,
+        coarse_fac = 8.,       
+        alloc_fac_nodes = 1.,
+        stop_coarsen = 2048,
+        mass_centered = False
+    )
 
 @partial(jax.tree_util.register_dataclass, 
          meta_fields=["k", "boxsize"],

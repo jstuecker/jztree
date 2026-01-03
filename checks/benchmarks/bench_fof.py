@@ -17,15 +17,11 @@ def bench_fof_steps(jax_bench, pos, N):
     posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
 
     cfg = jz.fof.FofConfig()
-    cfg_fmdj = fmdj.Config(fmm = fmdj.config.FMMConfig(
-        alloc_fac_nodes=cfg.alloc_fac_nodes,
-        max_leaf_size=cfg.max_leaf_size,
-        coarse_fac=cfg.coarse_fac,
-        stop_coarsen=cfg.stop_coarsen,
-        multipoles_around_com=False
-    ))
     posmass_z = fmdj.data.PosMass(posz, jnp.ones((len(posz),), dtype=jnp.float32))
-    jb.measure(fn_jit=fmdj.ztree.build_tree_hierarchy.jit, part=posmass_z, cfg=cfg_fmdj, tag="tree")
+    jb.measure(
+        fn_jit=fmdj.ztree.build_tree_hierarchy.jit, 
+        part=posmass_z, cfg_tree=cfg.tree, tag="tree"
+    )
 
     d = jb.measure(fn_jit=jz.fof.prepare_fof_z.jit, 
         posz=posz, rlink=rlink, boxsize=boxsize, tag="prepare_fofz"
