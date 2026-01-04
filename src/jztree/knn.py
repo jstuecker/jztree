@@ -56,6 +56,8 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
     leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
     leaf_ilist_rad = jax.ShapeDtypeStruct(leaf_ilist.shape, jnp.float32)
 
+    assert leaf_ilist.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
+
     radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
         x4leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),

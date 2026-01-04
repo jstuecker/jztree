@@ -24,6 +24,7 @@ def node_fof_and_ilist(
     ) -> Tuple[jnp.ndarray, InteractionList]:
     assert node_ilist.ispl.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
     assert isplit.shape[0] == node_igroup.shape[0]+1, "Should both correspond to no. of nodes"
+    assert node_ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
     
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
 
