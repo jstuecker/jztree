@@ -3,6 +3,7 @@ import jax.numpy as jnp
 from dataclasses import dataclass
 from functools import partial
 from fmdj.config import TreeConfig
+from fmdj.data import InteractionList
 
 @dataclass(frozen=True)
 class KNNConfig:
@@ -45,7 +46,7 @@ class KNNData:
 
 @partial(jax.tree_util.register_dataclass, 
          meta_fields=["rlink", "boxsize"],
-         data_fields=["posz", "igroup", "ilist_spl", "ilist", "spl"])
+         data_fields=["posz", "igroup", "ilist", "spl"])
 @dataclass
 class FofData:
     rlink : float
@@ -54,6 +55,5 @@ class FofData:
     posz: jnp.ndarray       # z-sorted positions
     # idz: jnp.ndarray        # ids so that posz = pos0[idz]
     igroup: jnp.ndarray     # group labels
-    ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
-    ilist: jnp.ndarray      # interaction list (leaf indices)
+    ilist: InteractionList  # interaction list (on leaf indices)
     spl: jnp.ndarray        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i

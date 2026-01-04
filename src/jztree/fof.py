@@ -5,6 +5,8 @@ from jztree_cuda import ffi_fof
 from .tree import pos_zorder_sort, grouped_dense_interaction_list
 from .common import conditional_callback
 from .data import  FofConfig, FofData
+from fmdj.data import InteractionList
+from typing import Tuple
 
 import fmdj
 
@@ -16,11 +18,11 @@ jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA
 # ------------------------------------------------------------------------------------------------ #
 
 def node_fof_and_ilist(
-        node_igroup, node_ilist_splits, node_ilist, isplit, xleaf, lvl_leaf,
-        # npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits, 
-        rlink, boxsize=0., alloc_fac=128, block_size=32
-    ):
-    assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
+        node_igroup: jnp.ndarray, node_ilist: InteractionList, isplit: jnp.ndarray, 
+        xleaf: jnp.ndarray, lvl_leaf: jnp.ndarray,
+        rlink: float, boxsize: float = 0., alloc_fac:float = 128., block_size:int = 32
+    ) -> Tuple[jnp.ndarray, InteractionList]:
+    assert node_ilist.ispl.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
     assert isplit.shape[0] == node_igroup.shape[0]+1, "Should both correspond to no. of nodes"
     
     x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
@@ -32,19 +34,20 @@ def node_fof_and_ilist(
     outputs = (leaf_igroup, leaf_ilist_ispl, leaf_ilist)
 
     res = jax.ffi.ffi_call("NodeFofAndIlist", outputs)(
-        node_igroup, node_ilist_splits, node_ilist, isplit, x4leaf,
+        node_igroup, node_ilist.ispl, node_ilist.iother, isplit, x4leaf,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )
 
     leaf_igroup, leaf_ilist_ispl, leaf_ilist = res
+    leaf_ilist = InteractionList(leaf_ilist_ispl, leaf_ilist, nfilled=leaf_ilist_ispl[-1])
 
     def err(n1, n2):
         raise MemoryError(f"The interaction list allocation is too small. (need: {n1} have: {n2})" +
                           f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
-    n1, n2 = leaf_ilist_ispl[-1], leaf_ilist.shape[0]
+    n1, n2 = leaf_ilist.nfilled, leaf_ilist.iother.shape[0]
     leaf_igroup = leaf_igroup + conditional_callback(n1 > n2, err, n1, n2)
 
-    return leaf_igroup, leaf_ilist_ispl, leaf_ilist
+    return leaf_igroup, leaf_ilist
 node_fof_and_ilist.jit = jax.jit(
     node_fof_and_ilist, static_argnames=["boxsize", "rlink", "alloc_fac", "block_size"]
 )
@@ -67,7 +70,7 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
     spl, ilist, nsup = grouped_dense_interaction_list(
         th.lvl.num(nplanes-1), size_ilist=int(th.plane_sizes[nplanes-1]*alloc_fac_ilist), ngroup=32
     )
-    il, ispl = ilist.iother, ilist.ispl
+    # il, ispl = ilist.iother, ilist.ispl
 
     # Get coarsest plane data
     igroup = jnp.arange(len(spl)-1, dtype=jnp.int32)
@@ -77,14 +80,14 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
         xleaf = th.geom_cent.get(level, size)
         lvl_leaf = th.lvl.get(level, size)
 
-        igroup, ispl, il = node_fof_and_ilist(
-            igroup, ispl, il, spl, xleaf, lvl_leaf, 
+        igroup, ilist = node_fof_and_ilist(
+            igroup, ilist, spl, xleaf, lvl_leaf, 
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
 
         spl = th.ispl_n2n.get(level, size+1)
         
-    return igroup, ispl, il, spl
+    return igroup, ilist, spl
 node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
 def particle_particle_fof(node_igroup, ispl, il, spl, posz, rlink: float, boxsize: float = 0., block_size=32):
@@ -107,17 +110,17 @@ def prepare_fof_z(posz: jnp.ndarray, rlink: float, boxsize: float | None = None,
         posz, cfg_tree=cfg.tree
     )
 
-    igroup, ispl, il, spl = node_node_fof(
+    igroup, ilist, spl = node_node_fof(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
 
-    return FofData(rlink, boxsize, posz, igroup, ispl, il, spl)
+    return FofData(rlink, boxsize, posz, igroup, ilist, spl)
 prepare_fof_z.jit = jax.jit(prepare_fof_z, static_argnames=["rlink", "boxsize", "cfg"])
 
 def evaluate_fof_z(d: FofData):
     # Could in principle support switching out the particle data at this point.
     return particle_particle_fof(
-        d.igroup, d.ilist_spl, d.ilist, d.spl, d.posz, rlink=d.rlink, boxsize=d.boxsize
+        d.igroup, d.ilist.ispl, d.ilist.iother, d.spl, d.posz, rlink=d.rlink, boxsize=d.boxsize
     )
 evaluate_fof_z.jit = jax.jit(evaluate_fof_z)
 
