@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_knn
-from .tree import pos_zorder_sort, search_sorted_z
+from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list
 from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
 from .data import KNNData, KNNConfig
 
@@ -86,52 +86,6 @@ def segment_sort(key, val, isplit, smem_size=512):
     return key_sorted, val_sorted
 
 # ------------------------------------------------------------------------------------------------ #
-#                                         Helper Functions                                         #
-# ------------------------------------------------------------------------------------------------ #
-    
-def dense_ilist(nleaves, leaf_mask=None, ngroup=32, size=None, size_ilist=None):
-    num = (nleaves + ngroup - 1) // ngroup
-    
-    ilist = jnp.array((jnp.arange(num, dtype=jnp.int32),)*num)
-    isplits = jnp.arange(num+1, dtype=jnp.int32)*num
-    spl = jnp.minimum(ngroup*jnp.arange(0, num + 1, dtype=jnp.int32), nleaves)
-
-    if leaf_mask is not None: 
-        # translate to node mask (any leaf must be valid)
-        lcum = cumsum_starting_with_zero(leaf_mask)
-        node_mask = lcum[spl[1:]-1] > lcum[spl[:-1]]
-
-        # Now create a reduced ilist that only contains valid interactions
-        valid = node_mask[None,:] & node_mask[:,None]
-        nvalid = jnp.sum(valid, axis=1)
-
-        isplits = jnp.concatenate([jnp.array([0]), jnp.cumsum(nvalid)])
-
-        prefix = masked_prefix_sum(valid.flatten())
-        if size_ilist is None:
-            buf = jnp.zeros_like(ilist.flatten())
-        else:
-            def err(n1, n2):
-                raise MemoryError(f"Dense interaction list buffer is too small. (need: {n1} have: {n2})" +
-                                  f"increase alloc_fac_ilist at least by a factor of {n1/n2:.1f}")
-            isplits = isplits + conditional_callback(isplits[-1] > size_ilist, err, isplits[-1], size_ilist)
-
-            buf = jnp.zeros(size_ilist, dtype=jnp.int32)
-        ilist = buf.at[prefix].set(ilist.flatten())
-        
-        spl = jnp.minimum(spl, lcum[-1])
-
-        # extend our buffers if wished:
-        if size is not None:
-            assert size >= nleaves
-            spl = jax.lax.dynamic_update_slice(jnp.full(size+1, spl[-1], dtype=spl.dtype), spl, (0,))
-            isplits = jax.lax.dynamic_update_slice(jnp.full(size+1, isplits[-1], dtype=isplits.dtype), isplits, (0,))
-
-    ir2list = jnp.zeros(ilist.shape, dtype=jnp.float32)
-
-    return spl, ilist.flatten(), ir2list.flatten(), isplits
-
-# ------------------------------------------------------------------------------------------------ #
 #                                      User Exposed Functions                                      #
 # ------------------------------------------------------------------------------------------------ #
 
@@ -190,11 +144,14 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     valid = jnp.arange(th.plane_sizes[-1], dtype=jnp.int32) < th.lvl.num(nplanes-1)
 
     size = th.plane_sizes[0]
-    size_ilist = int(size * cfg.alloc_fac_ilist)
+    size_ilist = int(size*cfg.alloc_fac_ilist)
 
-    spl, il, ir2l, ispl = dense_ilist(
-        th.plane_sizes[-1], valid, ngroup=32 #, size=size, size_ilist=size_ilist
+    # initialize top-level interaction list
+    spl, ilist, nsup = grouped_dense_interaction_list(
+        th.lvl.num(nplanes-1), size_ilist, ngroup=32
     )
+    il, ispl = ilist.iother, ilist.ispl
+    ir2l = jnp.zeros(il.shape, dtype=jnp.float32)
     
     def handle_level(i, carry):
         level = nplanes - i - 1 # have to do manual reversed loop with jax

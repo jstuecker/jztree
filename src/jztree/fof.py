@@ -2,8 +2,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_fof
-from .tree import pos_zorder_sort, search_sorted_z
-from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
+from .tree import pos_zorder_sort, grouped_dense_interaction_list
+from .common import conditional_callback
 from .data import  FofConfig, FofData
 
 import fmdj
@@ -60,15 +60,14 @@ def contract_links(igroup):
 
     return igroup_new
 
-from .knn import dense_ilist
-
 def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
     nplanes = th.num_planes()
-    nnodes = th.lvl.num(nplanes-1)
 
-    # initialize interaction list
-    valid = jnp.arange(th.plane_sizes[-1], dtype=jnp.int32) < nnodes
-    spl, il, _, ispl = dense_ilist(th.plane_sizes[-1], valid, ngroup=32)
+    # initialize top-level interaction list
+    spl, ilist, nsup = grouped_dense_interaction_list(
+        th.lvl.num(nplanes-1), size_ilist=int(th.plane_sizes[nplanes-1]*alloc_fac_ilist), ngroup=32
+    )
+    il, ispl = ilist.iother, ilist.ispl
 
     # Get coarsest plane data
     igroup = jnp.arange(len(spl)-1, dtype=jnp.int32)
