@@ -66,6 +66,8 @@ else()
   # Need to define the link directory explicitly here so that ninja finds it
   add_link_options(-L${_cuda_root}/lib)
   # add_link_options(-L${_cuda_root}/lib64)
+
+  set(CMAKE_CUDA_COMPILER "${_cuda_root}/bin/nvcc")
 endif()
 
 # Somehow some conda environments like to put the env. variable NVCC_PREPEND_FLAGS and/or
@@ -79,19 +81,10 @@ foreach(var IN ITEMS NVCC_PREPEND_FLAGS NVCC_PREPEND_FLAGS_BACKUP)
   endif()
 endforeach()
 
-set(CMAKE_CUDA_COMPILER "${_cuda_root}/bin/nvcc")
+# set(CMAKE_CUDA_COMPILER "${_cuda_root}/bin/nvcc")
 
 # Now let Cmake detect CUDA
-project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX CUDA)
 # find_package(CUDAToolkit CONFIG REQUIRED)
-
-message(STATUS "Using")
-
-find_package(nanobind CONFIG REQUIRED)
-
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # To simplify finding paths in vscode
 
 if(DEFINED ENV{CUDAARCHS})
   message(STATUS "User provided CUDAARCHS env: '$ENV{CUDAARCHS}'")
@@ -100,6 +93,16 @@ else()
   message(STATUS "Using native CUDA artchitecture")
   set(CMAKE_CUDA_ARCHITECTURES native)
 endif()
+
+project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX CUDA)
+
+message(STATUS "Using")
+
+find_package(nanobind CONFIG REQUIRED)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON) # To simplify finding paths in vscode
 
 # Find FFI Paths
 execute_process(

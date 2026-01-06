@@ -2,10 +2,12 @@ import pytest
 import jztree.fof
 import jax
 import jax.numpy as jnp
-from hfof import fof
 import pytest
 
+
 def test_against_hfof():
+    from hfof import fof
+
     boxsize = 1.0
 
     pos = jax.random.uniform(jax.random.PRNGKey(0), (1000000, 3), minval=0.0, maxval=boxsize)
