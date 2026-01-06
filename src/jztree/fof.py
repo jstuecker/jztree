@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jztree_cuda import ffi_fof
 from .tree import pos_zorder_sort, grouped_dense_interaction_list
 from .common import conditional_callback
-from .data import  FofConfig, FofData
+from .data import  FofConfig, FofData, PosLvl
 from fmdj.data import InteractionList
 from typing import Tuple
 
@@ -19,36 +19,36 @@ jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA
 
 def node_fof_and_ilist(
         node_igroup: jnp.ndarray, node_ilist: InteractionList, isplit: jnp.ndarray, 
-        xleaf: jnp.ndarray, lvl_leaf: jnp.ndarray,
+        child_data: PosLvl,
         rlink: float, boxsize: float = 0., alloc_fac:float = 128., block_size:int = 32
     ) -> Tuple[jnp.ndarray, InteractionList]:
     assert node_ilist.ispl.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
     assert isplit.shape[0] == node_igroup.shape[0]+1, "Should both correspond to no. of nodes"
     assert node_ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
     
-    x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
+    nchild = len(child_data.pos)
 
-    leaf_igroup = jax.ShapeDtypeStruct((len(xleaf),), jnp.int32)
-    leaf_ilist_ispl = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
-    leaf_ilist = jax.ShapeDtypeStruct((int(alloc_fac * len(xleaf)),), jnp.int32)
+    child_igroup = jax.ShapeDtypeStruct((nchild,), jnp.int32)
+    child_ilist_ispl = jax.ShapeDtypeStruct((nchild+1,), jnp.int32)
+    child_ilist = jax.ShapeDtypeStruct((int(alloc_fac * nchild),), jnp.int32)
     
-    outputs = (leaf_igroup, leaf_ilist_ispl, leaf_ilist)
+    outputs = (child_igroup, child_ilist_ispl, child_ilist)
 
     res = jax.ffi.ffi_call("NodeFofAndIlist", outputs)(
-        node_igroup, node_ilist.ispl, node_ilist.iother, isplit, x4leaf,
+        node_igroup, node_ilist.ispl, node_ilist.iother, isplit, child_data.pos_lvl(),
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )
 
-    leaf_igroup, leaf_ilist_ispl, leaf_ilist = res
-    leaf_ilist = InteractionList(leaf_ilist_ispl, leaf_ilist, nfilled=leaf_ilist_ispl[-1])
+    child_igroup, child_ilist_ispl, child_ilist = res
+    child_ilist = InteractionList(child_ilist_ispl, child_ilist, nfilled=child_ilist_ispl[-1])
 
     def err(n1, n2):
         raise MemoryError(f"The interaction list allocation is too small. (need: {n1} have: {n2})" +
                           f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
-    n1, n2 = leaf_ilist.nfilled, leaf_ilist.iother.shape[0]
-    leaf_igroup = leaf_igroup + conditional_callback(n1 > n2, err, n1, n2)
+    n1, n2 = child_ilist.nfilled, child_ilist.iother.shape[0]
+    child_igroup = child_igroup + conditional_callback(n1 > n2, err, n1, n2)
 
-    return leaf_igroup, leaf_ilist
+    return child_igroup, child_ilist
 node_fof_and_ilist.jit = jax.jit(
     node_fof_and_ilist, static_argnames=["boxsize", "rlink", "alloc_fac", "block_size"]
 )
@@ -71,18 +71,16 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
     spl, ilist, nsup = grouped_dense_interaction_list(
         th.lvl.num(nplanes-1), size_ilist=int(th.plane_sizes[nplanes-1]*alloc_fac_ilist), ngroup=32
     )
-    # il, ispl = ilist.iother, ilist.ispl
 
     # Get coarsest plane data
     igroup = jnp.arange(len(spl)-1, dtype=jnp.int32)
 
     for level in reversed(range(nplanes)):
         size = th.plane_sizes[level]
-        xleaf = th.geom_cent.get(level, size)
-        lvl_leaf = th.lvl.get(level, size)
+        child_data = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
 
         igroup, ilist = node_fof_and_ilist(
-            igroup, ilist, spl, xleaf, lvl_leaf, 
+            igroup, ilist, spl, child_data, 
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
 

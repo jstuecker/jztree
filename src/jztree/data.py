@@ -5,6 +5,15 @@ from functools import partial
 from fmdj.config import TreeConfig
 from fmdj.data import InteractionList
 
+@jax.tree_util.register_dataclass
+@dataclass
+class PosLvl():
+    pos: jnp.ndarray
+    lvl: jnp.ndarray
+
+    def pos_lvl(self):
+        return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
+
 @dataclass(frozen=True)
 class KNNConfig:
     alloc_fac_ilist: float = 256.
