@@ -3,8 +3,11 @@ import jztree.fof
 import jax
 import jax.numpy as jnp
 import pytest
+import importlib
 
+has_hfof = importlib.util.find_spec("hfof") is not None
 
+@pytest.mark.skipif(not has_hfof, reason="requires hfof module installed")
 def test_against_hfof():
     from hfof import fof
 
