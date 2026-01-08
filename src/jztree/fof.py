@@ -4,8 +4,8 @@ import jax.numpy as jnp
 from jztree_cuda import ffi_fof
 from .tree import pos_zorder_sort, grouped_dense_interaction_list
 from .common import conditional_callback
-from .data import  FofConfig, FofData, PosLvl
-from fmdj.data import InteractionList, Label
+from .data import  FofConfig, FofData, PosLvl, Label
+from fmdj.data import InteractionList
 from typing import Tuple
 
 import fmdj
@@ -13,43 +13,44 @@ import fmdj
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA")
 jax.ffi.register_ffi_target("InsertLinks", ffi_fof.InsertLinks(), platform="CUDA")
+jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), platform="CUDA")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
 def node_fof_and_ilist(
-        node_igroup: jnp.ndarray, node_ilist: InteractionList, isplit: jnp.ndarray, 
-        child_data: PosLvl,
+        node_ilist: InteractionList, isplit: jnp.ndarray, 
+        child_data: PosLvl, child_igroup: jnp.ndarray, 
         rlink: float, boxsize: float = 0., alloc_fac:float = 128., block_size:int = 32
     ) -> Tuple[jnp.ndarray, InteractionList]:
     assert node_ilist.ispl.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
-    assert isplit.shape[0] == node_igroup.shape[0]+1, "Should both correspond to no. of nodes"
+    assert len(child_data.lvl) == len(child_igroup), "Should both correspond to no. of childrne"
     assert node_ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
     
     nchild = len(child_data.pos)
 
-    child_igroup = jax.ShapeDtypeStruct((nchild,), jnp.int32)
+    child_igroup_out = jax.ShapeDtypeStruct((nchild,), jnp.int32)
     child_ilist_ispl = jax.ShapeDtypeStruct((nchild+1,), jnp.int32)
     child_ilist = jax.ShapeDtypeStruct((int(alloc_fac * nchild),), jnp.int32)
     
-    outputs = (child_igroup, child_ilist_ispl, child_ilist)
+    outputs = (child_igroup_out, child_ilist_ispl, child_ilist)
 
     res = jax.ffi.ffi_call("NodeFofAndIlist", outputs)(
-        node_igroup, node_ilist.ispl, node_ilist.iother, isplit, child_data.pos_lvl(),
+        node_ilist.ispl, node_ilist.iother, isplit, child_data.pos_lvl(), child_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )
 
-    child_igroup, child_ilist_ispl, child_ilist = res
+    child_igroup_out, child_ilist_ispl, child_ilist = res
     child_ilist = InteractionList(child_ilist_ispl, child_ilist, nfilled=child_ilist_ispl[-1])
 
     def err(n1, n2):
         raise MemoryError(f"The interaction list allocation is too small. (need: {n1} have: {n2})" +
                           f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
     n1, n2 = child_ilist.nfilled, child_ilist.iother.shape[0]
-    child_igroup = child_igroup + conditional_callback(n1 > n2, err, n1, n2)
+    child_igroup_out = child_igroup_out + conditional_callback(n1 > n2, err, n1, n2)
 
-    return child_igroup, child_ilist
+    return child_igroup_out, child_ilist
 node_fof_and_ilist.jit = jax.jit(
     node_fof_and_ilist, static_argnames=["boxsize", "rlink", "alloc_fac", "block_size"]
 )
@@ -65,6 +66,15 @@ def insert_links(igroup, iA, iB, num_links: jnp.ndarray | None = None, block_siz
     
     return igr_out
 
+def node_to_child_label(igroup: jnp.ndarray, spl: jnp.ndarray, size_child: int, 
+                        block_size: int = 64) -> jnp.ndarray:
+    outputs = (jax.ShapeDtypeStruct((size_child,), jnp.int32),)
+    igroup_child = jax.ffi.ffi_call("NodeToChildLabel",  outputs)(
+        igroup, spl, block_size=np.uint64(block_size)
+    )[0]
+
+    return igroup_child
+
 def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
     nplanes = th.num_planes()
 
@@ -79,9 +89,10 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
     for level in reversed(range(nplanes)):
         size = th.plane_sizes[level]
         child_data = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
+        child_igroup = node_to_child_label(igroup, spl, size)
 
         igroup, ilist = node_fof_and_ilist(
-            igroup, ilist, spl, child_data, 
+            ilist, spl, child_data, child_igroup,
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
 

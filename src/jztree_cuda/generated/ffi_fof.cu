@@ -22,16 +22,65 @@ namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: NodeToChildLabel                          */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error NodeToChildLabelFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer node_igroup,
+    ffi::AnyBuffer isplit,
+    ffi::Result<ffi::AnyBuffer> leaf_igroup,
+    size_t block_size
+) {
+    dim3 blockDim(block_size);
+    dim3 gridDim(node_igroup.element_count());
+    size_t smem = 0;
+    
+    // Initialize output buffers
+    cudaMemsetAsync(leaf_igroup->untyped_data(), 0, leaf_igroup->size_bytes(), stream);
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    // For pointers we need to create a pointer to the pointer
+    int* node_igroup_val = reinterpret_cast<int*>(node_igroup.untyped_data());
+    int* isplit_val = reinterpret_cast<int*>(isplit.untyped_data());
+    int* leaf_igroup_val = reinterpret_cast<int*>(leaf_igroup->untyped_data());
+
+    void* args[] = {
+        &node_igroup_val,
+        &isplit_val,
+        &leaf_igroup_val
+    };
+    cudaLaunchKernel((const void*)NodeToChildLabel, gridDim, blockDim, args, smem, stream);
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    NodeToChildLabelFFI, NodeToChildLabelFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // node_igroup
+        .Arg<ffi::AnyBuffer>() // isplit
+        .Ret<ffi::AnyBuffer>() // leaf_igroup
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: NodeFofAndIlist                           */
 /* ---------------------------------------------------------------------------------------------- */
 
 ffi::Error NodeFofAndIlistFFIHost(
     cudaStream_t stream,
-    ffi::AnyBuffer node_igroup,
     ffi::AnyBuffer node_ilist_splits,
     ffi::AnyBuffer node_ilist,
     ffi::AnyBuffer isplit,
     ffi::AnyBuffer leaves,
+    ffi::AnyBuffer leaf_igroup_in,
     ffi::Result<ffi::AnyBuffer> leaf_igroup,
     ffi::Result<ffi::AnyBuffer> ilist_out_splits,
     ffi::Result<ffi::AnyBuffer> ilist_out,
@@ -40,17 +89,17 @@ ffi::Error NodeFofAndIlistFFIHost(
     int block_size
 ) {
     int nnodes = isplit.element_count() - 1;
-    int nleaves = leaf_igroup->element_count();
+    int nleaves = leaf_igroup_in.element_count();
     size_t ilist_out_size = ilist_out->element_count();
 
     // Now call our function
     ffi::Error result = NodeFofAndIlist(
         stream,
-        reinterpret_cast<int*>(node_igroup.untyped_data()),
         reinterpret_cast<int*>(node_ilist_splits.untyped_data()),
         reinterpret_cast<int*>(node_ilist.untyped_data()),
         reinterpret_cast<int*>(isplit.untyped_data()),
         reinterpret_cast<Node*>(leaves.untyped_data()),
+        reinterpret_cast<int*>(leaf_igroup_in.untyped_data()),
         reinterpret_cast<int*>(leaf_igroup->untyped_data()),
         reinterpret_cast<int*>(ilist_out_splits->untyped_data()),
         reinterpret_cast<int*>(ilist_out->untyped_data()),
@@ -73,11 +122,11 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     NodeFofAndIlistFFI, NodeFofAndIlistFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // node_igroup
         .Arg<ffi::AnyBuffer>() // node_ilist_splits
         .Arg<ffi::AnyBuffer>() // node_ilist
         .Arg<ffi::AnyBuffer>() // isplit
         .Arg<ffi::AnyBuffer>() // leaves
+        .Arg<ffi::AnyBuffer>() // leaf_igroup_in
         .Ret<ffi::AnyBuffer>() // leaf_igroup
         .Ret<ffi::AnyBuffer>() // ilist_out_splits
         .Ret<ffi::AnyBuffer>() // ilist_out
@@ -199,6 +248,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_fof, m) {
+    m.def("NodeToChildLabel", []() { return EncapsulateFfiCall(&NodeToChildLabelFFI); });
     m.def("NodeFofAndIlist", []() { return EncapsulateFfiCall(&NodeFofAndIlistFFI); });
     m.def("ParticleFof", []() { return EncapsulateFfiCall(&ParticleFofFFI); });
     m.def("InsertLinks", []() { return EncapsulateFfiCall(&InsertLinksFFI); });

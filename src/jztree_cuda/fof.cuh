@@ -204,11 +204,11 @@ __global__ void KernelContractLinks(
 
 ffi::Error NodeFofAndIlist(
     cudaStream_t stream,
-    const int* __restrict__ node_igroup,
     const int* __restrict__ node_ilist_splits,
     const int* __restrict__ node_ilist,
     const int* __restrict__ isplit,
     const Node* __restrict__ leaves,
+    const int* __restrict__ leaf_igroup_in,
     int* __restrict__ leaf_igroup,
     int* __restrict__ ilist_out_splits,
     int* __restrict__ ilist_out,
@@ -228,10 +228,7 @@ ffi::Error NodeFofAndIlist(
 
     int* interaction_count = ilist_out_splits + 1; // use the ilist_out_splits as temporary storage
 
-    // Initialize childs leaf pointers
-    NodeToChildLabel<<< nnodes, block_size, 0, stream >>>(
-        node_igroup, isplit, leaf_igroup
-    );
+    cudaMemcpyAsync(leaf_igroup, leaf_igroup_in, nleaves*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // pass 0: link
     NodeFof_Link_Count_Insert<0><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
