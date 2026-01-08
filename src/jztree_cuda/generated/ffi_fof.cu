@@ -146,10 +146,60 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: InsertLinks                               */
+/* ---------------------------------------------------------------------------------------------- */
+
+ffi::Error InsertLinksFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer igroup_in,
+    ffi::AnyBuffer igroupLinkA,
+    ffi::AnyBuffer igroupLinkB,
+    ffi::AnyBuffer num_links,
+    ffi::Result<ffi::AnyBuffer> igroup,
+    int block_size
+) {
+    int size_links = igroupLinkA.element_count();
+    int size_groups = igroup_in.element_count();
+
+    // Now call our function
+    ffi::Error result = InsertLinks(
+        stream,
+        reinterpret_cast<int*>(igroup_in.untyped_data()),
+        reinterpret_cast<int*>(igroupLinkA.untyped_data()),
+        reinterpret_cast<int*>(igroupLinkB.untyped_data()),
+        reinterpret_cast<int*>(num_links.untyped_data()),
+        reinterpret_cast<int*>(igroup->untyped_data()),
+        size_links,
+        size_groups,
+        block_size
+    );
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    InsertLinksFFI, InsertLinksFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // igroup_in
+        .Arg<ffi::AnyBuffer>() // igroupLinkA
+        .Arg<ffi::AnyBuffer>() // igroupLinkB
+        .Arg<ffi::AnyBuffer>() // num_links
+        .Ret<ffi::AnyBuffer>() // igroup
+        .Attr<int>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_fof, m) {
     m.def("NodeFofAndIlist", []() { return EncapsulateFfiCall(&NodeFofAndIlistFFI); });
     m.def("ParticleFof", []() { return EncapsulateFfiCall(&ParticleFofFFI); });
+    m.def("InsertLinks", []() { return EncapsulateFfiCall(&InsertLinksFFI); });
 }

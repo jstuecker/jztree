@@ -13,6 +13,11 @@ class PosLvl():
 
     def pos_lvl(self):
         return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
+    
+@jax.tree_util.register_dataclass
+@dataclass
+class PosLvlId(PosLvl):
+    id: jnp.ndarray
 
 @dataclass(frozen=True)
 class KNNConfig:

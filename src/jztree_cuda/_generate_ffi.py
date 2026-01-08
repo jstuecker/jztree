@@ -44,7 +44,7 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "fof.cuh"),
-    names=["NodeFofAndIlist", "ParticleFof"],
+    names=["NodeFofAndIlist", "ParticleFof", "InsertLinks"],
     only_kernels=False
 )
 
@@ -55,8 +55,11 @@ functions["NodeFofAndIlist"].par["ilist_out_size"].expression = "ilist_out->elem
 functions["ParticleFof"].par["nnodes"].expression = "isplit.element_count() - 1"
 functions["ParticleFof"].par["npart"].expression = "particle_igroup->element_count()"
 
+functions["InsertLinks"].par["size_links"].expression = "igroupLinkA.element_count()"
+functions["InsertLinks"].par["size_groups"].expression = "igroup_in.element_count()"
+
 gen.generate_ffi_module_file(
-    output_file = str(HERE / "generated/ffi_fof.cu"), 
-    functions = functions, 
+    output_file = str(HERE / "generated/ffi_fof.cu"),
+    functions = functions,
     includes = default_includes + ["../fof.cuh"]
 )

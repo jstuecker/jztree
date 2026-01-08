@@ -16,8 +16,7 @@
 
 namespace ffi = xla::ffi;
 
- __align__(16) 
-struct PosAndIgroup {
+struct __align__(16) PosAndIgroup {
     float3 pos;
     int igroup;
 };
@@ -146,8 +145,8 @@ __global__ void NodeFof_Link_Count_Insert(
 
                     if((leafQ_igroup == igroupT[j]) && (ileafQ != ileafT)) { 
                         // already linked -> skip
-                        // Note: on pass 0 this check doesn't guarantee that we are not linked,
-                        //       since leaf_igroup might have changed in the mean-time
+                        // Note: on pass 0 failing this this check doesn't guarantee that we are not 
+                        //       linked, since leaf_igroup might have changed in the mean-time
                         //       this is fine, since we will check again when linking!
                         continue; 
                     }
@@ -214,12 +213,12 @@ ffi::Error NodeFofAndIlist(
     int* __restrict__ ilist_out_splits,
     int* __restrict__ ilist_out,
     // Parameters:
-    float r2link,
-    float boxsize,
-    int nnodes,
-    int nleaves,
-    size_t ilist_out_size,
-    int block_size
+    const float r2link,
+    const float boxsize,
+    const int nnodes,
+    const int nleaves,
+    const size_t ilist_out_size,
+    const int block_size
 ) {
     size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt) + sizeof(int));
 
@@ -382,10 +381,45 @@ ffi::Error ParticleFof(
     int contract_blocks = (npart + block_size - 1) / block_size;
     KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(particle_igroup, npart);
     
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
+    return ffi::Error::Success();
+}
+
+__global__ void KernelInsertLinks(
+    const int* __restrict__ igroupLinkA,
+    const int* __restrict__ igroupLinkB,
+    const int* __restrict__ num_links,
+    int* __restrict__ igroup
+) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+
+    if(idx >= num_links[0])
+        return;
+
+    link_roots(igroup, igroupLinkA[idx], igroupLinkB[idx]);
+}
+
+
+ffi::Error InsertLinks(
+    cudaStream_t stream,
+    const int* __restrict__ igroup_in,    
+    const int* __restrict__ igroupLinkA,
+    const int* __restrict__ igroupLinkB,
+    const int* num_links,
+    int* __restrict__ igroup,
+    const int size_links,
+    const int size_groups,
+    const int block_size
+) {
+    cudaMemcpyAsync(igroup, igroup_in, size_groups*sizeof(int), cudaMemcpyDeviceToDevice, stream);
+    
+    KernelInsertLinks<<< div_ceil(size_links, block_size), block_size, 0, stream>>>(
+        igroupLinkA, igroupLinkB, num_links, igroup
+    );
+
+    KernelContractLinks<<< div_ceil(size_groups, block_size), block_size, 0, stream >>>(
+        igroup, size_groups
+    );
+    
     return ffi::Error::Success();
 }
 

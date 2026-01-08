@@ -12,6 +12,7 @@ import fmdj
 
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA")
+jax.ffi.register_ffi_target("InsertLinks", ffi_fof.InsertLinks(), platform="CUDA")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                             FFI Calls                                            #
@@ -53,16 +54,16 @@ node_fof_and_ilist.jit = jax.jit(
     node_fof_and_ilist, static_argnames=["boxsize", "rlink", "alloc_fac", "block_size"]
 )
 
-def contract_links(igroup):
-    def body(carry):
-        igroup, _ = carry
-        igroup_new = igroup[abs(igroup)]
-        jax.debug.print("diff: {}", jnp.sum(igroup_new != igroup))
-        return igroup_new, jnp.any(abs(igroup_new) != abs(igroup))
-    
-    igroup_new = jax.lax.while_loop(lambda carry: carry[1], body, (igroup, True))[0]
+def insert_links(igroup, iA, iB, num_links: jnp.ndarray | None = None, block_size=64):
+    ngroups = len(igroup)
+    if num_links is None:
+        num_links = jnp.array(len(iA), dtype=jnp.int32)
 
-    return igroup_new
+    igr_out = jax.ffi.ffi_call("InsertLinks", (jax.ShapeDtypeStruct((ngroups,), jnp.int32),))(
+        igroup, iA, iB, num_links, block_size=np.int32(block_size)
+    )[0]
+    
+    return igr_out
 
 def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
     nplanes = th.num_planes()
