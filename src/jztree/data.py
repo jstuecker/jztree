@@ -19,6 +19,16 @@ class PosLvl():
 class PosLvlId(PosLvl):
     id: jnp.ndarray
 
+@jax.tree_util.register_dataclass
+@dataclass
+class Label:
+    irank: jnp.ndarray
+    igroup: jnp.ndarray
+
+    def stacked(self, posify=True):
+        igroup = jnp.abs(self.igroup) if posify else self.igroup
+        return jnp.stack([self.irank, self.igroup], axis=-1)
+
 @dataclass(frozen=True)
 class KNNConfig:
     alloc_fac_ilist: float = 256.

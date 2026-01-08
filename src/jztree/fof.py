@@ -5,7 +5,7 @@ from jztree_cuda import ffi_fof
 from .tree import pos_zorder_sort, grouped_dense_interaction_list
 from .common import conditional_callback
 from .data import  FofConfig, FofData, PosLvl
-from fmdj.data import InteractionList
+from fmdj.data import InteractionList, Label
 from typing import Tuple
 
 import fmdj
@@ -98,6 +98,21 @@ def particle_particle_fof(node_igroup, ispl, il, spl, posz, rlink: float, boxsiz
 
     return igroup
 particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
+
+# ------------------------------------------------------------------------------------------------ #
+#                              Functions specific to parallel version                              #
+# ------------------------------------------------------------------------------------------------ #
+
+def global_to_local_label(labels: Label) -> jnp.ndarray:
+    """Map each global to the index of the first occurence of it"""
+    # Note, currently the Fof self-linking detection can be wrong for index 0!
+    pairs = labels.stacked(posify = True)
+
+    lab, indices, inv = jnp.unique(
+        pairs, axis=0, size=len(pairs), return_index=True, return_inverse=True
+    )
+    
+    return jnp.where(labels.igroup >= 0, indices[inv], labels.igroup)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
