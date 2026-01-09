@@ -125,6 +125,97 @@ def global_to_local_label(labels: Label) -> jnp.ndarray:
     
     return jnp.where(labels.igroup >= 0, indices[inv], labels.igroup)
 
+
+from dataclasses import dataclass
+from fmdj.tools import offset_sum
+
+@jax.tree_util.register_dataclass
+@dataclass
+class Link:
+    a: Label
+    b: Label
+
+def masked_scatter(mask, arr, indices, values):
+    indices = jnp.where(mask, indices, len(arr))
+    return arr.at[indices].set(values)
+
+def masked_min_scatter(mask, arr, indices, values):
+    indices = jnp.where(mask, indices, len(arr))
+    
+    return arr.at[indices].min(values)
+
+def masked_to_dense(arr, mask):
+    pref, num = offset_sum(mask)
+    new_arr = jnp.zeros_like(arr).at[pref].set(arr)
+    return new_arr, num
+
+def tree_where(condition: jnp.ndarray, l1: Label, l2: Label) -> Label:
+    return jax.tree.map(lambda x, y: jnp.where(condition, x, y), l1, l2)
+
+def label_min_max(l1: Label, l2: Label):
+    lmax = tree_where(l1 >= l2, l1, l2)
+    lmin = tree_where(~(l1 >= l2), l1, l2)
+    return lmin, lmax
+
+from fmdj.comm import get_rank_info, arange_for_comm, all_to_all_with_splits, pytree_len
+
+def cross_task_link_step(igroup: jnp.ndarray, labels: Label, links: Link, nlinks: jnp.ndarray
+                         ) -> Tuple[jnp.ndarray, jnp.ndarray, Link, jnp.ndarray]:
+    rank, ndev, axis_name = get_rank_info()
+    dtype = igroup.dtype
+
+    def contract(lA, lB):
+        lA = tree_where(lA.irank == rank, labels[lA.igroup], lA)
+        lB = tree_where(lB.irank == rank, labels[lB.igroup], lB)
+        are_local = (lA.irank == rank).astype(dtype) + (lB.irank == rank).astype(dtype)
+        lmin, lmax = label_min_max(lA, lB)
+        return lmin, lmax, are_local
+
+    # Still need to communicate links here
+    send_rank = jnp.maximum(links.a.irank, links.b.irank)
+    data, dev_spl = arange_for_comm(send_rank, links, num=nlinks, axis_name=axis_name)
+    links, dev_spl = all_to_all_with_splits(data, dev_spl, axis_name=axis_name)
+    
+    valid = jnp.arange(pytree_len(links), dtype=jnp.int32) < dev_spl[-1]
+
+    # Dereference local labels
+    lA, lB, are_local = contract(links.a, links.b)
+
+    # handle fully local links
+    igrA, num = masked_to_dense(lA.igroup, valid & (are_local==2))
+    igrB, num = masked_to_dense(lB.igroup, valid & (are_local==2))
+    igroup = insert_links(igroup, igrA, igrB, num)
+    labels = labels[igroup]
+
+    is_root = (labels.irank == rank) & (jnp.abs(labels.igroup) == jnp.arange(len(labels.igroup)))
+
+    # Dereference again, since labels may have changed
+    lmin, lmax, are_local = contract(lA, lB)
+    was_resolved = lmin == lmax
+
+    # Handle partially local links. For these we need to update the higher root node to any
+    # parent of the lower node
+    # Multiple links may try to update a single root node at the same time. To deal with this
+    # race condition, we take the minimum suggested update then need to retry the unresolved
+    # in the next iteration where we try them at the larger root node
+
+    update_local = (are_local == 1) & (lmax.irank == rank)  & (~was_resolved)
+    update_local = update_local & (labels[lmax.igroup] >= lmin) & is_root[lmax.igroup]
+    labels.irank = masked_min_scatter(update_local, labels.irank, lmax.igroup, lmin.irank)
+    update_local = update_local & (labels[lmax.igroup].irank == lmin.irank)
+    labels.igroup = masked_min_scatter(update_local, labels.igroup, lmax.igroup, lmin.igroup)
+    was_resolved = was_resolved | (update_local & (labels[lmax.igroup] == lmin))
+
+    labels = labels[igroup]
+    lmin, lmax, are_local = contract(lmin, lmax)
+    
+    remaining_links = jax.tree.map(
+        lambda l: masked_to_dense(l, valid & ~was_resolved)[0], Link(lmax, lmin)
+    )
+
+    return igroup, labels, remaining_links, jnp.sum(valid & ~was_resolved)
+cross_task_link_step.jit = jax.jit(cross_task_link_step)
+
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
 # ------------------------------------------------------------------------------------------------ #

@@ -25,9 +25,19 @@ class Label:
     irank: jnp.ndarray
     igroup: jnp.ndarray
 
-    def stacked(self, posify=True):
+    def stacked(self, posify: bool = True) -> jnp.ndarary:
         igroup = jnp.abs(self.igroup) if posify else self.igroup
         return jnp.stack([self.irank, self.igroup], axis=-1)
+    
+    def __getitem__(self, key) -> Label:
+        return jax.tree.map(lambda x: x[key], self)
+    
+    def __eq__(self, other: "Label"):
+        return (self.irank == other.irank) & (self.igroup == other.igroup)
+
+    def __ge__(self, other: "Label") -> jnp.ndarray:
+        rank_gtr = self.irank > other.irank
+        return rank_gtr | ((self.irank == other.irank) & (self.igroup >= other.igroup))
 
 @dataclass(frozen=True)
 class KNNConfig:
