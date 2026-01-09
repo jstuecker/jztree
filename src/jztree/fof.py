@@ -141,12 +141,16 @@ def masked_scatter(mask, arr, indices, values):
 
 def masked_min_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
+
+    # first we erase the initial value of arr at the update locations,
+    # so we will only get the min of the updates
+    arr = arr.at[indices].set(jnp.iinfo(arr.dtype).max)
     
     return arr.at[indices].min(values)
 
 def masked_to_dense(arr, mask):
     pref, num = offset_sum(mask)
-    new_arr = jnp.zeros_like(arr).at[pref].set(arr)
+    new_arr = jnp.zeros_like(arr).at[jnp.where(mask, pref, len(arr))].set(arr)
     return new_arr, num
 
 def tree_where(condition: jnp.ndarray, l1: Label, l2: Label) -> Label:
@@ -196,8 +200,8 @@ def cross_task_link_step(igroup: jnp.ndarray, labels: Label, links: Link, nlinks
     # Handle partially local links. For these we need to update the higher root node to any
     # parent of the lower node
     # Multiple links may try to update a single root node at the same time. To deal with this
-    # race condition, we take the minimum suggested update then need to retry the unresolved
-    # in the next iteration where we try them at the larger root node
+    # race condition, we take the minimum suggested update and then need to retry the unresolved
+    # in the next iteration where we will continue try them at the larger node
 
     update_local = (are_local == 1) & (lmax.irank == rank)  & (~was_resolved)
     update_local = update_local & (labels[lmax.igroup] >= lmin) & is_root[lmax.igroup]
