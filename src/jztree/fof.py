@@ -7,6 +7,7 @@ from .common import conditional_callback
 from .data import  FofConfig, FofData, PosLvl, Label
 from fmdj.data import InteractionList
 from typing import Tuple
+from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank
 
 import fmdj
 
@@ -161,31 +162,32 @@ def label_min_max(l1: Label, l2: Label):
     lmin = tree_where(~(l1 >= l2), l1, l2)
     return lmin, lmax
 
-from fmdj.comm import get_rank_info, arange_for_comm, all_to_all_with_splits, pytree_len
-
-def cross_task_link_step(igroup: jnp.ndarray, labels: Label, links: Link, nlinks: jnp.ndarray
-                         ) -> Tuple[jnp.ndarray, jnp.ndarray, Link, jnp.ndarray]:
+def link_cross_task(igroup: jnp.ndarray, labels: Label, links: Link, nlinks: jnp.ndarray
+                    ) -> Tuple[jnp.ndarray, jnp.ndarray, Link, jnp.ndarray]:
     rank, ndev, axis_name = get_rank_info()
     dtype = igroup.dtype
 
-    def contract(lA, lB):
+    def contract(lA: Label, lB: Label):
+        # Contracts labels as far as possible, given the locally available information
+        # We do this step every time the local information may have changed
+
         lA = tree_where(lA.irank == rank, labels[lA.igroup], lA)
         lB = tree_where(lB.irank == rank, labels[lB.igroup], lB)
         are_local = (lA.irank == rank).astype(dtype) + (lB.irank == rank).astype(dtype)
         lmin, lmax = label_min_max(lA, lB)
         return lmin, lmax, are_local
 
-    # Still need to communicate links here
+    # Communicate the links to the larger rank in the link
     send_rank = jnp.maximum(links.a.irank, links.b.irank)
-    data, dev_spl = arange_for_comm(send_rank, links, num=nlinks, axis_name=axis_name)
-    links, dev_spl = all_to_all_with_splits(data, dev_spl, axis_name=axis_name)
+    links, dev_spl = all_to_all_with_irank(
+        send_rank, links, num=nlinks, axis_name=axis_name, copy_self=False
+    )
     
     valid = jnp.arange(pytree_len(links), dtype=jnp.int32) < dev_spl[-1]
 
-    # Dereference local labels
     lA, lB, are_local = contract(links.a, links.b)
 
-    # handle fully local links
+    # Handle fully local links. Note that insert_links also contracts the local igroup graph
     igrA, num = masked_to_dense(lA.igroup, valid & (are_local==2))
     igrB, num = masked_to_dense(lB.igroup, valid & (are_local==2))
     igroup = insert_links(igroup, igrA, igrB, num)
@@ -203,22 +205,25 @@ def cross_task_link_step(igroup: jnp.ndarray, labels: Label, links: Link, nlinks
     # race condition, we take the minimum suggested update and then need to retry the unresolved
     # in the next iteration where we will continue try them at the larger node
 
-    update_local = (are_local == 1) & (lmax.irank == rank)  & (~was_resolved)
-    update_local = update_local & (labels[lmax.igroup] >= lmin) & is_root[lmax.igroup]
-    labels.irank = masked_min_scatter(update_local, labels.irank, lmax.igroup, lmin.irank)
-    update_local = update_local & (labels[lmax.igroup].irank == lmin.irank)
-    labels.igroup = masked_min_scatter(update_local, labels.igroup, lmax.igroup, lmin.igroup)
-    was_resolved = was_resolved | (update_local & (labels[lmax.igroup] == lmin))
+    update = (are_local == 1) & (lmax.irank == rank)  & (~was_resolved)
+    update = update & (labels[lmax.igroup] >= lmin) & is_root[lmax.igroup]
+    labels.irank = masked_min_scatter(update, labels.irank, lmax.igroup, lmin.irank)
+    # only update labels.igroup with links that point towards the same rank
+    update = update & (labels[lmax.igroup].irank == lmin.irank)
+    labels.igroup = masked_min_scatter(update, labels.igroup, lmax.igroup, lmin.igroup)
 
+    # Dereference again, since labels may have changed
     labels = labels[igroup]
     lmin, lmax, are_local = contract(lmin, lmax)
+
+    was_resolved = lmin == lmax
     
     remaining_links = jax.tree.map(
         lambda l: masked_to_dense(l, valid & ~was_resolved)[0], Link(lmax, lmin)
     )
 
     return igroup, labels, remaining_links, jnp.sum(valid & ~was_resolved)
-cross_task_link_step.jit = jax.jit(cross_task_link_step)
+link_cross_task.jit = jax.jit(link_cross_task)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
