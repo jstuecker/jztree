@@ -7,7 +7,7 @@ from .common import conditional_callback
 from .data import  FofConfig, FofData, PosLvl, Label
 from fmdj.data import InteractionList
 from typing import Tuple
-from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank
+from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
 
 import fmdj
 
@@ -254,15 +254,9 @@ def contract_distributed(labels: Label, num: int | jnp.ndarray):
 
     valid = jnp.arange(pytree_len(labels)) < num
     
-    from fmdj.comm import all_to_all_request
-    
-    for i in range(0,3):
-        # to reduce communication, first find all unique non-local labels
+    def contraction_step(carry):
+        labels: Label = carry[0]
         nloc_lab, indices, num_uq = unique_labels(labels, (labels.irank != rank) & valid)
-
-        # print("nloc, lab", nloc_lab)
-
-        # print("---num-unique:", num_uq)
         
         nloc_lab_new = all_to_all_request(
             nloc_lab.irank, nloc_lab.igroup, labels, num=num_uq, axis_name=axis_name, copy_self=False
@@ -270,14 +264,14 @@ def contract_distributed(labels: Label, num: int | jnp.ndarray):
         labels_new = tree_where((labels.irank != rank) & valid, nloc_lab_new[indices], labels)
         labels_new = tree_where((labels_new.irank == rank) & valid, labels_new[labels_new.igroup], labels_new)
 
-        done = labels == labels_new
-        # print("--- not done:", jnp.sum(valid & ~done))
-
-        labels = labels_new
-    # print(jnp.sum(valid & ~done))
-
-    return labels
+        not_done = jax.lax.psum(~ jnp.all(labels == labels_new), axis_name) > 0
+        
+        return labels_new, not_done
     
+    return jax.lax.while_loop(
+        lambda c: c[1], contraction_step, (labels, jnp.array(True))
+    )[0]
+
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
