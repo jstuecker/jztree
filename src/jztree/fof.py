@@ -126,6 +126,26 @@ def global_to_local_label(labels: Label) -> jax.Array:
     
     return jnp.where(labels.igroup >= 0, indices[inv], labels.igroup)
 
+def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax.Array]:
+    """Get unique labels among the masked locations
+
+    returns labels_out, indices, num
+
+    indices are so that labels == labels_out[indices] at locations where mask is True
+    """
+    pairs = labels.stacked(posify = True)
+
+    masked_pairs, num, inv_mask = masked_to_dense(
+        jnp.abs(pairs), mask, get_inverse=True, fill_value=-1
+    )
+    # To avoid counting invalid pairs as an extra label, we set them to the first valid label
+    masked_pairs = jnp.where(masked_pairs == -1, masked_pairs[0], masked_pairs)
+
+    lab, inv = jnp.unique(
+        masked_pairs, axis=0, size=len(masked_pairs), return_inverse=True, fill_value=-1
+    )
+
+    return Label(lab[...,0], lab[...,1]), inv[inv_mask], jnp.sum(lab[...,0] != -1)
 
 from dataclasses import dataclass
 from fmdj.tools import offset_sum
@@ -149,10 +169,14 @@ def masked_min_scatter(mask, arr, indices, values):
     
     return arr.at[indices].min(values)
 
-def masked_to_dense(arr, mask):
+def masked_to_dense(arr: jax.Array, mask, get_inverse=False, fill_value=0):
     pref, num = offset_sum(mask)
-    new_arr = jnp.zeros_like(arr).at[jnp.where(mask, pref, len(arr))].set(arr)
-    return new_arr, num
+    indices = jnp.where(mask, pref, len(arr))
+    new_arr = jnp.full(arr.shape, fill_value, arr.dtype).at[indices].set(arr)
+    if get_inverse:
+        return new_arr, num, indices
+    else:
+        return new_arr, num
 
 def tree_where(condition: jax.Array, l1: Label, l2: Label) -> Label:
     return jax.tree.map(lambda x, y: jnp.where(condition, x, y), l1, l2)
@@ -162,8 +186,8 @@ def label_min_max(l1: Label, l2: Label):
     lmin = tree_where(~(l1 >= l2), l1, l2)
     return lmin, lmax
 
-def link_cross_task(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.Array
-                    ) -> Tuple[jax.Array, jax.Array, Link, jax.Array]:
+def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.Array
+                          ) -> Tuple[jax.Array, jax.Array, Link, jax.Array]:
     rank, ndev, axis_name = get_rank_info()
     dtype = igroup.dtype
 
@@ -223,7 +247,37 @@ def link_cross_task(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.A
     )
 
     return igroup, labels, remaining_links, jnp.sum(valid & ~was_resolved)
-link_cross_task.jit = jax.jit(link_cross_task)
+link_distributed_step.jit = jax.jit(link_distributed_step)
+
+def contract_distributed(labels: Label, num: int | jnp.ndarray):
+    rank, ndev, axis_name = get_rank_info()
+
+    valid = jnp.arange(pytree_len(labels)) < num
+    
+    from fmdj.comm import all_to_all_request
+    
+    for i in range(0,3):
+        # to reduce communication, first find all unique non-local labels
+        nloc_lab, indices, num_uq = unique_labels(labels, (labels.irank != rank) & valid)
+
+        # print("nloc, lab", nloc_lab)
+
+        # print("---num-unique:", num_uq)
+        
+        nloc_lab_new = all_to_all_request(
+            nloc_lab.irank, nloc_lab.igroup, labels, num=num_uq, axis_name=axis_name, copy_self=False
+        )
+        labels_new = tree_where((labels.irank != rank) & valid, nloc_lab_new[indices], labels)
+        labels_new = tree_where((labels_new.irank == rank) & valid, labels_new[labels_new.igroup], labels_new)
+
+        done = labels == labels_new
+        # print("--- not done:", jnp.sum(valid & ~done))
+
+        labels = labels_new
+    # print(jnp.sum(valid & ~done))
+
+    return labels
+    
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #

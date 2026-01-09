@@ -27,7 +27,7 @@ class Label:
 
     def stacked(self, posify: bool = True) -> jnp.ndarary:
         igroup = jnp.abs(self.igroup) if posify else self.igroup
-        return jnp.stack([self.irank, self.igroup], axis=-1)
+        return jnp.stack([self.irank, igroup], axis=-1)
     
     def __getitem__(self, key) -> Label:
         return jax.tree.map(lambda x: x[key], self)
