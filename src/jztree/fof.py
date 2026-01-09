@@ -21,10 +21,10 @@ jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), plat
 # ------------------------------------------------------------------------------------------------ #
 
 def node_fof_and_ilist(
-        node_ilist: InteractionList, isplit: jnp.ndarray, 
-        child_data: PosLvl, child_igroup: jnp.ndarray, 
+        node_ilist: InteractionList, isplit: jax.Array, 
+        child_data: PosLvl, child_igroup: jax.Array, 
         rlink: float, boxsize: float = 0., alloc_fac:float = 128., block_size:int = 32
-    ) -> Tuple[jnp.ndarray, InteractionList]:
+    ) -> Tuple[jax.Array, InteractionList]:
     assert node_ilist.ispl.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
     assert len(child_data.lvl) == len(child_igroup), "Should both correspond to no. of childrne"
     assert node_ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
@@ -56,7 +56,7 @@ node_fof_and_ilist.jit = jax.jit(
     node_fof_and_ilist, static_argnames=["boxsize", "rlink", "alloc_fac", "block_size"]
 )
 
-def insert_links(igroup, iA, iB, num_links: jnp.ndarray | None = None, block_size=64):
+def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=64):
     ngroups = len(igroup)
     if num_links is None:
         num_links = jnp.array(len(iA), dtype=jnp.int32)
@@ -67,8 +67,8 @@ def insert_links(igroup, iA, iB, num_links: jnp.ndarray | None = None, block_siz
     
     return igr_out
 
-def node_to_child_label(igroup: jnp.ndarray, spl: jnp.ndarray, size_child: int, 
-                        block_size: int = 64) -> jnp.ndarray:
+def node_to_child_label(igroup: jax.Array, spl: jax.Array, size_child: int, 
+                        block_size: int = 64) -> jax.Array:
     outputs = (jax.ShapeDtypeStruct((size_child,), jnp.int32),)
     igroup_child = jax.ffi.ffi_call("NodeToChildLabel",  outputs)(
         igroup, spl, block_size=np.uint64(block_size)
@@ -115,7 +115,7 @@ particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rli
 #                              Functions specific to parallel version                              #
 # ------------------------------------------------------------------------------------------------ #
 
-def global_to_local_label(labels: Label) -> jnp.ndarray:
+def global_to_local_label(labels: Label) -> jax.Array:
     """Map each global to the index of the first occurence of it"""
     # Note, currently the Fof self-linking detection can be wrong for index 0!
     pairs = labels.stacked(posify = True)
@@ -154,7 +154,7 @@ def masked_to_dense(arr, mask):
     new_arr = jnp.zeros_like(arr).at[jnp.where(mask, pref, len(arr))].set(arr)
     return new_arr, num
 
-def tree_where(condition: jnp.ndarray, l1: Label, l2: Label) -> Label:
+def tree_where(condition: jax.Array, l1: Label, l2: Label) -> Label:
     return jax.tree.map(lambda x, y: jnp.where(condition, x, y), l1, l2)
 
 def label_min_max(l1: Label, l2: Label):
@@ -162,8 +162,8 @@ def label_min_max(l1: Label, l2: Label):
     lmin = tree_where(~(l1 >= l2), l1, l2)
     return lmin, lmax
 
-def link_cross_task(igroup: jnp.ndarray, labels: Label, links: Link, nlinks: jnp.ndarray
-                    ) -> Tuple[jnp.ndarray, jnp.ndarray, Link, jnp.ndarray]:
+def link_cross_task(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.Array
+                    ) -> Tuple[jax.Array, jax.Array, Link, jax.Array]:
     rank, ndev, axis_name = get_rank_info()
     dtype = igroup.dtype
 
@@ -229,7 +229,7 @@ link_cross_task.jit = jax.jit(link_cross_task)
 #                                          User Interface                                          #
 # ------------------------------------------------------------------------------------------------ #
 
-def prepare_fof_z(posz: jnp.ndarray, rlink: float, boxsize: float | None = None, 
+def prepare_fof_z(posz: jax.Array, rlink: float, boxsize: float | None = None, 
                   cfg: FofConfig = FofConfig()) -> FofData:
 
     th: fmdj.data.TreeHierarchy = fmdj.ztree.build_tree_hierarchy(
@@ -250,12 +250,12 @@ def evaluate_fof_z(d: FofData):
     )
 evaluate_fof_z.jit = jax.jit(evaluate_fof_z)
 
-def fof_z(posz: jnp.ndarray, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jnp.ndarray:
+def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
     data = prepare_fof_z(posz, rlink, boxsize, cfg)
     return evaluate_fof_z(data)
 fof_z.jit = jax.jit(fof_z, static_argnames=["rlink", "boxsize", "cfg"])
 
-def fof(pos: jnp.ndarray, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jnp.ndarray:
+def fof(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
     posz, idz = pos_zorder_sort(pos)
     
     igroupz = fof_z(posz, rlink, boxsize=boxsize, cfg=cfg)

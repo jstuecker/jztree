@@ -8,8 +8,8 @@ from fmdj.data import InteractionList
 @jax.tree_util.register_dataclass
 @dataclass
 class PosLvl():
-    pos: jnp.ndarray
-    lvl: jnp.ndarray
+    pos: jax.Array
+    lvl: jax.Array
 
     def pos_lvl(self):
         return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
@@ -17,13 +17,13 @@ class PosLvl():
 @jax.tree_util.register_dataclass
 @dataclass
 class PosLvlId(PosLvl):
-    id: jnp.ndarray
+    id: jax.Array
 
 @jax.tree_util.register_dataclass
 @dataclass
 class Label:
-    irank: jnp.ndarray
-    igroup: jnp.ndarray
+    irank: jax.Array
+    igroup: jax.Array
 
     def stacked(self, posify: bool = True) -> jnp.ndarary:
         igroup = jnp.abs(self.igroup) if posify else self.igroup
@@ -35,7 +35,7 @@ class Label:
     def __eq__(self, other: "Label"):
         return (self.irank == other.irank) & (self.igroup == other.igroup)
 
-    def __ge__(self, other: "Label") -> jnp.ndarray:
+    def __ge__(self, other: "Label") -> jax.Array:
         rank_gtr = self.irank > other.irank
         return rank_gtr | ((self.irank == other.irank) & (self.igroup >= other.igroup))
 
@@ -71,12 +71,12 @@ class KNNData:
     k : int
     boxsize : float
 
-    posz: jnp.ndarray       # z-sorted positions
-    idz: jnp.ndarray        # ids so that posz = pos0[idz]
-    spl: jnp.ndarray        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
-    ilist: jnp.ndarray      # interaction list (leaf indices)
-    ir2list: jnp.ndarray    # interaction r2 list (lower bound leaf-leaf distances squared)
-    ilist_spl: jnp.ndarray  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
+    posz: jax.Array       # z-sorted positions
+    idz: jax.Array        # ids so that posz = pos0[idz]
+    spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
+    ilist: jax.Array      # interaction list (leaf indices)
+    ir2list: jax.Array    # interaction r2 list (lower bound leaf-leaf distances squared)
+    ilist_spl: jax.Array  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
 
 @partial(jax.tree_util.register_dataclass, 
          meta_fields=["rlink", "boxsize"],
@@ -86,8 +86,8 @@ class FofData:
     rlink : float
     boxsize : float
 
-    posz: jnp.ndarray       # z-sorted positions
-    # idz: jnp.ndarray        # ids so that posz = pos0[idz]
-    igroup: jnp.ndarray     # group labels
+    posz: jax.Array       # z-sorted positions
+    # idz: jax.Array        # ids so that posz = pos0[idz]
+    igroup: jax.Array     # group labels
     ilist: InteractionList  # interaction list (on leaf indices)
-    spl: jnp.ndarray        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
+    spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
