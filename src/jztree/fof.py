@@ -187,7 +187,7 @@ def label_min_max(l1: Label, l2: Label):
     return lmin, lmax
 
 def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.Array
-                          ) -> Tuple[jax.Array, jax.Array, Link, jax.Array]:
+                          ) -> Tuple[jax.Array, Label, Link, jax.Array]:
     rank, ndev, axis_name = get_rank_info()
     dtype = igroup.dtype
 
@@ -272,6 +272,25 @@ def contract_distributed(labels: Label, num: int | jnp.ndarray):
         lambda c: c[1], contraction_step, (labels, jnp.array(True))
     )[0]
 
+def link_distributed(
+        igroup: jax.Array,
+        labels: jax.Array,
+        links: Link,
+        nlabels: jax.Array,
+        nlinks: jax.Array
+    ):
+    rank, ndev, axis_name = get_rank_info()
+
+    def condition(carry):
+        igroup, labels, links, nlinks = carry
+        return jax.lax.psum(nlinks > 0, axis_name) > 0
+    
+    init_val = (igroup, labels, links, nlinks)
+    igroup, labels, links, nlinks = jax.lax.while_loop(
+        condition, lambda c: link_distributed_step(*c), init_val
+    )
+
+    return contract_distributed(labels, nlabels)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
