@@ -28,8 +28,10 @@ namespace ffi = xla::ffi;
 ffi::Error NodeToChildLabelFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer node_igroup,
+    ffi::AnyBuffer node_lvl,
     ffi::AnyBuffer isplit,
     ffi::Result<ffi::AnyBuffer> leaf_igroup,
+    float r2link,
     size_t block_size
 ) {
     dim3 blockDim(block_size);
@@ -42,13 +44,16 @@ ffi::Error NodeToChildLabelFFIHost(
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
     int* node_igroup_val = reinterpret_cast<int*>(node_igroup.untyped_data());
+    int* node_lvl_val = reinterpret_cast<int*>(node_lvl.untyped_data());
     int* isplit_val = reinterpret_cast<int*>(isplit.untyped_data());
     int* leaf_igroup_val = reinterpret_cast<int*>(leaf_igroup->untyped_data());
 
     void* args[] = {
         &node_igroup_val,
+        &node_lvl_val,
         &isplit_val,
-        &leaf_igroup_val
+        &leaf_igroup_val,
+        &r2link
     };
     cudaLaunchKernel((const void*)NodeToChildLabel, gridDim, blockDim, args, smem, stream);
 
@@ -64,8 +69,10 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // node_igroup
+        .Arg<ffi::AnyBuffer>() // node_lvl
         .Arg<ffi::AnyBuffer>() // isplit
         .Ret<ffi::AnyBuffer>() // leaf_igroup
+        .Attr<float>("r2link")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

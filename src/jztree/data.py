@@ -80,7 +80,7 @@ class KNNData:
 
 @partial(jax.tree_util.register_dataclass, 
          meta_fields=["rlink", "boxsize"],
-         data_fields=["posz", "igroup", "ilist", "spl"])
+         data_fields=["posz", "igroup", "node_lvl", "ilist", "spl"])
 @dataclass
 class FofData:
     rlink : float
@@ -89,5 +89,6 @@ class FofData:
     posz: jax.Array       # z-sorted positions
     # idz: jax.Array        # ids so that posz = pos0[idz]
     igroup: jax.Array     # group labels
+    node_lvl: jax.Array   # node-levels
     ilist: InteractionList  # interaction list (on leaf indices)
     spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i

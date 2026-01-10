@@ -67,11 +67,11 @@ def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=
     
     return igr_out
 
-def node_to_child_label(igroup: jax.Array, spl: jax.Array, size_child: int, 
-                        block_size: int = 64) -> jax.Array:
+def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
+                        size_child: int, rlink: float, block_size: int = 64) -> jax.Array:
     outputs = (jax.ShapeDtypeStruct((size_child,), jnp.int32),)
     igroup_child = jax.ffi.ffi_call("NodeToChildLabel",  outputs)(
-        igroup, spl, block_size=np.uint64(block_size)
+        igroup, lvl, spl, block_size=np.uint64(block_size), r2link=np.float32(rlink*rlink)
     )[0]
 
     return igroup_child
@@ -87,17 +87,20 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
     # Get coarsest plane data
     igroup = jnp.arange(len(spl)-1, dtype=jnp.int32)
 
+    node_lvl = jnp.full_like(igroup, 388)
+
     for level in reversed(range(nplanes)):
         size = th.plane_sizes[level]
+        igroup = node_to_child_label(igroup, node_lvl, spl, size, rlink=rlink)
         child_data = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
-        child_igroup = node_to_child_label(igroup, spl, size)
 
         igroup, ilist = node_fof_and_ilist(
-            ilist, spl, child_data, child_igroup,
+            ilist, spl, child_data, igroup,
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
 
         spl = th.ispl_n2n.get(level, size+1)
+        node_lvl = child_data.lvl
         
     return igroup, ilist, spl
 node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
@@ -307,12 +310,11 @@ def prepare_fof_z(posz: jax.Array, rlink: float, boxsize: float | None = None,
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
 
-    return FofData(rlink, boxsize, posz, igroup, ilist, spl)
+    return FofData(rlink, boxsize, posz, igroup, th.lvl.get(0, len(igroup)), ilist, spl)
 prepare_fof_z.jit = jax.jit(prepare_fof_z, static_argnames=["rlink", "boxsize", "cfg"])
 
 def evaluate_fof_z(d: FofData):
-    # Could in principle support switching out the particle data at this point.
-    child_igroup = node_to_child_label(d.igroup, d.spl, len(d.posz))
+    child_igroup = node_to_child_label(d.igroup, d.node_lvl, d.spl, len(d.posz), rlink=d.rlink)
 
     return particle_particle_fof(
         d.ilist.ispl, d.ilist.iother, d.spl, d.posz, child_igroup, rlink=d.rlink, boxsize=d.boxsize
