@@ -345,11 +345,11 @@ __global__ void ParticleFofLink(
 
 ffi::Error ParticleFof(
     cudaStream_t stream,
-    const int* __restrict__ node_igroup,
     const int* __restrict__ node_ilist_splits,
     const int* __restrict__ node_ilist,
     const int* __restrict__ isplit,
     const float3* __restrict__ pos,
+    const int* __restrict__ particle_igroup_in,
     int* __restrict__ particle_igroup,
     // Parameters:
     float r2link,
@@ -358,12 +358,7 @@ ffi::Error ParticleFof(
     int npart,
     int block_size
 ) {
-    cudaMemsetAsync(particle_igroup, 0, sizeof(int)*npart, stream);
-
-    // Initialize particle group pointers from nodes
-    NodeToChildLabel<<< nnodes, block_size, 0, stream >>>(
-        node_igroup, isplit, particle_igroup
-    );
+    cudaMemcpyAsync(particle_igroup, particle_igroup_in, npart*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // Now do particle-particle linking
     // use packed PartTile for shared positions

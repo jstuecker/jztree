@@ -102,9 +102,9 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
     return igroup, ilist, spl
 node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
-def particle_particle_fof(node_igroup, ispl, il, spl, posz, rlink: float, boxsize: float = 0., block_size=32):
-    igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), node_igroup.dtype),))(
-        node_igroup, ispl, il, spl, posz,
+def particle_particle_fof(ispl, il, spl, posz, part_igroup, rlink: float, boxsize: float = 0., block_size=32):
+    igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
+        ispl, il, spl, posz, part_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
@@ -312,8 +312,10 @@ prepare_fof_z.jit = jax.jit(prepare_fof_z, static_argnames=["rlink", "boxsize", 
 
 def evaluate_fof_z(d: FofData):
     # Could in principle support switching out the particle data at this point.
+    child_igroup = node_to_child_label(d.igroup, d.spl, len(d.posz))
+
     return particle_particle_fof(
-        d.igroup, d.ilist.ispl, d.ilist.iother, d.spl, d.posz, rlink=d.rlink, boxsize=d.boxsize
+        d.ilist.ispl, d.ilist.iother, d.spl, d.posz, child_igroup, rlink=d.rlink, boxsize=d.boxsize
     )
 evaluate_fof_z.jit = jax.jit(evaluate_fof_z)
 

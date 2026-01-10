@@ -142,11 +142,11 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 ffi::Error ParticleFofFFIHost(
     cudaStream_t stream,
-    ffi::AnyBuffer node_igroup,
     ffi::AnyBuffer node_ilist_splits,
     ffi::AnyBuffer node_ilist,
     ffi::AnyBuffer isplit,
     ffi::AnyBuffer pos,
+    ffi::AnyBuffer particle_igroup_in,
     ffi::Result<ffi::AnyBuffer> particle_igroup,
     float r2link,
     float boxsize,
@@ -158,11 +158,11 @@ ffi::Error ParticleFofFFIHost(
     // Now call our function
     ffi::Error result = ParticleFof(
         stream,
-        reinterpret_cast<int*>(node_igroup.untyped_data()),
         reinterpret_cast<int*>(node_ilist_splits.untyped_data()),
         reinterpret_cast<int*>(node_ilist.untyped_data()),
         reinterpret_cast<int*>(isplit.untyped_data()),
         reinterpret_cast<float3*>(pos.untyped_data()),
+        reinterpret_cast<int*>(particle_igroup_in.untyped_data()),
         reinterpret_cast<int*>(particle_igroup->untyped_data()),
         r2link,
         boxsize,
@@ -182,11 +182,11 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ParticleFofFFI, ParticleFofFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // node_igroup
         .Arg<ffi::AnyBuffer>() // node_ilist_splits
         .Arg<ffi::AnyBuffer>() // node_ilist
         .Arg<ffi::AnyBuffer>() // isplit
         .Arg<ffi::AnyBuffer>() // pos
+        .Arg<ffi::AnyBuffer>() // particle_igroup_in
         .Ret<ffi::AnyBuffer>() // particle_igroup
         .Attr<float>("r2link")
         .Attr<float>("boxsize")
