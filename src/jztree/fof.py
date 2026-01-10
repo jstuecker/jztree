@@ -252,7 +252,7 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     return igroup, labels, remaining_links, jnp.sum(valid & ~was_resolved)
 link_distributed_step.jit = jax.jit(link_distributed_step)
 
-def contract_distributed(labels: Label, num: int | jnp.ndarray):
+def contract_distributed(labels: Label, num: int | jax.Array):
     rank, ndev, axis_name = get_rank_info()
 
     valid = jnp.arange(pytree_len(labels)) < num
