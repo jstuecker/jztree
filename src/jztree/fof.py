@@ -121,7 +121,7 @@ particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rli
 def global_to_local_label(labels: Label) -> jax.Array:
     """Map each global to the index of the first occurence of it"""
     # Note, currently the Fof self-linking detection can be wrong for index 0!
-    pairs = labels.stacked(posify = True)
+    pairs = labels.stacked()
 
     lab, indices, inv = jnp.unique(
         pairs, axis=0, size=len(pairs), return_index=True, return_inverse=True
@@ -136,7 +136,7 @@ def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax
 
     indices are so that labels == labels_out[indices] at locations where mask is True
     """
-    pairs = labels.stacked(posify = True)
+    pairs = labels.stacked()
 
     masked_pairs, num, inv_mask = masked_to_dense(
         pairs, mask, get_inverse=True, fill_value=-1
