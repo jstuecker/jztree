@@ -139,7 +139,7 @@ def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax
     pairs = labels.stacked(posify = True)
 
     masked_pairs, num, inv_mask = masked_to_dense(
-        jnp.abs(pairs), mask, get_inverse=True, fill_value=-1
+        pairs, mask, get_inverse=True, fill_value=-1
     )
     # To avoid counting invalid pairs as an extra label, we set them to the first valid label
     masked_pairs = jnp.where(masked_pairs == -1, masked_pairs[0], masked_pairs)
@@ -220,7 +220,7 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     igroup = insert_links(igroup, igrA, igrB, num)
     labels = labels[igroup]
 
-    is_root = (labels.irank == rank) & (jnp.abs(labels.igroup) == jnp.arange(len(labels.igroup)))
+    is_root = (labels.irank == rank) & (labels.igroup == jnp.arange(len(labels.igroup)))
 
     # Dereference again, since labels may have changed
     lmin, lmax, are_local = contract(lA, lB)

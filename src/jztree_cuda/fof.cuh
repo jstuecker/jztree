@@ -23,7 +23,7 @@ struct __align__(16) PosAndIgroup {
 
 __device__ __forceinline__ int find_root(const int* __restrict__ igroup, int x) {
     while (true) {
-        int p = abs(igroup[x]);
+        int p = igroup[x];
         if (p == x) return x;
         x = p;
     }
@@ -67,9 +67,7 @@ __global__ void NodeToChildLabel(
         }
         else { 
             // If our node is linked, then we inherit the label of the first child of its root
-            // Self-linked nodes are indicated through a negative self-pointer and this will 
-            // be triggered for them, too!
-            leaf_igroup[ileaf] = isplit[abs(node_root)];
+            leaf_igroup[ileaf] = isplit[node_root];
         }
     }
 }
@@ -111,9 +109,7 @@ __global__ void NodeFof_Link_Count_Insert(
         
         PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
 
-        // Note: leaf_igroup_out[ileafQ] throughout the kernel in pass 0, but not in pass 1 and 2
-        //       so we can use it in pass 1 and 2 for pruning.
-        int leafQ_igroup = abs(leaf_igroup[ileafQ]);
+        int leafQ_igroup = leaf_igroup[ileafQ];
 
         int ncount = 0;
 
@@ -137,7 +133,7 @@ __global__ void NodeFof_Link_Count_Insert(
 
                 if(ileafT < ileafT_end) {
                     leafT[threadIdx.x] = NodeLvlToHalfExt(leaves[ileafT]);
-                    igroupT[threadIdx.x] = abs(leaf_igroup[ileafT]);
+                    igroupT[threadIdx.x] = leaf_igroup[ileafT];
                 }
                 __syncthreads();
                 
@@ -163,12 +159,20 @@ __global__ void NodeFof_Link_Count_Insert(
                     NodeWithExt lT = leafT[j];
                     float r2max = maxdist2(lT.center, leafQ.center, sumf3(leafQ.extent, lT.extent), boxsize);
                     float r2min = mindist2(lT.center, leafQ.center, sumf3(leafQ.extent, lT.extent), boxsize);
+
+                    float L2 = norm2(2*lT.extent);
                     
-                    if(r2max <= r2link) {
+                    // Check whether we are guaranteed to be linked
+                    if(max(r2max, L2) <= r2link) {
+                        // The max(..., L2) handles a very rare scenario where r2max < L2 of the
+                        // target node and only r2max < r2link. (This can happen if lQ is very small 
+                        // and close). In this scenario leafT would be linked with itself, but only 
+                        // thanks to the existence of lQ and the self-linkedness of lT would not 
+                        // be properly detected in NodeToChildLabel. To deal with this we simply add
+                        // our node also to the interaction list and resolve it at the child-level 
+
                         if(pass == 0)
                             link_roots(leaf_igroup, ileafQ, ileafT);
-                        else if((pass == 2) && (ileafQ == ileafT) && (abs(leaf_igroup[ileafQ]) == ileafQ))
-                            leaf_igroup[ileafQ] = -ileafQ; // flag self-interaction
                     }
                     else if((pass >= 1) && (r2min <= r2link)) {
                         if((pass == 2) && (ilist_offset + ncount < ilist_out_size))
@@ -197,7 +201,7 @@ __global__ void KernelContractLinks(
 
     int igr = igroup[idx];
     for(int i=0; i<max_iter; i++) {
-        int igr_new = igroup[abs(igr)];
+        int igr_new = igroup[igr];
         if(igr_new == igr) break;
         igr = igr_new;
     }
@@ -310,7 +314,7 @@ __global__ void ParticleFofLink(
         PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
         
         float3 xQ = pos[ipartQ];
-        int igroupQ = abs(part_igroup[ipartQ]);
+        int igroupQ = part_igroup[ipartQ];
 
         while(!pf_ilist.finished()) {
             int nodeT = pf_ilist.next();
@@ -327,7 +331,7 @@ __global__ void ParticleFofLink(
 
                 if(ipartT < ipartT_end) {
                     tileT[threadIdx.x].pos = pos[ipartT];
-                    tileT[threadIdx.x].igroup = abs(part_igroup[ipartT]);
+                    tileT[threadIdx.x].igroup = part_igroup[ipartT];
                 }
                 __syncthreads();
                 
