@@ -7,7 +7,9 @@ from .common import conditional_callback
 from .data import  FofConfig, FofData, PosLvl, Label
 from fmdj.data import InteractionList
 from typing import Tuple
-from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
+from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
+from fmdj.ztree import simplify_interaction_list
+from fmdj.tools import inverse_of_splits, cumsum_starting_with_zero
 
 import fmdj
 
@@ -76,6 +78,29 @@ def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
 
     return igroup_child
 
+# def level_to_extend(lvl, diag=True):
+#     olvl, omod = lvl//3, lvl % 3
+
+#     dx = jnp.ldexp(1., olvl)
+#     dy = jnp.ldexp(1., olvl + (omod >= 2).astype(jnp.int32))
+#     dz = jnp.ldexp(1., olvl + (omod >= 1).astype(jnp.int32))
+
+#     if diag:
+#         return jnp.sqrt(dx*dx + dy*dy + dz*dz)
+#     else:
+#         return jnp.stack((dx, dy, dz), axis=-1)
+
+# def node_to_child_label2(node_igroup, node_lvl, spl, size, rlink):
+#     inode = inverse_of_splits(spl, size)
+
+#     node_is_linked = jnp.arange(len(node_igroup)) != node_igroup
+#     node_is_linked = node_is_linked | (level_to_extend(node_lvl, diag=True) <= rlink)
+
+#     idx = jnp.arange(size)
+#     igroup = jnp.where(node_is_linked[inode], spl[node_igroup[inode]], idx)
+
+#     return igroup
+
 def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
     nplanes = th.num_planes()
 
@@ -129,26 +154,30 @@ def global_to_local_label(labels: Label) -> jax.Array:
     
     return jnp.where(labels.igroup >= 0, indices[inv], labels.igroup)
 
-def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax.Array]:
-    """Get unique labels among the masked locations
+def masked_unique_pairs(pairs: jax.Array, mask: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    """Get unique pairs among the masked locations
 
-    returns labels_out, indices, num
+    returns pairs_unique, indices, num
 
-    indices are so that labels == labels_out[indices] at locations where mask is True
+    indices are so that pars == pairs_unique[indices] at locations where mask is True
+    assumes there are no negative values in tuples
     """
-    pairs = labels.stacked()
-
     masked_pairs, num, inv_mask = masked_to_dense(
         pairs, mask, get_inverse=True, fill_value=-1
     )
     # To avoid counting invalid pairs as an extra label, we set them to the first valid label
     masked_pairs = jnp.where(masked_pairs == -1, masked_pairs[0], masked_pairs)
 
-    lab, inv = jnp.unique(
+    pair_unique, inv = jnp.unique(
         masked_pairs, axis=0, size=len(masked_pairs), return_inverse=True, fill_value=-1
     )
 
-    return Label(lab[...,0], lab[...,1]), inv[inv_mask], jnp.sum(lab[...,0] != -1)
+    return pair_unique, inv[inv_mask], jnp.sum(pair_unique[...,0] != -1)
+
+def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax.Array]:
+    lab, inv, num = masked_unique_pairs(labels.stacked(), mask)
+
+    return Label(lab[...,0], lab[...,1]), inv, num
 
 from dataclasses import dataclass
 from fmdj.tools import offset_sum
@@ -158,6 +187,9 @@ from fmdj.tools import offset_sum
 class Link:
     a: Label
     b: Label
+
+    def stacked(self):
+        return jnp.stack([self.a.irank, self.a.igroup, self.b.irank, self.b.igroup])
 
 def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
@@ -294,6 +326,123 @@ def link_distributed(
     )
 
     return contract_distributed(labels, nlabels)
+
+def distr_node_to_child_label(labels: Label, lvl: jax.Array, spl: jax.Array, nlabels: jax.Array,
+                              size_child: int, rlink: float):
+    rank, ndev, axis_name = get_rank_info()
+
+    valid = jnp.arange(len(lvl)) < nlabels
+    
+    local_child_labels = Label(
+        jnp.full(size_child, rank),
+        node_to_child_label(labels.igroup, lvl, spl, size_child, rlink=rlink),
+    )
+
+    inode = inverse_of_splits(spl, size_child)
+
+    request, inv, num = unique_labels(labels, (labels.irank != rank) & valid)
+    remote_child_labels = all_to_all_request(
+        request.irank, request.igroup, local_child_labels[spl[:-1]], num=num, axis_name=axis_name
+    )
+
+    child_labels = tree_where(labels[inode].irank == rank, local_child_labels, remote_child_labels[inv[inode]])
+
+    return child_labels
+
+@jax.tree_util.register_dataclass
+@dataclass
+class NodeData(PosLvl):
+    ids: jax.Array
+    global_label: Label
+
+from fmdj.comm import dynamic_all_gather
+
+def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
+    rank, ndev, axis_name = get_rank_info()
+
+    label_new = label[igroup_new]
+    mask = (igroup != igroup_new) & (label.irank != rank)
+    print("changed labels:", jnp.sum(mask))
+    pairs = jnp.stack([igroup, igroup_new], axis=-1)
+    pairs, inv, num_links = masked_unique_pairs(pairs, mask)
+
+    links = Link(label[pairs[:,0]], label[pairs[:,1]])
+
+    label_new = link_distributed(igroup_new, label_new, links, num_labels, num_links)
+
+    return label_new
+
+def linearly_grouped(num, size, ngroup=32):
+    from fmdj.tools import div_ceil
+    return jnp.minimum(jnp.arange(size+1) * ngroup, num), div_ceil(num, ngroup)
+
+def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., alloc_fac_ilist = 32):
+    rank, ndev, axis_name = get_rank_info()
+
+    nplanes = th.num_planes()
+    size = th.plane_sizes[-1] * 8
+
+    # prepare super-node data
+    spl, nsuper = linearly_grouped(th.num(nplanes-1), size//32, ngroup=32)
+    
+    labels = Label(jnp.full(size, rank, dtype=jnp.int32), jnp.arange(size))
+    
+    # figure out which data we will need
+    nper_rank = jax.lax.all_gather(nsuper, axis_name) # should be div_ceil
+    
+    # due to pruning, only need data from larger tasks
+    dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev) >= rank))
+    ids_need = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
+
+    # Define a dense interaction list on top-nodes:
+    ilist = fmdj.ztree.dense_interaction_list(dev_spl[-1], size, size*alloc_fac_ilist,
+        node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
+    )
+
+    for level in (nplanes-1,):
+    #for level in reversed(range(nplanes)):
+        size = th.plane_sizes[level] * 8
+        size_child = th.plane_sizes[level-1] if level > 0 else 1024*1024
+        num_nodes = th.num(level)
+
+        # Request the nodes that we need to evaluate the interaction list
+        # data = NodeData(th.geom_cent.get(level, size), th.lvl.get(level, size), jnp.arange(size), labels)
+        poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
+                
+        (poslvl, ids, labels), spl, dev_spl = all_to_all_request_children(
+            dev_spl, ids_need, spl, (poslvl, jnp.arange(size), labels),
+            axis_name=axis_name
+        )
+
+        # Do the FoF with local labels
+        igroup = global_to_local_label(labels)
+
+        igroup_new, ilist = node_fof_and_ilist(
+            ilist, spl, poslvl, igroup,
+            rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
+        )
+
+        # Communicate the locally detected change in labels
+        labels = distr_local_to_global_label_change(
+            igroup, igroup_new, labels, dev_spl[-1]
+        )
+
+        print("pre_dev_spl", dev_spl)
+
+        # Simplify interaction list (reduces unnecessary remote requests)
+        ilist, ids_need, dev_spl = simplify_interaction_list(ilist, ids, dev_spl, num_nodes)
+
+        print("post_dev_spl", dev_spl)
+
+        # Advect labels to children
+        spl = th.ispl_n2n.get(level, size+1)
+        labels = distr_node_to_child_label(
+            labels, th.lvl.get(level, size), spl, nlabels=num_nodes, size_child=size_child, rlink=rlink
+        )
+distr_node_node_fof.jit = jax.jit(
+    distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink")
+)
+        
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
