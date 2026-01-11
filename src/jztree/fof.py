@@ -384,8 +384,8 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
 
     # prepare super-node data
     spl, nsuper = linearly_grouped(th.num(nplanes-1), size//32, ngroup=32)
-    
-    labels = Label(jnp.full(size, rank, dtype=jnp.int32), jnp.arange(size))
+    labels = Label(jnp.full(len(spl)-1, rank, dtype=jnp.int32), jnp.arange(len(spl)-1))
+    super_lvl = jnp.full(len(spl)-1, 388)
     
     # figure out which data we will need
     nper_rank = jax.lax.all_gather(nsuper, axis_name) # should be div_ceil
@@ -399,16 +399,15 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
         node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
     )
 
-    for level in (nplanes-1,):
-    #for level in reversed(range(nplanes)):
-        size = th.plane_sizes[level] * 8
-        size_child = th.plane_sizes[level-1] if level > 0 else 1024*1024
-        num_nodes = th.num(level)
+    for level in reversed(range(nplanes)):
+        size = max(th.plane_sizes[level]*2, 4096)
 
         # Request the nodes that we need to evaluate the interaction list
-        # data = NodeData(th.geom_cent.get(level, size), th.lvl.get(level, size), jnp.arange(size), labels)
         poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
-                
+        labels = distr_node_to_child_label(
+            labels, super_lvl, spl, nlabels=nsuper, size_child=size, rlink=rlink
+        )
+        
         (poslvl, ids, labels), spl, dev_spl = all_to_all_request_children(
             dev_spl, ids_need, spl, (poslvl, jnp.arange(size), labels),
             axis_name=axis_name
@@ -427,22 +426,18 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
             igroup, igroup_new, labels, dev_spl[-1]
         )
 
-        print("pre_dev_spl", dev_spl)
-
         # Simplify interaction list (reduces unnecessary remote requests)
-        ilist, ids_need, dev_spl = simplify_interaction_list(ilist, ids, dev_spl, num_nodes)
+        ilist, ids_need, dev_spl = simplify_interaction_list(ilist, ids, dev_spl, th.num(level))
 
-        print("post_dev_spl", dev_spl)
-
-        # Advect labels to children
+        # Define node-splits for next level
         spl = th.ispl_n2n.get(level, size+1)
-        labels = distr_node_to_child_label(
-            labels, th.lvl.get(level, size), spl, nlabels=num_nodes, size_child=size_child, rlink=rlink
-        )
+        nsuper = th.num(level)
+        super_lvl = th.lvl.get(level, size)
+    
+    return labels, ilist, spl
 distr_node_node_fof.jit = jax.jit(
     distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink")
 )
-        
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
