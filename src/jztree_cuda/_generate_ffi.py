@@ -1,8 +1,7 @@
 from pathlib import Path
 import os
 
-import fmdj_utils.parse as parse
-import fmdj_utils.generator as gen
+from jax_ffi_gen import parse, generator as gen
 
 HERE = Path(__file__).resolve().parent
 
