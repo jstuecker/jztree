@@ -51,13 +51,18 @@ __device__ __forceinline__ void link_roots(int* __restrict__ igroup, int a, int 
 
 __global__ void NodeToChildLabel(
     const int* __restrict__ node_igroup,
+    const bool* __restrict__ node_is_local,
     const int* __restrict__ node_lvl,
     const int* __restrict__ isplit,
     int* __restrict__ leaf_igroup,
     const float r2link
 ) {
     int node = blockIdx.x;
+    if(!node_is_local[node])
+        return;
     int node_root = node_igroup[node];
+    if(!node_is_local[node_root])
+        return;
     float L2 = norm2(LvlToExt(node_lvl[node]));
 
     int ileaf_start = isplit[node], ileaf_end = isplit[node + 1];

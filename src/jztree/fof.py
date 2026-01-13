@@ -70,10 +70,14 @@ def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=
     return igr_out
 
 def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
-                        size_child: int, rlink: float, block_size: int = 64) -> jax.Array:
+                        size_child: int, rlink: float, flag_local: jax.Array | None = None,
+                        block_size: int = 64) -> jax.Array:
+    if flag_local is None:
+        flag_local = jnp.ones(igroup.shape, dtype=jnp.bool)
+
     outputs = (jax.ShapeDtypeStruct((size_child,), jnp.int32),)
     igroup_child = jax.ffi.ffi_call("NodeToChildLabel",  outputs)(
-        igroup, lvl, spl, block_size=np.uint64(block_size), r2link=np.float32(rlink*rlink)
+        igroup, flag_local, lvl, spl, block_size=np.uint64(block_size), r2link=np.float32(rlink*rlink)
     )[0]
 
     return igroup_child
@@ -336,10 +340,11 @@ def distr_node_to_child_label(nodes: NodeData, size_child: int, rlink: float) ->
     rank, ndev, axis_name = get_rank_info()
 
     valid = jnp.arange(len(nodes.lvl)) < nodes.num
-    
+
     local_child_labels = Label(
         jnp.full(size_child, rank),
-        node_to_child_label(nodes.label.igroup, nodes.lvl, nodes.spl, size_child, rlink=rlink),
+        node_to_child_label(nodes.label.igroup, nodes.lvl, nodes.spl, size_child, rlink=rlink,
+                            flag_local=(nodes.label.irank == rank) & (valid)),
     )
 
     inode = inverse_of_splits(nodes.spl, size_child)

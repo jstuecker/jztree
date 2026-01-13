@@ -28,6 +28,7 @@ namespace ffi = xla::ffi;
 ffi::Error NodeToChildLabelFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer node_igroup,
+    ffi::AnyBuffer node_is_local,
     ffi::AnyBuffer node_lvl,
     ffi::AnyBuffer isplit,
     ffi::Result<ffi::AnyBuffer> leaf_igroup,
@@ -44,12 +45,14 @@ ffi::Error NodeToChildLabelFFIHost(
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
     int* node_igroup_val = reinterpret_cast<int*>(node_igroup.untyped_data());
+    bool* node_is_local_val = reinterpret_cast<bool*>(node_is_local.untyped_data());
     int* node_lvl_val = reinterpret_cast<int*>(node_lvl.untyped_data());
     int* isplit_val = reinterpret_cast<int*>(isplit.untyped_data());
     int* leaf_igroup_val = reinterpret_cast<int*>(leaf_igroup->untyped_data());
 
     void* args[] = {
         &node_igroup_val,
+        &node_is_local_val,
         &node_lvl_val,
         &isplit_val,
         &leaf_igroup_val,
@@ -69,6 +72,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // node_igroup
+        .Arg<ffi::AnyBuffer>() // node_is_local
         .Arg<ffi::AnyBuffer>() // node_lvl
         .Arg<ffi::AnyBuffer>() // isplit
         .Ret<ffi::AnyBuffer>() // leaf_igroup
