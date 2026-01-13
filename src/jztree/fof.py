@@ -9,8 +9,8 @@ from fmdj.data import InteractionList
 from typing import Tuple
 from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
 from fmdj.ztree import simplify_interaction_list
-from fmdj.tools import inverse_of_splits, cumsum_starting_with_zero
-
+from fmdj.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum
+from dataclasses import dataclass, replace
 import fmdj
 
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
@@ -178,9 +178,6 @@ def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax
     lab, inv, num = masked_unique_pairs(labels.stacked(), mask)
 
     return Label(lab[...,0], lab[...,1]), inv, num
-
-from dataclasses import dataclass
-from fmdj.tools import offset_sum
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -362,7 +359,7 @@ def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
 
     label_new = label[igroup_new]
     mask = (igroup != igroup_new) & (label.irank != rank)
-    print("changed labels:", jnp.sum(mask))
+    # print("changed labels:", jnp.sum(mask))
     pairs = jnp.stack([igroup, igroup_new], axis=-1)
     pairs, inv, num_links = masked_unique_pairs(pairs, mask)
 
@@ -385,31 +382,36 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
     # prepare super-node data
     spl, nsuper = linearly_grouped(th.num(nplanes-1), size//32, ngroup=32)
     labels = Label(jnp.full(len(spl)-1, rank, dtype=jnp.int32), jnp.arange(len(spl)-1))
-    super_lvl = jnp.full(len(spl)-1, 388)
+    node_lvl = jnp.full(len(spl)-1, 388)
     
     # figure out which data we will need
     nper_rank = jax.lax.all_gather(nsuper, axis_name) # should be div_ceil
     
     # due to pruning, only need data from larger tasks
     dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev) >= rank))
-    ids_need = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
 
     # Define a dense interaction list on top-nodes:
     ilist = fmdj.ztree.dense_interaction_list(dev_spl[-1], size, size*alloc_fac_ilist,
         node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
     )
+    ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
+    ilist.dev_spl = dev_spl
 
-    for level in reversed(range(nplanes)):
+    def handle_plane(
+            level, 
+            ilist: InteractionList,
+            labels, node_lvl, nnodes, spl # local super nodes properties
+        ):
         size = max(th.plane_sizes[level]*2, 4096)
 
-        # Request the nodes that we need to evaluate the interaction list
-        poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
+        # Advect node to child data
         labels = distr_node_to_child_label(
-            labels, super_lvl, spl, nlabels=nsuper, size_child=size, rlink=rlink
+            labels, node_lvl, spl, nlabels=nnodes, size_child=size, rlink=rlink
         )
-        
+        poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
+        # Request the remote node children that we need to interact with
         (poslvl, ids, labels), spl, dev_spl = all_to_all_request_children(
-            dev_spl, ids_need, spl, (poslvl, jnp.arange(size), labels),
+            ilist.dev_spl, ilist.ids, spl, (poslvl, jnp.arange(size), labels),
             axis_name=axis_name
         )
 
@@ -420,6 +422,7 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
             ilist, spl, poslvl, igroup,
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
+        ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # inform the ilist where children lie
 
         # Communicate the locally detected change in labels
         labels = distr_local_to_global_label_change(
@@ -427,12 +430,19 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
         )
 
         # Simplify interaction list (reduces unnecessary remote requests)
-        ilist, ids_need, dev_spl = simplify_interaction_list(ilist, ids, dev_spl, th.num(level))
+        ilist = simplify_interaction_list(ilist, th.num(level))
 
         # Define node-splits for next level
         spl = th.ispl_n2n.get(level, size+1)
-        nsuper = th.num(level)
-        super_lvl = th.lvl.get(level, size)
+        nnodes = th.num(level)
+        node_lvl = th.lvl.get(level, size)
+
+        return ilist, labels, node_lvl, nnodes, spl
+    
+    args = ilist, labels, node_lvl, nsuper, spl
+    for level in reversed(range(nplanes)):
+        args = handle_plane(level, *args)
+    ilist, labels, node_lvl, nsuper, spl = args
     
     return labels, ilist, spl
 distr_node_node_fof.jit = jax.jit(

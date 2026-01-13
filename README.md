@@ -2,8 +2,7 @@
 Some c++ cuda kernels that expose new functionality to jax via the foreign function interface (FFI)
 
 # Todo:
-* Fof self-linking detection can be wrong for index 0!
-* Node to child advection for negative indices might not be correct yet
+* Check that the level of domain boundary nodes is always defined correctly
 
 # Installation
 Installation from source can be a bit tricky, because the CUDA compiler nvcc and a couple of libraries are required. These may be accessible in three different ways (1) installed with pip (only available for CUDA>=13), (2) installed in a conda environment or (3) system installed
