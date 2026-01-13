@@ -419,7 +419,8 @@ def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_il
 
     return node_data, ilist
 
-def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., alloc_fac_ilist = 32):
+def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., 
+                        alloc_fac_ilist = 32) -> Tuple[NodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
     def handle_plane(level: int, node_data: NodeData, ilist: InteractionList):
@@ -466,7 +467,7 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
     for level in reversed(range(th.num_planes())):
         node_data, ilist = handle_plane(level, node_data, ilist)
     
-    return node_data.label, ilist, node_data.spl
+    return node_data, ilist
 distr_node_node_fof.jit = jax.jit(
     distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink")
 )
