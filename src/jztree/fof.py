@@ -324,35 +324,36 @@ def link_distributed(
 
     return contract_distributed(labels, nlabels)
 
-def distr_node_to_child_label(labels: Label, lvl: jax.Array, spl: jax.Array, nlabels: jax.Array,
-                              size_child: int, rlink: float):
+@jax.tree_util.register_dataclass
+@dataclass
+class NodeData():
+    lvl: jax.Array
+    label: Label
+    spl: jax.Array
+    num: jax.Array
+
+def distr_node_to_child_label(nodes: NodeData, size_child: int, rlink: float) -> jax.Array:
     rank, ndev, axis_name = get_rank_info()
 
-    valid = jnp.arange(len(lvl)) < nlabels
+    valid = jnp.arange(len(nodes.lvl)) < nodes.num
     
     local_child_labels = Label(
         jnp.full(size_child, rank),
-        node_to_child_label(labels.igroup, lvl, spl, size_child, rlink=rlink),
+        node_to_child_label(nodes.label.igroup, nodes.lvl, nodes.spl, size_child, rlink=rlink),
     )
 
-    inode = inverse_of_splits(spl, size_child)
+    inode = inverse_of_splits(nodes.spl, size_child)
 
-    request, inv, num = unique_labels(labels, (labels.irank != rank) & valid)
+    request, inv, num = unique_labels(nodes.label, (nodes.label.irank != rank) & valid)
     remote_child_labels = all_to_all_request(
-        request.irank, request.igroup, local_child_labels[spl[:-1]], num=num, axis_name=axis_name
+        request.irank, request.igroup, local_child_labels[nodes.spl[:-1]], num=num, axis_name=axis_name
     )
 
-    child_labels = tree_where(labels[inode].irank == rank, local_child_labels, remote_child_labels[inv[inode]])
+    child_labels = tree_where(
+        nodes.label[inode].irank == rank, local_child_labels, remote_child_labels[inv[inode]]
+    )
 
     return child_labels
-
-@jax.tree_util.register_dataclass
-@dataclass
-class NodeData(PosLvl):
-    ids: jax.Array
-    global_label: Label
-
-from fmdj.comm import dynamic_all_gather
 
 def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
     rank, ndev, axis_name = get_rank_info()
@@ -383,6 +384,8 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
     spl, nsuper = linearly_grouped(th.num(nplanes-1), size//32, ngroup=32)
     labels = Label(jnp.full(len(spl)-1, rank, dtype=jnp.int32), jnp.arange(len(spl)-1))
     node_lvl = jnp.full(len(spl)-1, 388)
+
+    node_data = NodeData(node_lvl, labels, spl, nsuper)
     
     # figure out which data we will need
     nper_rank = jax.lax.all_gather(nsuper, axis_name) # should be div_ceil
@@ -397,21 +400,15 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
     ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
     ilist.dev_spl = dev_spl
 
-    def handle_plane(
-            level, 
-            ilist: InteractionList,
-            labels, node_lvl, nnodes, spl # local super nodes properties
-        ):
+    def handle_plane(level: int, ilist: InteractionList, node_data: NodeData):
         size = max(th.plane_sizes[level]*2, 4096)
 
         # Advect node to child data
-        labels = distr_node_to_child_label(
-            labels, node_lvl, spl, nlabels=nnodes, size_child=size, rlink=rlink
-        )
+        labels = distr_node_to_child_label(node_data, size_child=size, rlink=rlink)
         poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
         # Request the remote node children that we need to interact with
         (poslvl, ids, labels), spl, dev_spl = all_to_all_request_children(
-            ilist.dev_spl, ilist.ids, spl, (poslvl, jnp.arange(size), labels),
+            ilist.dev_spl, ilist.ids, node_data.spl, (poslvl, jnp.arange(size), labels),
             axis_name=axis_name
         )
 
@@ -433,18 +430,18 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
         ilist = simplify_interaction_list(ilist, th.num(level))
 
         # Define node-splits for next level
-        spl = th.ispl_n2n.get(level, size+1)
-        nnodes = th.num(level)
-        node_lvl = th.lvl.get(level, size)
+        node_data = NodeData(
+            th.lvl.get(level, size), labels, th.ispl_n2n.get(level, size+1), th.num(level)
+        )
 
-        return ilist, labels, node_lvl, nnodes, spl
+        return ilist, node_data
     
-    args = ilist, labels, node_lvl, nsuper, spl
+    args = ilist, node_data
     for level in reversed(range(nplanes)):
         args = handle_plane(level, *args)
-    ilist, labels, node_lvl, nsuper, spl = args
+    ilist, node_data = args
     
-    return labels, ilist, spl
+    return node_data.label, ilist, node_data.spl
 distr_node_node_fof.jit = jax.jit(
     distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink")
 )
