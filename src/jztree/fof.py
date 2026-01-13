@@ -362,14 +362,22 @@ def distr_node_to_child_label(nodes: NodeData, size_child: int, rlink: float) ->
 
 def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
     rank, ndev, axis_name = get_rank_info()
+    
+    valid = jnp.arange(len(igroup)) < num_labels
 
-    label_new = label[igroup_new]
-    mask = (igroup != igroup_new) & (label.irank != rank)
+    # First update the global labels that our task knows about
+    irankmin = masked_min_scatter(valid, label.irank, igroup_new, label.irank)
+    is_min_rank = valid & (label.irank == irankmin[igroup_new])
+    igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup_new, label.igroup)
+    label_new = Label(irankmin[igroup_new], igroupmin[igroup_new])
+
+    # label_new = label[igroup_new]
+    mask = (label != label_new) & ((label_new.irank != rank) | (label.irank != rank))
     # print("changed labels:", jnp.sum(mask))
     pairs = jnp.stack([igroup, igroup_new], axis=-1)
     pairs, inv, num_links = masked_unique_pairs(pairs, mask)
 
-    links = Link(label[pairs[:,0]], label[pairs[:,1]])
+    links = Link(label[pairs[:,0]], label_new[pairs[:,1]])
 
     label_new = link_distributed(igroup_new, label_new, links, num_labels, num_links)
 

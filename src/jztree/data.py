@@ -33,6 +33,9 @@ class Label:
     
     def __eq__(self, other: "Label"):
         return (self.irank == other.irank) & (self.igroup == other.igroup)
+    
+    def __ne__(self, other: "Label"):
+        return ~self.__eq__(other)
 
     def __ge__(self, other: "Label") -> jax.Array:
         rank_gtr = self.irank > other.irank
