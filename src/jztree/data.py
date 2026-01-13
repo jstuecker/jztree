@@ -31,15 +31,19 @@ class Label:
     def __getitem__(self, key) -> "Label":
         return jax.tree.map(lambda x: x[key], self)
     
-    def __eq__(self, other: "Label"):
+    def __eq__(self, other: "Label") -> jax.Array:
         return (self.irank == other.irank) & (self.igroup == other.igroup)
     
-    def __ne__(self, other: "Label"):
+    def __ne__(self, other: "Label") -> jax.Array:
         return ~self.__eq__(other)
 
     def __ge__(self, other: "Label") -> jax.Array:
         rank_gtr = self.irank > other.irank
         return rank_gtr | ((self.irank == other.irank) & (self.igroup >= other.igroup))
+
+    def __gt__(self, other: "Label") -> jax.Array:
+        rank_gtr = self.irank > other.irank
+        return rank_gtr | ((self.irank == other.irank) & (self.igroup > other.igroup))
 
 @dataclass(frozen=True)
 class KNNConfig:

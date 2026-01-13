@@ -266,7 +266,7 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     # in the next iteration where we will continue try them at the larger node
 
     update = (are_local == 1) & (lmax.irank == rank)  & (~was_resolved)
-    update = update & (labels[lmax.igroup] >= lmin) & is_root[lmax.igroup]
+    update = update & (labels[lmax.igroup] > lmin) & is_root[lmax.igroup]
     labels.irank = masked_min_scatter(update, labels.irank, lmax.igroup, lmin.irank)
     # only update labels.igroup with links that point towards the same rank
     update = update & (labels[lmax.igroup].irank == lmin.irank)
@@ -360,20 +360,22 @@ def distr_node_to_child_label(nodes: NodeData, size_child: int, rlink: float) ->
 
     return child_labels
 
+def get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
+    """Finds the minimum of labels that are pointed to as the same local group"""
+    irankmin = masked_min_scatter(valid, label.irank, igroup, label.irank)
+    is_min_rank = valid & (label.irank == irankmin[igroup])
+    igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup, label.igroup)
+    return Label(irankmin[igroup], igroupmin[igroup])
+
 def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
     rank, ndev, axis_name = get_rank_info()
     
     valid = jnp.arange(len(igroup)) < num_labels
 
     # First update the global labels that our task knows about
-    irankmin = masked_min_scatter(valid, label.irank, igroup_new, label.irank)
-    is_min_rank = valid & (label.irank == irankmin[igroup_new])
-    igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup_new, label.igroup)
-    label_new = Label(irankmin[igroup_new], igroupmin[igroup_new])
+    label_new = get_min_label(valid, igroup_new, label)
 
-    # label_new = label[igroup_new]
-    mask = (label != label_new) & ((label_new.irank != rank) | (label.irank != rank))
-    # print("changed labels:", jnp.sum(mask))
+    mask = valid & (label != label_new) & ((label_new.irank != rank) | (label.irank != rank))
     pairs = jnp.stack([igroup, igroup_new], axis=-1)
     pairs, inv, num_links = masked_unique_pairs(pairs, mask)
 
