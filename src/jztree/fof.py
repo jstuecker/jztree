@@ -9,7 +9,7 @@ from fmdj.data import InteractionList
 from typing import Tuple
 from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
 from fmdj.ztree import simplify_interaction_list
-from fmdj.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum
+from fmdj.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from dataclasses import dataclass, replace
 import fmdj
 
@@ -371,36 +371,43 @@ def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
     return label_new
 
 def linearly_grouped(num, size, ngroup=32):
-    from fmdj.tools import div_ceil
-    return jnp.minimum(jnp.arange(size+1) * ngroup, num), div_ceil(num, ngroup)
+    num_sup, size_sup = div_ceil(num, ngroup), div_ceil(size, ngroup)
+    return jnp.minimum(jnp.arange(size_sup+1) * ngroup, num), num_sup
 
-def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., alloc_fac_ilist = 32):
+def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_ilist: float
+                        ) -> Tuple[NodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
-    nplanes = th.num_planes()
-    size = th.plane_sizes[-1] * 8
-
-    # prepare super-node data
-    spl, nsuper = linearly_grouped(th.num(nplanes-1), size//32, ngroup=32)
-    labels = Label(jnp.full(len(spl)-1, rank, dtype=jnp.int32), jnp.arange(len(spl)-1))
-    node_lvl = jnp.full(len(spl)-1, 388)
-
+    # Define splits and their data
+    spl, nsuper = linearly_grouped(num_local, size_local, ngroup=32)
+    size_sup = len(spl)-1
+    labels = Label(
+        irank=jnp.full(size_sup, rank, dtype=jnp.int32),
+        igroup=jnp.arange(size_sup)
+    )
+    node_lvl = jnp.full(size_sup, 388)
     node_data = NodeData(node_lvl, labels, spl, nsuper)
     
-    # figure out which data we will need
-    nper_rank = jax.lax.all_gather(nsuper, axis_name) # should be div_ceil
+    # define interaction list with remote interactions
+    nper_rank = jax.lax.all_gather(nsuper, axis_name)
     
     # due to pruning, only need data from larger tasks
     dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev) >= rank))
 
     # Define a dense interaction list on top-nodes:
-    ilist = fmdj.ztree.dense_interaction_list(dev_spl[-1], size, size*alloc_fac_ilist,
+    ilist = fmdj.ztree.dense_interaction_list(
+        dev_spl[-1], size, size*alloc_fac_ilist,
         node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
     )
     ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
     ilist.dev_spl = dev_spl
 
-    def handle_plane(level: int, ilist: InteractionList, node_data: NodeData):
+    return node_data, ilist
+
+def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., alloc_fac_ilist = 32):
+    rank, ndev, axis_name = get_rank_info()
+
+    def handle_plane(level: int, node_data: NodeData, ilist: InteractionList):
         size = max(th.plane_sizes[level]*2, 4096)
 
         # Advect node to child data
@@ -434,12 +441,15 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
             th.lvl.get(level, size), labels, th.ispl_n2n.get(level, size+1), th.num(level)
         )
 
-        return ilist, node_data
+        return node_data, ilist
     
-    args = ilist, node_data
-    for level in reversed(range(nplanes)):
-        args = handle_plane(level, *args)
-    ilist, node_data = args
+    # Seed with dense interactions at top-level
+    node_data, ilist = distr_fof_top_level(
+        th.num(th.num_planes()-1), th.plane_sizes[-1]*8, th.plane_sizes[-1]*8, alloc_fac_ilist
+    )
+
+    for level in reversed(range(th.num_planes())):
+        node_data, ilist = handle_plane(level, node_data, ilist)
     
     return node_data.label, ilist, node_data.spl
 distr_node_node_fof.jit = jax.jit(
