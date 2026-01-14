@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jztree_cuda import ffi_fof
 from .tree import pos_zorder_sort, grouped_dense_interaction_list
 from .common import conditional_callback
-from .data import  FofConfig, FofData, PosLvl, Label
+from .data import  FofConfig, FofData, PosLvl, Label, Link, FofNodeData
 from fmdj.data import InteractionList
 from typing import Tuple
 from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
@@ -81,6 +81,7 @@ def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
     )[0]
 
     return igroup_child
+node_to_child_label.jit = jax.jit(node_to_child_label, static_argnames=("size_child", "rlink", "block_size"))
 
 # def level_to_extend(lvl, diag=True):
 #     olvl, omod = lvl//3, lvl % 3
@@ -105,7 +106,8 @@ def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
 
 #     return igroup
 
-def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128):
+def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
+                  ) -> Tuple[FofNodeData, InteractionList]:
     nplanes = th.num_planes()
 
     # initialize top-level interaction list
@@ -130,13 +132,20 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
 
         spl = th.ispl_n2n.get(level, size+1)
         node_lvl = child_data.lvl
-        
-    return igroup, ilist, spl
+    
+    node_data = FofNodeData(node_lvl, igroup, spl, th.lvl.num(0))
+
+    return node_data, ilist
 node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
-def particle_particle_fof(ispl, il, spl, posz, part_igroup, rlink: float, boxsize: float = 0., block_size=32):
+def particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
+                          rlink: float, boxsize: float = 0., block_size=32):
+    part_igroup = node_to_child_label(
+        node_data.label, node_data.lvl, node_data.spl, len(posz), rlink=rlink
+    )
+
     igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
-        ispl, il, spl, posz, part_igroup,
+        ilist.ispl, ilist.iother, node_data.spl, posz, part_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
@@ -183,14 +192,6 @@ def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax
 
     return Label(lab[...,0], lab[...,1]), inv, num
 
-@jax.tree_util.register_dataclass
-@dataclass
-class Link:
-    a: Label
-    b: Label
-
-    def stacked(self):
-        return jnp.stack([self.a.irank, self.a.igroup, self.b.irank, self.b.igroup])
 
 def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
@@ -328,15 +329,7 @@ def link_distributed(
 
     return contract_distributed(labels, nlabels)
 
-@jax.tree_util.register_dataclass
-@dataclass
-class NodeData():
-    lvl: jax.Array
-    label: Label
-    spl: jax.Array
-    num: jax.Array
-
-def distr_node_to_child_label(nodes: NodeData, size_child: int, rlink: float) -> jax.Array:
+def distr_node_to_child_label(nodes: FofNodeData, size_child: int, rlink: float) -> jax.Array:
     rank, ndev, axis_name = get_rank_info()
 
     valid = jnp.arange(len(nodes.lvl)) < nodes.num
@@ -390,7 +383,7 @@ def linearly_grouped(num, size, ngroup=32):
     return jnp.minimum(jnp.arange(size_sup+1) * ngroup, num), num_sup
 
 def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_ilist: float
-                        ) -> Tuple[NodeData, InteractionList]:
+                        ) -> Tuple[FofNodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
     # Define splits and their data
@@ -401,7 +394,7 @@ def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_il
         igroup=jnp.arange(size_sup)
     )
     node_lvl = jnp.full(size_sup, 388)
-    node_data = NodeData(node_lvl, labels, spl, nsuper)
+    node_data = FofNodeData(node_lvl, labels, spl, nsuper)
     
     # define interaction list with remote interactions
     nper_rank = jax.lax.all_gather(nsuper, axis_name)
@@ -420,10 +413,10 @@ def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_il
     return node_data, ilist
 
 def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., 
-                        alloc_fac_ilist = 32) -> Tuple[NodeData, InteractionList]:
+                        alloc_fac_ilist = 32) -> Tuple[FofNodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
-    def handle_plane(level: int, node_data: NodeData, ilist: InteractionList):
+    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList):
         size = max(th.plane_sizes[level]*2, 4096)
 
         # Advect node to child data
@@ -453,7 +446,7 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
         ilist = simplify_interaction_list(ilist, th.num(level))
 
         # Define node-splits for next level
-        node_data = NodeData(
+        node_data = FofNodeData(
             th.lvl.get(level, size), labels, th.ispl_n2n.get(level, size+1), th.num(level)
         )
 
@@ -476,31 +469,14 @@ distr_node_node_fof.jit = jax.jit(
 #                                          User Interface                                          #
 # ------------------------------------------------------------------------------------------------ #
 
-def prepare_fof_z(posz: jax.Array, rlink: float, boxsize: float | None = None, 
-                  cfg: FofConfig = FofConfig()) -> FofData:
-
-    th: fmdj.data.TreeHierarchy = fmdj.ztree.build_tree_hierarchy(
-        posz, cfg_tree=cfg.tree
-    )
-
-    igroup, ilist, spl = node_node_fof(
+def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
+    th = fmdj.ztree.build_tree_hierarchy(posz, cfg_tree=cfg.tree)
+    node_data, ilist = node_node_fof(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
-
-    return FofData(rlink, boxsize, posz, igroup, th.lvl.get(0, len(igroup)), ilist, spl)
-prepare_fof_z.jit = jax.jit(prepare_fof_z, static_argnames=["rlink", "boxsize", "cfg"])
-
-def evaluate_fof_z(d: FofData):
-    child_igroup = node_to_child_label(d.igroup, d.node_lvl, d.spl, len(d.posz), rlink=d.rlink)
-
     return particle_particle_fof(
-        d.ilist.ispl, d.ilist.iother, d.spl, d.posz, child_igroup, rlink=d.rlink, boxsize=d.boxsize
+        node_data, ilist, posz, rlink=rlink, boxsize=boxsize
     )
-evaluate_fof_z.jit = jax.jit(evaluate_fof_z)
-
-def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
-    data = prepare_fof_z(posz, rlink, boxsize, cfg)
-    return evaluate_fof_z(data)
 fof_z.jit = jax.jit(fof_z, static_argnames=["rlink", "boxsize", "cfg"])
 
 def fof(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:

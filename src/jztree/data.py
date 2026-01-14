@@ -45,6 +45,23 @@ class Label:
         rank_gtr = self.irank > other.irank
         return rank_gtr | ((self.irank == other.irank) & (self.igroup > other.igroup))
 
+@jax.tree_util.register_dataclass
+@dataclass
+class Link:
+    a: Label
+    b: Label
+
+    def stacked(self):
+        return jnp.stack([self.a.irank, self.a.igroup, self.b.irank, self.b.igroup])
+
+@jax.tree_util.register_dataclass
+@dataclass
+class FofNodeData():
+    lvl: jax.Array
+    label: Label | jax.Array # Local index pointer for single-gpu, but (rank,id) pointer for multi
+    spl: jax.Array
+    num: jax.Array
+
 @dataclass(frozen=True)
 class KNNConfig:
     alloc_fac_ilist: float = 256.

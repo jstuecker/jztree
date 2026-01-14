@@ -8,7 +8,7 @@ import fmdj
 
 @pytest.mark.parametrize("N", [int(1e6), int(3e6)])
 def bench_fof_steps(jax_bench, pos, N):
-    jb = jax_bench(jit_rounds=40, jit_warmup=10)
+    jb = jax_bench(jit_rounds=5, jit_warmup=2)
 
     boxsize = 1.0
     rlink = 0.2 * boxsize / N**(1/3)
@@ -17,16 +17,18 @@ def bench_fof_steps(jax_bench, pos, N):
     posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
 
     cfg = jz.fof.FofConfig()
-    jb.measure(
+    th = jb.measure(
         fn_jit=fmdj.ztree.build_tree_hierarchy.jit, 
         part=posz, cfg_tree=cfg.tree, tag="tree"
-    )
-
-    d = jb.measure(fn_jit=jz.fof.prepare_fof_z.jit, 
-        posz=posz, rlink=rlink, boxsize=boxsize, tag="prepare_fofz"
     )[1]
 
-    jb.measure(fn_jit=jz.fof.evaluate_fof_z.jit, d=d, tag="evaluate_fofz")[1]
+    node_data, ilist = jb.measure(fn_jit=jz.fof.node_node_fof.jit, 
+        th=th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist, tag="node_node"
+    )[1]
+    jb.measure(fn_jit=jz.fof.particle_particle_fof.jit, 
+        node_data=node_data, ilist=ilist, posz=posz, rlink=rlink, boxsize=boxsize,
+        tag="particle_particle"
+    )[1]
 
     jb.measure(fn_jit=jz.fof.fof.jit, pos=pos, rlink=rlink, boxsize=boxsize, tag="total")
 
