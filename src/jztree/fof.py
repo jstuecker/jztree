@@ -465,6 +465,30 @@ distr_node_node_fof.jit = jax.jit(
     distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink")
 )
 
+def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
+                                rlink: float, boxsize: float = 0., block_size=32) -> Label:
+    rank, ndev, axis_name = get_rank_info()
+
+    labels = distr_node_to_child_label(node_data, len(posz), rlink=rlink)
+
+    numpart = node_data.spl[-1]
+    (posz, labels), spl, dev_spl = all_to_all_request_children(
+        ilist.dev_spl, ilist.ids, node_data.spl, (posz, labels), axis_name=axis_name
+    )
+
+    igroup = global_to_local_label(labels)
+
+    igroup_new = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), igroup.dtype),))(
+        ilist.ispl, ilist.iother, spl, posz, igroup,
+        r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
+    )[0]
+
+    labels = distr_local_to_global_label_change(igroup, igroup_new, labels, dev_spl[-1])
+    labels = tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
+    
+    return labels
+distr_particle_particle_fof.jit = jax.jit(distr_particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
+
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
 # ------------------------------------------------------------------------------------------------ #

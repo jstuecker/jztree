@@ -93,9 +93,9 @@ def test_distr_node_node_fof(seed):
     cfg = jztree.data.FofConfig()
     partz = fmdj.ztree.pos_zorder_sort(partz)[0]
     th = fmdj.ztree.build_tree_hierarchy.jit(partz, cfg.tree, npart_tot=int(jnp.sum(~jnp.isnan(partz.pos[...,0]))))
-    igroup2, ilist2, spl2 = jztree.fof.node_node_fof.jit(th, rlink=0.8)
+    node_data, ilist2 = jztree.fof.node_node_fof.jit(th, rlink=0.8)
 
-    assert igroup1[:len(igroup2)] == pytest.approx(igroup2, abs=0.1)
+    assert igroup1[:len(node_data.label)] == pytest.approx(node_data.label, abs=0.1)
     # So far, there will be more interactions in the multi-gpu case, because the pruning based
     # on identical ids is less efficient, since the global true ids are not perfectly known at that
     # point. For now, just check that we have at least as many interactions:
