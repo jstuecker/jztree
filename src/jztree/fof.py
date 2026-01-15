@@ -404,7 +404,7 @@ def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_il
 
     # Define a dense interaction list on top-nodes:
     ilist = fmdj.ztree.dense_interaction_list(
-        dev_spl[-1], size, size*alloc_fac_ilist,
+        dev_spl[-1], size, int(size*alloc_fac_ilist),
         node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
     )
     ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
@@ -512,3 +512,39 @@ def fof(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofC
 
     return igroup
 fof.jit = jax.jit(fof, static_argnames=["rlink", "boxsize", "cfg"])
+
+def distr_fof_z_with_tree(
+        posz: jax.Array, th: fmdj.data.TreeHierarchy, rlink: float, 
+        boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False
+    ) -> Label:
+    """
+    linearize_labels: only for testing against single-gpu version - converts (irank,igroup) labels to 
+        dense global linear ones
+    """
+    rank, ndev, axis_name = get_rank_info()
+
+    node_data, ilist = distr_node_node_fof(
+        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
+    )
+
+    labels = distr_particle_particle_fof(node_data, ilist, posz, rlink=rlink, boxsize=boxsize)
+
+    if linearize_labels:
+        num = jax.lax.all_gather(jnp.sum(~jnp.isnan(posz[...,0]), axis=0), axis_name)
+        dspl = cumsum_starting_with_zero(num)
+        igroup = dspl[labels.irank] + labels.igroup
+
+        return igroup
+    else:
+        return labels
+distr_fof_z_with_tree.jit = jax.jit(
+    distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
+)
+
+def distr_fof(part: fmdj.data.Pos, npart_tot: int, rlink: float, boxsize: float = 0., 
+              cfg: FofConfig = FofConfig):
+    partz, th = fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
+
+    labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
+
+    return partz, labels

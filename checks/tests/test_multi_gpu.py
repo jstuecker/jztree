@@ -54,17 +54,9 @@ def particles_and_tree(seed=0):
     rank, ndev, axis_name = get_rank_info()
     npart_tot = 1024*1024*ndev
 
-    part = gaussian_blob(1024*1024, npad=1024*128, seed=rank+seed)
-    partz = fmdj.ztree.distributed_zsort(part)
+    part = gaussian_blob(1024*1024, npad=1024*128*3, seed=rank+seed)
 
-    npart = jnp.sum(~jnp.isnan(partz.pos[...,0]))
-
-    top_node_size = fmdj.ztree.define_tree_level_node_sizes(npart_tot, cfg.tree)[-1]
-    partz, npart, lvl_bound = fmdj.ztree.adjust_domain_for_nodesize(partz, top_node_size, npart=npart)
-
-    th = fmdj.ztree.build_tree_hierarchy(partz, cfg.tree, npart_tot=npart_tot, lvl_bound=lvl_bound)
-
-    return partz, th
+    return fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
 
 @jax.jit
 @jax.shard_map(in_specs=P(), out_specs=P("gpus"), mesh=mesh)
@@ -100,3 +92,26 @@ def test_distr_node_node_fof(seed):
     # on identical ids is less efficient, since the global true ids are not perfectly known at that
     # point. For now, just check that we have at least as many interactions:
     assert numint1 >= ilist2.ispl[-1]
+
+@jax.jit
+@jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
+def distr_fof(seed):
+    rank, ndev, axis_name = get_rank_info()
+    partz, th = particles_and_tree(seed)
+    igroup = jztree.fof.distr_fof_z_with_tree(partz.pos, th, rlink=0.1, linearize_labels=True)
+
+    num = jax.lax.all_gather(jnp.sum(~jnp.isnan(partz.pos[...,0]), axis=0), axis_name)
+    dspl = cumsum_starting_with_zero(num)
+
+    return partz, igroup.reshape(1,-1), dspl.reshape(1,-1)
+
+@pytest.mark.parametrize("seed", [0,17,23,99])
+def test_distr_fof(seed):
+    partz, igroup1, dev_spl = distr_fof(seed)
+    # combine arrays into one:
+    igroup1 = multi_to_dense.jit(igroup1, dev_spl[0])
+
+    partz = fmdj.ztree.pos_zorder_sort.jit(partz)[0]
+    igroup2 = jztree.fof.fof_z.jit(partz.pos, rlink=0.1)
+
+    assert igroup1 == pytest.approx(igroup2, abs=0.1)
