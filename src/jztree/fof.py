@@ -22,6 +22,24 @@ jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), plat
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
+def pcast_like_vma(x, like):
+    """Make x have the same VMA (varying manual axes) as `like` inside shard_map."""
+    # Outside shard_map, VMA is irrelevant; just return x.
+    mesh = jax.sharding.get_abstract_mesh()
+    if mesh is None:
+        return x
+
+    # Keep axis order consistent with the mesh (vma is a set).
+    like_vma = getattr(like, "vma", frozenset())
+    axes = tuple(ax for ax in mesh.axis_names if ax in like_vma)
+
+    # No varying axes => nothing to do (also covers single-device meshes).
+    if not axes:
+        return x
+
+    # pvary is deprecated; pcast(..., to="varying") is the supported replacement.
+    return jax.lax.pcast(x, axes, to="varying")
+
 def node_fof_and_ilist(
         node_ilist: InteractionList, isplit: jax.Array, 
         child_data: PosLvl, child_igroup: jax.Array, 
@@ -36,7 +54,7 @@ def node_fof_and_ilist(
     child_igroup_out = jax.ShapeDtypeStruct((nchild,), jnp.int32)
     child_ilist_ispl = jax.ShapeDtypeStruct((nchild+1,), jnp.int32)
     child_ilist = jax.ShapeDtypeStruct((int(alloc_fac * nchild),), jnp.int32)
-    
+
     outputs = (child_igroup_out, child_ilist_ispl, child_ilist)
 
     res = jax.ffi.ffi_call("NodeFofAndIlist", outputs)(
@@ -44,7 +62,7 @@ def node_fof_and_ilist(
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )
 
-    child_igroup_out, child_ilist_ispl, child_ilist = res
+    child_igroup_out, child_ilist_ispl, child_ilist = pcast_like_vma(res, like=node_ilist.iother)
     child_ilist = InteractionList(child_ilist_ispl, child_ilist, nfilled=child_ilist_ispl[-1])
 
     def err(n1, n2):
@@ -67,7 +85,7 @@ def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=
         igroup, iA, iB, num_links, block_size=np.int32(block_size)
     )[0]
     
-    return igr_out
+    return pcast_like_vma(igr_out, like=igroup)
 
 def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
                         size_child: int, rlink: float, flag_local: jax.Array | None = None,
@@ -401,21 +419,21 @@ def distr_local_to_global_label_change(igroup, igroup_new, label, dev_spl):
     return label_new
 
 def linearly_grouped(num, size, ngroup=32):
-    num_sup, size_sup = div_ceil(num, ngroup), div_ceil(size, ngroup)
-    return jnp.minimum(jnp.arange(size_sup+1) * ngroup, num), num_sup
+    num_sup = div_ceil(num, ngroup)
+    return jnp.minimum(jnp.arange(size+1) * ngroup, num), num_sup
 
-def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_ilist: float
+def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
                         ) -> Tuple[FofNodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
     # Define splits and their data
-    spl, nsuper = linearly_grouped(num_local, size_local, ngroup=32)
-    size_sup = len(spl)-1
+    spl, nsuper = linearly_grouped(num_local, size, ngroup=32)
+    
     labels = Label(
-        irank=jnp.full(size_sup, rank, dtype=jnp.int32),
-        igroup=jnp.arange(size_sup)
+        irank=jnp.full(size, rank, dtype=jnp.int32),
+        igroup=jax.lax.pcast(jnp.arange(size), axis_name, to="varying")
     )
-    node_lvl = jnp.full(size_sup, 388)
+    node_lvl = jax.lax.pcast(jnp.full(size, 388), axis_name, to="varying")
     node_data = FofNodeData(node_lvl, labels, spl, nsuper)
     
     # define interaction list with remote interactions
@@ -431,16 +449,16 @@ def distr_fof_top_level(num_local: int, size_local: int, size: int, alloc_fac_il
     )
     ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
     ilist.dev_spl = dev_spl
-
+    
     return node_data, ilist
 
 def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., 
                         alloc_fac_ilist = 32) -> Tuple[FofNodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
-    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList):
-        size = max(th.plane_sizes[level]*2, 4096)
+    size = th.plane_sizes[0]
 
+    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList):
         # Advect node to child data
         labels = distr_node_to_child_label(node_data, size_child=size, rlink=rlink)
         poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
@@ -475,12 +493,14 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
         return node_data, ilist
     
     # Seed with dense interactions at top-level
-    node_data, ilist = distr_fof_top_level(
-        th.num(th.num_planes()-1), th.plane_sizes[-1]*8, th.plane_sizes[-1]*8, alloc_fac_ilist
-    )
+    node_data, ilist = distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
 
-    for level in reversed(range(th.num_planes())):
-        node_data, ilist = handle_plane(level, node_data, ilist)
+    # for level in reversed(range(th.num_planes())):
+    #     node_data, ilist = handle_plane(level, node_data, ilist)
+
+    def loop_body(i, carry):
+        return handle_plane(th.num_planes()-i-1, *carry)
+    node_data, ilist = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist))
     
     return node_data, ilist
 distr_node_node_fof.jit = jax.jit(
