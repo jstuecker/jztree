@@ -206,14 +206,21 @@ def masked_min_scatter(mask, arr, indices, values):
     
     return arr.at[indices].min(values)
 
-def masked_to_dense(arr: jax.Array, mask, get_inverse=False, fill_value=0):
+def masked_to_dense(arr: jax.Array, mask, get_inverse=False, get_indices=False, fill_value=0):
     pref, num = offset_sum(mask)
-    indices = jnp.where(mask, pref, len(arr))
-    new_arr = jnp.full(arr.shape, fill_value, arr.dtype).at[indices].set(arr)
+    size = pytree_len(arr)
+    pref = jnp.where(mask, pref, size)
+    def upd(x):
+        return jnp.full(x.shape, fill_value, x.dtype).at[pref].set(x)
+
+    new_arr = jax.tree.map(upd, arr)
+    res = [new_arr, num]
     if get_inverse:
-        return new_arr, num, indices
-    else:
-        return new_arr, num
+        res.append(pref)
+    if get_indices:
+        ind = jnp.full(size, size, pref.dtype).at[pref].set(jnp.arange(size))
+        res.append(ind)
+    return res
 
 def tree_where(condition: jax.Array, l1: Label, l2: Label) -> Label:
     return jax.tree.map(lambda x, y: jnp.where(condition, x, y), l1, l2)
@@ -286,34 +293,46 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     return igroup, labels, remaining_links, jnp.sum(valid & ~was_resolved)
 link_distributed_step.jit = jax.jit(link_distributed_step)
 
-def contract_distributed(labels: Label, num: int | jax.Array):
+def contract_distributed(labels: Label, igroup: jax.Array, dev_spl: int):
     rank, ndev, axis_name = get_rank_info()
 
-    valid = jnp.arange(pytree_len(labels)) < num
+    igroup = igroup[igroup]
+    labels = labels[igroup]
+
+    # mask root labels of the local graph that lie remotely
+    idx = jnp.arange(len(igroup))
+    is_local_root = idx == igroup
+    valid = (idx >= dev_spl[rank]) & (idx < dev_spl[rank+1])
+    mask = valid & is_local_root & (labels.irank != rank)
     
     def contraction_step(carry):
-        labels: Label = carry[0]
-        nloc_lab, indices, num_uq = unique_labels(labels, (labels.irank != rank) & valid)
+        labels, mask, _ = carry
+        non_loc_lab, num_uq, ind = masked_to_dense(labels, mask, get_indices=True)
         
-        nloc_lab_new = all_to_all_request(
-            nloc_lab.irank, nloc_lab.igroup, labels, num=num_uq, axis_name=axis_name, copy_self=False
+        nloc_lab_new: Label = all_to_all_request(
+            non_loc_lab.irank, non_loc_lab.igroup, labels, num=num_uq, axis_name=axis_name, copy_self=False
         )
-        labels_new = tree_where((labels.irank != rank) & valid, nloc_lab_new[indices], labels)
-        labels_new = tree_where((labels_new.irank == rank) & valid, labels_new[labels_new.igroup], labels_new)
+        labels_new = Label(
+            labels.irank.at[ind].set(nloc_lab_new.irank),
+            labels.igroup.at[ind].set(nloc_lab_new.igroup)
+        )
+        labels_new = labels_new[igroup]
 
-        not_done = jax.lax.psum(~ jnp.all(labels == labels_new), axis_name) > 0
+        mask = mask & (labels != labels_new)
         
-        return labels_new, not_done
+        any_left = jax.lax.pmax(jnp.any(mask), axis_name)
+        
+        return labels_new, mask, any_left
     
     return jax.lax.while_loop(
-        lambda c: c[1], contraction_step, (labels, jnp.array(True))
+        lambda c: c[2], contraction_step, (labels, mask, jnp.array(True))
     )[0]
 
 def link_distributed(
         igroup: jax.Array,
         labels: jax.Array,
         links: Link,
-        nlabels: jax.Array,
+        dev_spl: jax.Array,
         nlinks: jax.Array
     ):
     rank, ndev, axis_name = get_rank_info()
@@ -327,7 +346,7 @@ def link_distributed(
         condition, lambda c: link_distributed_step(*c), init_val
     )
 
-    return contract_distributed(labels, nlabels)
+    return contract_distributed(labels, igroup, dev_spl)
 
 def distr_node_to_child_label(nodes: FofNodeData, size_child: int, rlink: float) -> jax.Array:
     rank, ndev, axis_name = get_rank_info()
@@ -360,10 +379,10 @@ def get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
     igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup, label.igroup)
     return Label(irankmin[igroup], igroupmin[igroup])
 
-def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
+def distr_local_to_global_label_change(igroup, igroup_new, label, dev_spl):
     rank, ndev, axis_name = get_rank_info()
     
-    valid = jnp.arange(len(igroup)) < num_labels
+    valid = jnp.arange(len(igroup)) < dev_spl[-1]
 
     # First update the global labels that our task knows about
     label_new = get_min_label(valid, igroup_new, label)
@@ -377,7 +396,7 @@ def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
     
     links = Link(label[indices], label_new[indices])
 
-    label_new = link_distributed(igroup_new, label_new, links, num_labels, num_links)
+    label_new = link_distributed(igroup_new, label_new, links, dev_spl, num_links)
 
     return label_new
 
@@ -442,7 +461,7 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
 
         # Communicate the locally detected change in labels
         labels = distr_local_to_global_label_change(
-            igroup, igroup_new, labels, dev_spl[-1]
+            igroup, igroup_new, labels, dev_spl
         )
 
         # Simplify interaction list (reduces unnecessary remote requests)
@@ -486,7 +505,7 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, 
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
-    labels = distr_local_to_global_label_change(igroup, igroup_new, labels, dev_spl[-1])
+    labels = distr_local_to_global_label_change(igroup, igroup_new, labels, dev_spl)
     labels = tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
     
     return labels
