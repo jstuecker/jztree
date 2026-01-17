@@ -368,11 +368,14 @@ def distr_local_to_global_label_change(igroup, igroup_new, label, num_labels):
     # First update the global labels that our task knows about
     label_new = get_min_label(valid, igroup_new, label)
 
-    mask = valid & (label != label_new) & ((label_new.irank != rank) | (label.irank != rank))
-    pairs = jnp.stack([igroup, igroup_new], axis=-1)
-    pairs, inv, num_links = masked_unique_pairs(pairs, mask)
-
-    links = Link(label[pairs[:,0]], label_new[pairs[:,1]])
+    # find globally relevant root nodes that became linked
+    was_root = jnp.arange(len(igroup)) == igroup
+    remote = (label_new.irank != rank) | (label.irank != rank)
+    mask = (label != label_new) & was_root & remote & valid
+    indices = jnp.where(mask, size=len(igroup))
+    num_links = jnp.sum(mask)
+    
+    links = Link(label[indices], label_new[indices])
 
     label_new = link_distributed(igroup_new, label_new, links, num_labels, num_links)
 
