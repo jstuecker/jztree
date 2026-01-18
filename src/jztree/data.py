@@ -51,6 +51,11 @@ class Link:
     a: Label
     b: Label
 
+    @classmethod
+    def from_stacked(cls, ld, axis=-1):
+        assert axis == -1
+        return cls(Label(ld[...,0], ld[...,1]), Label(ld[...,2], ld[...,3]))
+
     def stacked(self, axis=0):
         return jnp.stack([self.a.irank, self.a.igroup, self.b.irank, self.b.igroup], axis=axis)
 

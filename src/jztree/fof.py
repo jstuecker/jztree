@@ -473,7 +473,7 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
                         alloc_fac_ilist = 32) -> Tuple[FofNodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
-    size = th.plane_sizes[0]*4
+    size = th.plane_sizes[0]*2
 
     def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
         igroup = node_to_child_label(node_data.label, node_data.lvl, node_data.spl, size, rlink=rlink) 
@@ -497,7 +497,7 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
         ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # inform the ilist where children lie
 
         links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, leaf_id, dev_spl)
-        link_data = link_data.set(th.num_planes()-1-level, links.stacked(axis=-1), num_links)
+        link_data = link_data.append(links.stacked(axis=-1), num_links)
 
         # Simplify interaction list (reduces unnecessary remote requests)
         ilist = simplify_interaction_list(ilist, th.num(level))
@@ -523,28 +523,28 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
     
     igroup = node_data.label
     labels = Label(jnp.full(igroup.shape, rank, dtype=jnp.int32), igroup)
-    ld = link_data.data
-    links = Link(Label(ld[:,0], ld[:,1]), Label(ld[:,2], ld[:,3]))
+    links = Link.from_stacked(link_data.data)
     node_data.label = link_distributed(
         igroup, labels, links, ilist.dev_spl, link_data.ispl[-1],
     )
 
     jax.debug.log("num {}", link_data.ispl)
 
-    return node_data, ilist
+    return node_data, ilist, link_data
 distr_node_node_fof.jit = jax.jit(
     distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink")
 )
 
-def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
+def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, 
+                                link_data: PackedArray, posz: jax.Array,
                                 rlink: float, boxsize: float = 0., block_size=32) -> Label:
     rank, ndev, axis_name = get_rank_info()
 
     labels = distr_node_to_child_label(node_data, len(posz), rlink=rlink)
 
     numpart = node_data.spl[-1]
-    (posz, labels), spl, dev_spl = all_to_all_request_children(
-        ilist.dev_spl, ilist.ids, node_data.spl, (posz, labels), axis_name=axis_name
+    (posz, labels, ids), spl, dev_spl = all_to_all_request_children(
+        ilist.dev_spl, ilist.ids, node_data.spl, (posz, labels, jnp.arange(len(posz))), axis_name=axis_name
     )
 
     igroup = global_to_local_label(labels)
@@ -554,9 +554,13 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, 
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
+    links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, ids, dev_spl)
+    links: Link
+    link_data = link_data.set(4, links.stacked(axis=-1))
+
     labels = distr_local_to_global_label_change(igroup, igroup_new, labels, dev_spl)
     labels = tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
-    
+
     return labels
 distr_particle_particle_fof.jit = jax.jit(distr_particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
 
@@ -594,11 +598,11 @@ def distr_fof_z_with_tree(
     """
     rank, ndev, axis_name = get_rank_info()
 
-    node_data, ilist = distr_node_node_fof(
+    node_data, ilist, link_data = distr_node_node_fof(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
 
-    labels = distr_particle_particle_fof(node_data, ilist, posz, rlink=rlink, boxsize=boxsize)
+    labels = distr_particle_particle_fof(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
 
     if linearize_labels:
         num = jax.lax.all_gather(jnp.sum(~jnp.isnan(posz[...,0]), axis=0), axis_name)
