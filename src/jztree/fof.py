@@ -533,9 +533,12 @@ def distr_node_node_fof_v2(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: f
 
     size = th.plane_sizes[0]*4
 
-    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray, igroup_last):
+    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray, igroup):
         # Advect node to child data
-        labels = distr_node_to_child_label(node_data, size_child=size, rlink=rlink)
+        # labels = distr_node_to_child_label(node_data, size_child=size, rlink=rlink)
+        igroup = node_to_child_label(igroup, node_data.lvl, node_data.spl, size, rlink=rlink) 
+        labels = Label(jnp.full(igroup.shape, rank), igroup)
+
         poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
         leaf_id = th.ispl_n2l.get(level, size)
         # Request the remote node children that we need to interact with
@@ -545,7 +548,9 @@ def distr_node_node_fof_v2(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: f
         )
 
         # Do the FoF with local labels
-        igroup = global_to_local_label(labels)
+        # igroup = global_to_local_label(labels)
+        irank = inverse_of_splits(dev_spl, size)
+        igroup = jnp.where(irank==rank, igroup, jnp.arange(size))
 
         igroup_new, ilist = node_fof_and_ilist(
             ilist, spl, poslvl, igroup,
@@ -553,10 +558,6 @@ def distr_node_node_fof_v2(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: f
         )
         ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # inform the ilist where children lie
 
-        # Communicate the locally detected change in labels
-        # labels = distr_local_to_global_label_change(
-        #     igroup, igroup_new, labels, dev_spl
-        # )
         links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, leaf_id, dev_spl)
         link_data = link_data.set(th.num_planes()-1-level, links.stacked(axis=-1), num_links)
 
@@ -582,11 +583,13 @@ def distr_node_node_fof_v2(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: f
         return handle_plane(th.num_planes()-i-1, *carry)
     node_data, ilist, link_data, igroup = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist, link_data, node_data.label.igroup))
     
+    labels = Label(jnp.full(igroup.shape, rank, dtype=jnp.int32), igroup)
+
     node_data: FofNodeData
     ld = link_data.data
     links = Link(Label(ld[:,0], ld[:,1]), Label(ld[:,2], ld[:,3]))
     node_data.label = link_distributed(
-        igroup, node_data.label, links, ilist.dev_spl, link_data.ispl[-1],
+        igroup, labels, links, ilist.dev_spl, link_data.ispl[-1],
     )
 
     link_data: PackedArray
