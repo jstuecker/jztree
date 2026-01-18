@@ -323,7 +323,7 @@ def contract_distributed(labels: Label, igroup: jax.Array, dev_spl: int):
     valid = (idx >= dev_spl[rank]) & (idx < dev_spl[rank+1])
     mask = valid & is_local_root & (labels.irank != rank)
 
-    jax.debug.log("n-to-contract: {}", jnp.sum(mask))
+    # jax.debug.log("n-to-contract: {}", jnp.sum(mask))
     
     def contraction_step(carry):
         labels, mask, _ = carry
@@ -559,7 +559,7 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     link_data = link_data.append(links.stacked(axis=-1), num_links)
     links = Link.from_stacked(link_data.data)
 
-    jax.debug.log("rank {} nlinks: {}", rank, link_data.ispl)
+    # jax.debug.log("rank {} nlinks: {}", rank, link_data.ispl)
 
     # Infer global labels
     labels = Label(jnp.full(igroup.shape, rank, dtype=jnp.int32), igroup)
