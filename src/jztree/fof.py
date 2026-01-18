@@ -472,22 +472,25 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     return node_data, ilist
 
 def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., 
-                        alloc_fac_ilist = 32, size_links = None) -> Tuple[FofNodeData, InteractionList]:
+                        alloc_fac_ilist = 32, size_links = None
+                        ) -> Tuple[FofNodeData, InteractionList, PackedArray]:
     rank, ndev, axis_name = get_rank_info()
 
     size = th.plane_sizes[0]*2
     if size_links is  None:
         size_links = size
 
+    l2p = th.ispl_n2n.get(0, size+1)
+
     def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
         igroup = node_to_child_label(node_data.label, node_data.lvl, node_data.spl, size, rlink=rlink) 
 
         poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
-        l2p = th.ispl_n2n.get(0, size+1)
-        leaf_id = l2p[th.ispl_n2l.get(level, size)]
+        pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
+        
         # Request the remote node children that we need to interact with
-        (poslvl, ids, leaf_id), spl, dev_spl = all_to_all_request_children(
-            ilist.dev_spl, ilist.ids, node_data.spl, (poslvl, jnp.arange(size), leaf_id),
+        (poslvl, ids, pid), spl, dev_spl = all_to_all_request_children(
+            ilist.dev_spl, ilist.ids, node_data.spl, (poslvl, jnp.arange(size), pid),
             axis_name=axis_name
         )
 
@@ -499,9 +502,9 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
             ilist, spl, poslvl, igroup,
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
-        ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # inform the ilist where children lie
+        ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # save the node origins in ilist
 
-        links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, leaf_id, dev_spl)
+        links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, pid, dev_spl)
         link_data = link_data.append(links.stacked(axis=-1), num_links)
 
         # Simplify interaction list (reduces unnecessary remote requests)
@@ -517,11 +520,10 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
     # Seed with dense interactions at top-level
     node_data, ilist = distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
     
-    link_data = PackedArray(pcast_like_vma(jnp.zeros((size_links,4), dtype=jnp.int32), node_data.lvl), levels=th.num_planes()+1)
+    # Set up an empty PackedArray to save link data and mark as varying per gpu
+    link_data = pcast_like_vma(jnp.zeros((size_links,4), dtype=jnp.int32), node_data.lvl)
+    link_data = PackedArray(link_data, levels=th.num_planes()+1)
     link_data.ispl = jax.lax.pcast(link_data.ispl, axis_name, to="varying")
-
-    # for level in reversed(range(th.num_planes())):
-    #     node_data, ilist = handle_plane(level, node_data, ilist)
 
     def loop_body(i, carry):
         return handle_plane(th.num_planes()-i-1, *carry)
