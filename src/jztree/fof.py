@@ -449,10 +449,7 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     # Define splits and their data
     spl, nsuper = linearly_grouped(num_local, size, ngroup=32)
     
-    labels = Label(
-        irank=jnp.full(size, rank, dtype=jnp.int32),
-        igroup=jax.lax.pcast(jnp.arange(size), axis_name, to="varying")
-    )
+    labels = jax.lax.pcast(jnp.arange(size), axis_name, to="varying")
     node_lvl = jax.lax.pcast(jnp.full(size, 388), axis_name, to="varying")
     node_data = FofNodeData(node_lvl, labels, spl, nsuper)
     
@@ -478,22 +475,18 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
 
     size = th.plane_sizes[0]*4
 
-    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray, igroup):
-        # Advect node to child data
-        # labels = distr_node_to_child_label(node_data, size_child=size, rlink=rlink)
-        igroup = node_to_child_label(igroup, node_data.lvl, node_data.spl, size, rlink=rlink) 
-        labels = Label(jnp.full(igroup.shape, rank), igroup)
+    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
+        igroup = node_to_child_label(node_data.label, node_data.lvl, node_data.spl, size, rlink=rlink) 
 
         poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
         leaf_id = th.ispl_n2l.get(level, size)
         # Request the remote node children that we need to interact with
-        (poslvl, ids, leaf_id, labels), spl, dev_spl = all_to_all_request_children(
-            ilist.dev_spl, ilist.ids, node_data.spl, (poslvl, jnp.arange(size), leaf_id, labels),
+        (poslvl, ids, leaf_id), spl, dev_spl = all_to_all_request_children(
+            ilist.dev_spl, ilist.ids, node_data.spl, (poslvl, jnp.arange(size), leaf_id),
             axis_name=axis_name
         )
 
-        # Do the FoF with local labels
-        # igroup = global_to_local_label(labels)
+        # Treat remote nodes as roots
         irank = inverse_of_splits(dev_spl, size)
         igroup = jnp.where(irank==rank, igroup, jnp.arange(size))
 
@@ -511,14 +504,14 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
 
         # Define node-splits for next level
         node_data = FofNodeData(
-            th.lvl.get(level, size), labels, th.ispl_n2n.get(level, size+1), th.num(level)
+            th.lvl.get(level, size), igroup_new, th.ispl_n2n.get(level, size+1), th.num(level)
         )
 
-        return node_data, ilist, link_data, igroup_new
+        return node_data, ilist, link_data
     
     # Seed with dense interactions at top-level
     node_data, ilist = distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
-    link_data = PackedArray(pcast_like_vma(jnp.zeros((size,4), dtype=jnp.int32), node_data.label.irank), levels=th.num_planes())
+    link_data = PackedArray(pcast_like_vma(jnp.zeros((size,4), dtype=jnp.int32), node_data.lvl), levels=th.num_planes())
     link_data.ispl = jax.lax.pcast(link_data.ispl, axis_name, to="varying")
 
     # for level in reversed(range(th.num_planes())):
@@ -526,21 +519,17 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
 
     def loop_body(i, carry):
         return handle_plane(th.num_planes()-i-1, *carry)
-    node_data, ilist, link_data, igroup = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist, link_data, node_data.label.igroup))
+    node_data, ilist, link_data = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist, link_data))
     
+    igroup = node_data.label
     labels = Label(jnp.full(igroup.shape, rank, dtype=jnp.int32), igroup)
-
-    node_data: FofNodeData
     ld = link_data.data
     links = Link(Label(ld[:,0], ld[:,1]), Label(ld[:,2], ld[:,3]))
     node_data.label = link_distributed(
         igroup, labels, links, ilist.dev_spl, link_data.ispl[-1],
     )
 
-    link_data: PackedArray
     jax.debug.log("num {}", link_data.ispl)
-
-
 
     return node_data, ilist
 distr_node_node_fof.jit = jax.jit(
