@@ -51,8 +51,8 @@ class Link:
     a: Label
     b: Label
 
-    def stacked(self):
-        return jnp.stack([self.a.irank, self.a.igroup, self.b.irank, self.b.igroup])
+    def stacked(self, axis=0):
+        return jnp.stack([self.a.irank, self.a.igroup, self.b.irank, self.b.igroup], axis=axis)
 
 @jax.tree_util.register_dataclass
 @dataclass
