@@ -476,61 +476,6 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
                         alloc_fac_ilist = 32) -> Tuple[FofNodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
-    size = th.plane_sizes[0]
-
-    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList):
-        # Advect node to child data
-        labels = distr_node_to_child_label(node_data, size_child=size, rlink=rlink)
-        poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
-        # Request the remote node children that we need to interact with
-        (poslvl, ids, labels), spl, dev_spl = all_to_all_request_children(
-            ilist.dev_spl, ilist.ids, node_data.spl, (poslvl, jnp.arange(size), labels),
-            axis_name=axis_name
-        )
-
-        # Do the FoF with local labels
-        igroup = global_to_local_label(labels)
-
-        igroup_new, ilist = node_fof_and_ilist(
-            ilist, spl, poslvl, igroup,
-            rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
-        )
-        ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # inform the ilist where children lie
-
-        # Communicate the locally detected change in labels
-        labels = distr_local_to_global_label_change(
-            igroup, igroup_new, labels, dev_spl
-        )
-
-        # Simplify interaction list (reduces unnecessary remote requests)
-        ilist = simplify_interaction_list(ilist, th.num(level))
-
-        # Define node-splits for next level
-        node_data = FofNodeData(
-            th.lvl.get(level, size), labels, th.ispl_n2n.get(level, size+1), th.num(level)
-        )
-
-        return node_data, ilist
-    
-    # Seed with dense interactions at top-level
-    node_data, ilist = distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
-
-    # for level in reversed(range(th.num_planes())):
-    #     node_data, ilist = handle_plane(level, node_data, ilist)
-
-    def loop_body(i, carry):
-        return handle_plane(th.num_planes()-i-1, *carry)
-    node_data, ilist = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist))
-    
-    return node_data, ilist
-distr_node_node_fof.jit = jax.jit(
-    distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink")
-)
-
-def distr_node_node_fof_v2(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., 
-                        alloc_fac_ilist = 32) -> Tuple[FofNodeData, InteractionList]:
-    rank, ndev, axis_name = get_rank_info()
-
     size = th.plane_sizes[0]*4
 
     def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray, igroup):
@@ -652,8 +597,7 @@ fof.jit = jax.jit(fof, static_argnames=["rlink", "boxsize", "cfg"])
 
 def distr_fof_z_with_tree(
         posz: jax.Array, th: fmdj.data.TreeHierarchy, rlink: float, 
-        boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False,
-        mode: int = 0
+        boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False
     ) -> Label:
     """
     linearize_labels: only for testing against single-gpu version - converts (irank,igroup) labels to 
@@ -661,14 +605,9 @@ def distr_fof_z_with_tree(
     """
     rank, ndev, axis_name = get_rank_info()
 
-    if mode == 0:
-        node_data, ilist = distr_node_node_fof(
-            th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
-        )
-    else:
-        node_data, ilist = distr_node_node_fof_v2(
-            th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
-        )
+    node_data, ilist = distr_node_node_fof(
+        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
+    )
 
     labels = distr_particle_particle_fof(node_data, ilist, posz, rlink=rlink, boxsize=boxsize)
 
@@ -681,7 +620,7 @@ def distr_fof_z_with_tree(
     else:
         return labels
 distr_fof_z_with_tree.jit = jax.jit(
-    distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels", "mode"]
+    distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
 )
 
 def distr_fof(part: fmdj.data.Pos, npart_tot: int, rlink: float, boxsize: float = 0., 
