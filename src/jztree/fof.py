@@ -151,7 +151,7 @@ def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., 
         spl = th.ispl_n2n.get(level, size+1)
         node_lvl = child_data.lvl
     
-    node_data = FofNodeData(node_lvl, igroup, spl, th.lvl.num(0))
+    node_data = FofNodeData(node_lvl, igroup, spl)
 
     return node_data, ilist
 node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
@@ -453,7 +453,7 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     
     labels = jax.lax.pcast(jnp.arange(size), axis_name, to="varying")
     node_lvl = jax.lax.pcast(jnp.full(size, 388), axis_name, to="varying")
-    node_data = FofNodeData(node_lvl, labels, spl, nsuper)
+    node_data = FofNodeData(node_lvl, labels, spl)
     
     # define interaction list with remote interactions
     nper_rank = jax.lax.all_gather(nsuper, axis_name)
@@ -512,7 +512,7 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
 
         # Define node-splits for next level
         node_data = FofNodeData(
-            th.lvl.get(level, size), igroup_new, th.ispl_n2n.get(level, size+1), th.num(level)
+            th.lvl.get(level, size), igroup_new, th.ispl_n2n.get(level, size+1)
         )
 
         return node_data, ilist, link_data

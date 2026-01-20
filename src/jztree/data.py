@@ -65,7 +65,6 @@ class FofNodeData():
     lvl: jax.Array
     label: Label | jax.Array # Local index pointer for single-gpu, but (rank,id) pointer for multi
     spl: jax.Array
-    num: jax.Array
 
 @dataclass(frozen=True)
 class KNNConfig:
