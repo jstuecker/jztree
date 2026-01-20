@@ -22,23 +22,11 @@ jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), plat
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
-def pcast_like_vma(x, like):
-    """Make x have the same VMA (varying manual axes) as `like` inside shard_map."""
-    # Outside shard_map, VMA is irrelevant; just return x.
-    mesh = jax.sharding.get_abstract_mesh()
-    if mesh is None:
-        return x
+def pcast_vma(x, vma):
+    return jax.lax.pcast(x, tuple(vma), to="varying")
 
-    # Keep axis order consistent with the mesh (vma is a set).
-    like_vma = getattr(like, "vma", frozenset())
-    axes = tuple(ax for ax in mesh.axis_names if ax in like_vma)
-
-    # No varying axes => nothing to do (also covers single-device meshes).
-    if not axes:
-        return x
-
-    # pvary is deprecated; pcast(..., to="varying") is the supported replacement.
-    return jax.lax.pcast(x, axes, to="varying")
+def pcast_like(x, like):
+    return jax.lax.pcast(x, tuple(jax.typeof(like).vma), to="varying")
 
 def node_fof_and_ilist(
         node_ilist: InteractionList, isplit: jax.Array, 
@@ -62,7 +50,7 @@ def node_fof_and_ilist(
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )
 
-    child_igroup_out, child_ilist_ispl, child_ilist = pcast_like_vma(res, like=node_ilist.iother)
+    child_igroup_out, child_ilist_ispl, child_ilist = pcast_like(res, like=node_ilist.iother)
     child_ilist = InteractionList(child_ilist_ispl, child_ilist)
 
     def err(n1, n2):
@@ -85,7 +73,7 @@ def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=
         igroup, iA, iB, num_links, block_size=np.int32(block_size)
     )[0]
     
-    return pcast_like_vma(igr_out, like=igroup)
+    return pcast_like(igr_out, like=igroup)
 
 def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
                         size_child: int, rlink: float, flag_local: jax.Array | None = None,
@@ -521,9 +509,9 @@ def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: floa
     node_data, ilist = distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
     
     # Set up an empty PackedArray to save link data and mark as varying per gpu
-    link_data = pcast_like_vma(jnp.zeros((size_links,4), dtype=jnp.int32), node_data.lvl)
-    link_data = PackedArray(link_data, levels=th.num_planes()+1)
-    link_data.ispl = jax.lax.pcast(link_data.ispl, axis_name, to="varying")
+    link_data = PackedArray.create_empty(
+        (size_links, 4), levels=th.num_planes()+1, dtype=jnp.int32, vma=jax.typeof(rank).vma
+    )
 
     def loop_body(i, carry):
         return handle_plane(th.num_planes()-i-1, *carry)
