@@ -63,12 +63,12 @@ def node_fof_and_ilist(
     )
 
     child_igroup_out, child_ilist_ispl, child_ilist = pcast_like_vma(res, like=node_ilist.iother)
-    child_ilist = InteractionList(child_ilist_ispl, child_ilist, nfilled=child_ilist_ispl[-1])
+    child_ilist = InteractionList(child_ilist_ispl, child_ilist)
 
     def err(n1, n2):
         raise MemoryError(f"The interaction list allocation is too small. (need: {n1} have: {n2})" +
                           f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
-    n1, n2 = child_ilist.nfilled, child_ilist.iother.shape[0]
+    n1, n2 = child_ilist.nfilled(), child_ilist.iother.shape[0]
     child_igroup_out = child_igroup_out + conditional_callback(n1 > n2, err, n1, n2)
 
     return child_igroup_out, child_ilist
