@@ -37,6 +37,7 @@ def particles_and_tree(N=int(1e6), seed=0):
 
     return fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
 
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("N", [int(1e6), int(1e7), int(3e7), int(1e8), int(3e8)])
 def bench_fof(jax_bench, pos, N):
 
@@ -58,6 +59,7 @@ def smap_jit(f, **kwargs):
     fsm = jax.shard_map(lambda: f(**kwargs), in_specs=P(), out_specs=P("gpus"), mesh=mesh)
     return jax.jit(fsm) # the lambda helps with passing x as keyword argument
 
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("N", [int(1e6), int(1e7), int(3e7), int(1e8), int(3e8)])
 def bench_fof_steps(jax_bench, pos, N):
     jb = jax_bench(jit_rounds=4, jit_warmup=1)

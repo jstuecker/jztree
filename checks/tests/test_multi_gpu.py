@@ -14,6 +14,7 @@ from jztree.fof import Link, link_distributed, Label, insert_links
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 sharding = NamedSharding(mesh, P('gpus'))
 
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("nperdev", (16, 256, 5012))
 def test_distributed_links(nperdev):
     """Define a random distributed link graph and check against local implementation"""
@@ -75,6 +76,7 @@ def node_fof(seed=0):
 
     return partz, igroup.reshape(1,-1), ilist.ispl[-1].reshape(1), dspl.reshape(1,-1)
 
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,11,77,133,1337])
 def test_distr_node_node_fof(seed):
     partz, igroup1, numint1, dev_spl = node_fof(seed)
@@ -105,6 +107,7 @@ def distr_fof(seed):
 
     return partz, igroup.reshape(1,-1), dspl.reshape(1,-1)
 
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
 def test_distr_fof(seed):
     partz, igroup1, dev_spl = distr_fof(seed)
