@@ -38,8 +38,10 @@ def test_distributed_links(nperdev):
 
         rank, ndev, axis_name = get_rank_info()
 
+        dev_spl = (jnp.zeros(ndev+1, dtype=jnp.int32)).at[rank+1].set(len(igroup))
+
         labels = link_distributed(
-            igroup, labels, links, len(igroup), jax.lax.pvary(len(igroup), axis_name)
+            igroup, labels, links, dev_spl, len(igroup) + rank*0,
         )
         
         # convert back to global indices

@@ -60,7 +60,7 @@ def smap_jit(f, **kwargs):
     return jax.jit(fsm) # the lambda helps with passing x as keyword argument
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.parametrize("N", [int(1e6), int(1e7), int(3e7), int(1e8), int(3e8)])
+@pytest.mark.parametrize("N", [int(1e6), int(1e7), int(3e7)])
 def bench_fof_steps(jax_bench, pos, N):
     jb = jax_bench(jit_rounds=4, jit_warmup=1)
 
