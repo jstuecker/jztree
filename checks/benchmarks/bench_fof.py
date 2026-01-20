@@ -8,6 +8,7 @@ import fmdj
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("N", [int(1e6), int(3e6)])
 def bench_fof_steps(jax_bench, pos, N):
     jb = jax_bench(jit_rounds=5, jit_warmup=2)
@@ -34,6 +35,7 @@ def bench_fof_steps(jax_bench, pos, N):
 
     jb.measure(fn_jit=jz.fof.fof.jit, pos=pos, rlink=rlink, boxsize=boxsize, tag="total")
 
+@pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("N", [int(1e5), int(3e5), int(1e6), int(3e6), int(1e7)])
 def bench_fof_uniform(jax_bench, pos, N):
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
@@ -44,6 +46,7 @@ def bench_fof_uniform(jax_bench, pos, N):
 
     jb.measure(fn_jit=jz.fof.fof.jit, pos=pos, rlink=rlink, boxsize=boxsize)
 
+@pytest.mark.shrink_in_quick(keep_index=3)
 @pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
 @pytest.mark.parametrize("ngrid", [16, 32, 64, 128, 256])
 def bench_fof_cosmo(jax_bench, pos, ngrid):

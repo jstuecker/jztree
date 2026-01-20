@@ -13,21 +13,6 @@ import numpy as np
 
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 
-def ftest():
-    return jax.random.uniform(jax.random.key(0), 100)
-
-@pytest.mark.parametrize("N", [int(1e6)])
-def bench_smap_test(jax_bench, pos, N):
-
-    jb = jax_bench(jit_rounds=2, jit_warmup=1)
-
-    @jax.shard_map(in_specs=P("gpus"), out_specs=P("gpus"), mesh=mesh)
-    def smapped():
-        
-        jb.measure(fn_jit=jax.jit(ftest), tag="shard_map_test")
-
-    smapped()
-
 def particles_and_tree(N=int(1e6), seed=0):
     cfg = jz.data.FofConfig()
     rank, ndev, axis_name = get_rank_info()
@@ -38,6 +23,7 @@ def particles_and_tree(N=int(1e6), seed=0):
     return fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+@pytest.mark.shrink_in_quick(keep_index=1)
 @pytest.mark.parametrize("N", [int(1e6), int(1e7), int(3e7), int(1e8), int(3e8)])
 def bench_fof(jax_bench, pos, N):
 
@@ -60,6 +46,7 @@ def smap_jit(f, **kwargs):
     return jax.jit(fsm) # the lambda helps with passing x as keyword argument
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+@pytest.mark.shrink_in_quick(keep_index=1)
 @pytest.mark.parametrize("N", [int(1e6), int(1e7), int(3e7)])
 def bench_fof_steps(jax_bench, pos, N):
     jb = jax_bench(jit_rounds=4, jit_warmup=1)

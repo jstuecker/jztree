@@ -5,6 +5,7 @@ import jztree as jz
 from dataclasses import replace
 from jztree.tree import pos_zorder_sort
 
+@pytest.mark.shrink_in_quick(keep_index=1)
 @pytest.mark.parametrize("npart", [int(1e5), int(1e6), int(3e6)])
 def bench_knn_steps(jax_bench, pos):
     k = 16
@@ -28,6 +29,7 @@ def bench_knn_steps(jax_bench, pos):
     jb.measure(fn_jit=jz.knn.evaluate_knn_z.jit, d=data2, posz_query=pos_qz, tag="eval_q_z")
     jb.measure(fn_jit=jz.knn.knn.jit, pos0=pos_q, k=k, pos_query=pos_q, tag="total_q_z")
 
+@pytest.mark.shrink_in_quick(keep_index=3)
 @pytest.mark.parametrize("k", [4,8,12,16,32,64])
 def bench_knn_k(jax_bench, pos, k):
     jb = jax_bench(jit_rounds=40, jit_warmup=10)

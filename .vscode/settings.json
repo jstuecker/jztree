@@ -3,6 +3,7 @@
     "python.testing.unittestEnabled": false,
     "python.testing.cwd": "${workspaceFolder}/checks",
     "python.terminal.executeInFileDir": true,
+    "python.testing.pytestArgs": [ "--quick" ],
 
     "files.associations": {
         "string": "cpp",

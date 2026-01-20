@@ -10,17 +10,7 @@ from fmdj.tools import conditional_callback
 from jax.experimental import io_callback
 from jztree.fof import masked_min_scatter
 
-@pytest.mark.parametrize("N", [int(1e4), int(1e5), int(3e5), int(1e6)])
-def bench_tmp_sort(jax_bench, N):
-    pos = jax.random.uniform(jax.random.key(0), (N, 3))
-    
-    jb = jax_bench(jit_rounds=100, jit_warmup=50, eager_rounds=1)
-
-    jb.measure(fn=fmdj.fmm.pos_zorder_sort, fn_jit=fmdj.fmm.pos_zorder_sort.jit, x = pos, tag="sort")
-
-    jb.configure(jit_rounds=10, jit_loops=10, jit_warmup=5)
-    jb.measure(fn_jit=fmdj.fmm.pos_zorder_sort.jit, x=pos, tag="sort_lp")
-
+@pytest.mark.skip_in_quick
 @pytest.mark.parametrize("N", [int(1e5), int(1e6), int(1e7)])
 def bench_host_callback(jax_bench, N):
     def f(mode = 0):
@@ -47,6 +37,7 @@ def bench_host_callback(jax_bench, N):
     jb.measure(fn=f, fn_jit=f.jit, mode=1, tag="cond-callback")
     jb.measure(fn=f, fn_jit=f.jit, mode=2, tag="host-callback")
 
+@pytest.mark.skip_in_quick
 @pytest.mark.parametrize("N", [int(1e5), int(1e6)]) # , int(3e6), int(1e7), int(3e7)
 def bench_unique(jax_bench, N):
     """This test shows that jnp.unique needs to be avoided, especially on pairs
@@ -68,6 +59,7 @@ def bench_unique(jax_bench, N):
     jb.measure(fn=f, fn_jit=f.jit, n=3, tag="unique_n3")
     jb.measure(fn=f, fn_jit=f.jit, n=10, tag="unique_n10")
 
+@pytest.mark.skip_in_quick
 @pytest.mark.parametrize("N", [int(1e6), int(1e7)])
 def bench_min_scatter(jax_bench, N):
     def f(mode=0):

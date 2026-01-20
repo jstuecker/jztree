@@ -12,6 +12,7 @@ def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
     
     return pos0
 
+@pytest.mark.skip_in_quick
 def test_segment_sort():
     spl = jnp.insert(jnp.sort(jax.random.randint(jax.random.PRNGKey(0), (5000,), 0, 1000000)), 0, 0)
     print(f"\n max seg: {jnp.max(spl[1:] - spl[:-1])}, mean seg: {jnp.mean(spl[1:] - spl[:-1])}")
@@ -45,30 +46,35 @@ def check_against_ckdtree(posz, k=16, boxsize=0.):
 
     assert  nids_diff/len(posz) <= 1e-2, "A lot of ids are different (some expected due to degenerate radii)"
 
-@pytest.mark.parametrize("xmin,xmax", [(0.1, 0.4), (-0.3,0.3), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
+@pytest.mark.skip_in_quick
+@pytest.mark.parametrize("xmin,xmax", [(-0.3,0.7), (0.1, 0.4), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_domain(xmin, xmax):
     posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=xmin, xmax=xmax))
 
     check_against_ckdtree(posz)
 
+@pytest.mark.shrink_in_quick(keep_index=3)
 @pytest.mark.parametrize("k", [4,8,12,16,32,64])
 def test_k(k):
     posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10.))
 
     check_against_ckdtree(posz, k=k)
 
+@pytest.mark.skip_in_quick
 @pytest.mark.parametrize("boxsize", [0.03,1.,170.])
 def test_boxisze(boxsize):
     posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=boxsize))
 
     check_against_ckdtree(posz, boxsize=boxsize)
 
+@pytest.mark.skip_in_quick
 @pytest.mark.parametrize("npart", [1e5, 1e6, 4e6])
 def test_npart(npart):
     posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
 
     check_against_ckdtree(posz)
 
+@pytest.mark.skip_in_quick
 def test_query_skip():
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
 
@@ -100,6 +106,7 @@ def test_io_order():
     assert jnp.all(inn00[data.idz] == inn0z)
     assert jnp.all(inn0z == data.idz[innzz])
 
+@pytest.mark.skip_in_quick
 def test_twice_knn():
     """Test that running the knn twice works. (Might fail with stream capture problems.)"""
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
@@ -115,6 +122,7 @@ def test_twice_knn():
 
     assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
 
+@pytest.mark.skip_in_quick
 def test_twice_query():
     """Test that running the knn twice works. (Might fail with stream capture problems.)"""
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0, seed=1)
@@ -131,6 +139,8 @@ def test_twice_query():
 
     assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
 
+@pytest.mark.skip_in_quick
+@pytest.mark.slow
 def test_scan_knn():
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
 
@@ -145,6 +155,7 @@ def test_scan_knn():
 
     assert jnp.allclose(rmean, rmean2)
 
+@pytest.mark.skip_in_quick
 def test_scan_query():
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0, seed=1)
     posa = get_pos(1024*32, xmin=0., xmax=1.0, seed=2)
