@@ -2,6 +2,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 from jztree.tree import pos_zorder_sort
+from fmdj.comm import should_init_jax_distributed
 import sys
 import os
 
@@ -44,10 +45,10 @@ def _silence_process_output() -> None:
 
 
 def pytest_configure(config):
-    try:
+    if should_init_jax_distributed():
         jax.distributed.initialize()
-    except (ValueError, RuntimeError) as err:
-        print(f"Distributed mode not available ({err})")
+    else:
+        print(f"Using single-GPU mode")
 
     if jax.process_index() != 0:
         _silence_process_output()
