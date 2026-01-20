@@ -9,8 +9,8 @@ import importlib
 has_hfof = importlib.util.find_spec("hfof") is not None
 
 # Define a setup
-pos = jax.random.uniform(jax.random.PRNGKey(0), (int(1e6), 3), minval=0.0, maxval=boxsize)
 boxsize = 1.0
+pos = jax.random.uniform(jax.random.PRNGKey(0), (int(1e6), 3), minval=0.0, maxval=boxsize)
 rlink = 0.8 * boxsize / len(pos)**(1/3)
 cfg = jztree.data.FofConfig()
 
