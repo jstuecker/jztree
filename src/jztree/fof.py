@@ -688,4 +688,4 @@ def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
         vel_COM = vel_COM.at[index_roots].add(vel)
 
     ngroups = jnp.sum(index_roots < Ngroupsmax)
-    return FofData(ngroups, npart, pos_COM, vel_COM, mass)
+    return FofReducedData(ngroups, npart, pos_COM, vel_COM, mass)
