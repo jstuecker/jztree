@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jztree_cuda import ffi_fof
 from .tree import pos_zorder_sort, grouped_dense_interaction_list
 from .common import conditional_callback
-from .data import  FofConfig, FofData, PosLvl, Label, Link, FofNodeData
+from .data import  FofConfig, FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
 from fmdj.data import InteractionList, PackedArray
 from typing import Tuple
 from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
@@ -619,3 +619,73 @@ def distr_fof(part: fmdj.data.Pos, npart_tot: int, rlink: float, boxsize: float 
     labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
 
     return partz, labels
+
+def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
+                  boxsize : float, mpart : float | None = None, Nmin : int = 20):
+    ''' Reduce particle data to FOF group data.
+    Parameters
+    ----------
+    particles_z : ParticleData
+        z-ordered particle data to be reduced
+    igroup_z : jax.Array
+        z-ordered array of group indices for each particle
+    boxsize : float
+        size of the periodic box
+    mpart : float | None, optional
+        mass of each particle, by default None
+    Nmin : int, optional
+        minimum number of particles in a group to be considered, by default 20
+
+    Returns
+    -------
+    FofData
+        reduced FOF group data with number of particles, center of mass positions,
+        and, if provided, center of mass velocities and masses
+    '''
+    pos = particles_z.pos
+
+    npart = jnp.zeros((pos.shape[0],),dtype=jnp.int32)
+    npart = npart.at[igroup_z].add(1)
+    Ngroupsmax = pos.shape[0] // Nmin
+    mask_atleast_Nmin = npart >= Nmin
+
+    # take only indices that result in more than Nmin particles in the group
+    # else, add 'outside' the array
+    index_offset = jnp.where(mask_atleast_Nmin[igroup_z],
+                             (jnp.cumsum(mask_atleast_Nmin)-1)[igroup_z], Ngroupsmax)
+    index_roots = jnp.where(mask_atleast_Nmin,
+                             (jnp.cumsum(mask_atleast_Nmin)-1)[igroup_z], Ngroupsmax)
+    
+    npart = jnp.zeros(Ngroupsmax, jnp.int32)
+    npart = npart.at[index_offset].add(1)
+    npart = jnp.where(npart == 0, jnp.nan, npart).astype(jnp.int32)
+
+    ## MASSES
+    mass = None
+    if mpart is not None:
+        mass = mpart * npart
+
+    ## POSITIONS
+    pos_COM = jnp.zeros((Ngroupsmax, 3), jnp.float32)
+    # center each position around its group's root/parent
+    # and create shortest distance in periodic geometry
+    displacement_group = pos - pos[igroup_z] 
+    displacement_group -= boxsize * jnp.round(displacement_group / boxsize)
+    # add positions to the corresponding groups and take mean
+    pos_COM = pos_COM.at[index_offset].add(displacement_group) / npart[:,None]
+    # add the centers back and apply periodicity
+    pos_COM = pos_COM.at[index_roots].add(pos)
+    pos_COM %= boxsize
+
+    ## VELOCITIES
+    vel_COM = None
+    vel = getattr(particles_z, 'vel', None)
+    if vel is not None:
+        vel = particles_z.vel
+        vel_COM = jnp.zeros((Ngroupsmax, 3), jnp.float32)
+        # center each velocity around its group's root/parent to improve numerical precision
+        vel_COM = vel_COM.at[index_offset].add(vel - vel[igroup_z]) / npart[:,None]
+        vel_COM = vel_COM.at[index_roots].add(vel)
+
+    ngroups = jnp.sum(index_roots < Ngroupsmax)
+    return FofData(ngroups, npart, pos_COM, vel_COM, mass)

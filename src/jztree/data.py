@@ -119,3 +119,46 @@ class FofData:
     node_lvl: jax.Array   # node-levels
     ilist: InteractionList  # interaction list (on leaf indices)
     spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
+
+
+@jax.jax.tree_util.register_dataclass
+@dataclass
+class ParticleData:
+    ''' Data class for particle data.
+    Attributes
+    ----------
+    pos : jax.Array
+        positions of the particles, shape (N, 3)
+    vel : jax.Array | None
+        velocities of the particles, shape (N, 3), optional
+    '''
+    pos : jax.Array
+    vel : jax.Array | None = None
+
+    def __post_init__(self):
+        assert self.pos.shape[1] == 3, "provide positions as an array of shape (N, 3)"
+        if self.vel != None:
+            assert self.vel.shape[1] == 3, "provide velocities as an array of shape (N, 3)"
+            assert self.vel.shape[0] == self.pos.shape[0], "provide as many velocities as positions"
+
+@jax.jax.tree_util.register_dataclass
+@dataclass
+class FofReducedData:
+    ''' Data class for FOF group data.
+    Attributes
+    ----------
+    npart : jax.Array
+        number of particles in each group
+    pos : jax.Array
+        center of mass positions of the groups, shape (Ngroups, 3)
+    vel : jax.Array | None
+        center of mass velocities of the groups, shape (Ngroups, 3), optional
+    mass : jax.Array | None
+        total mass of the groups, optional
+    '''
+    ngroups : int
+    npart : jax.Array
+    pos : jax.Array
+    vel : jax.Array | None = None
+    mass : jax.Array | None = None
+    # TODO: add more properties
