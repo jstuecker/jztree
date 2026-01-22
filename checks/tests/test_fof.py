@@ -4,11 +4,16 @@ import jax
 import jax.numpy as jnp
 import pytest
 import importlib
+from pathlib import Path
+from jztree.data import ParticleData
+from fmdj.ztree import pos_zorder_sort
+import h5py
+import hdf5plugin
 
 has_hfof = importlib.util.find_spec("hfof") is not None
 
 @pytest.mark.skipif(not has_hfof, reason="requires hfof module installed")
-def test_against_hfof():
+def test_vs_hfof_uniform():
     from hfof import fof
 
     boxsize = 1.0
@@ -36,3 +41,90 @@ def test_against_hfof():
     # print(group_sizes_jz[0:10])
 
     assert group_sizes_jz == pytest.approx(group_sizes_hfof)
+
+@pytest.fixture()
+def camels_data():
+    file_path_snap = Path(__file__).resolve().parent.parent / "data/CAMELS_snapshot.hdf5"
+    file_path_groups = Path(__file__).resolve().parent.parent /"data/CAMELS_groups.hdf5"
+
+    if not file_path_snap.exists() or not file_path_groups.exists():
+        raise ValueError("Camels data not found, please download by executing ../prepare_tests.py")
+    
+    file_snap = h5py.File(file_path_snap)['PartType1']
+    pos = file_snap['Coordinates'][:] / 1000
+    vel = file_snap['Velocities'][:] 
+    
+    file_groups = h5py.File(file_path_groups)['Group']
+    pos_h = file_groups['GroupPos'][:] / 1000
+    vel_h = file_groups['GroupVel'][:]
+    group_len = file_groups['GroupLen'][:]
+
+    return pos, vel, pos_h, vel_h, group_len
+
+@pytest.fixture()
+def camels_jz_fof(camels_data):
+    pos, vel, pos_h, vel_h, group_len = camels_data
+
+    res = 256
+
+    boxsize = 25
+    b = 0.2
+    rlink = b * boxsize / res
+    cfg = jztree.data.FofConfig()
+    cfg.tree.alloc_fac_nodes = 2
+    
+    particles = ParticleData(jnp.asarray(pos), jnp.asarray(vel))
+    
+    particlesz, idz = pos_zorder_sort.jit(particles)
+    igr_jz = jztree.fof.fof_z.jit(particlesz.pos, rlink, boxsize=boxsize, cfg=cfg)
+
+    return particlesz, igr_jz, rlink, boxsize
+
+def test_CAMELS(camels_data, camels_jz_fof):
+    pos, vel, pos_h, vel_h, group_len = camels_data
+    particlesz, igr_jz, rlink, boxsize = camels_jz_fof
+
+    print("\n","Comparing CAMELS and jz_tree","\n")
+
+    results = jztree.fof.fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
+    
+    print("# of halos indentified:")
+    print("CAMELS:", pos_h.shape[0])
+    print("jz_tree:", results.ngroups,"\n")
+
+    print("# particles in heaviest 25 halos:")
+    print("CAMELS:", jnp.sort(group_len)[-25:])
+    print("jz_tree:", jnp.sort(results.npart[:results.ngroups])[-25:],"\n")
+
+    print("# of minimal mass (32 particles) halos:")
+    print("CAMELS:", jnp.sum(group_len == 32))
+    print("jz_tree:", jnp.sum(results.npart[:results.ngroups] == 32),"\n")
+    
+    print("Total number of particles in all halos combined:")
+    print("CAMELS", jnp.sum(group_len))
+    print("jz_tree:", jnp.sum(results.npart[:results.ngroups]))
+    print("difference (CAMELS - jz_tree):", jnp.sum(group_len) - jnp.sum(results.npart[:results.ngroups]),"\n")
+
+@pytest.mark.skipif(not has_hfof, reason="requires hfof module installed")
+def test_vs_hfof_camels(camels_data, camels_jz_fof):
+    from hfof import fof
+
+    pos, vel, pos_h, vel_h, group_len = camels_data
+    particlesz, igr_jz, rlink, boxsize = camels_jz_fof
+    
+    igr_hfof = fof(particlesz.pos, rlink, boxsize=boxsize)
+
+    # uniquely map every jzfof-label to an hfof-label
+    label_map = jnp.zeros(particlesz.pos.shape[0], dtype=jnp.int32).at[igr_jz].set(igr_hfof)
+    label_map_rev = jnp.arange(particlesz.pos.shape[0], dtype=jnp.int32).at[igr_hfof].set(igr_jz)
+
+    igr_hfof_jz = label_map[igr_jz]
+    igr_jz_hfof = label_map_rev[igr_hfof]
+    group_sizes_jz = jnp.sort(jnp.bincount(igr_jz, minlength=particlesz.pos.shape[0]))[::-1]
+    group_sizes_hfof = jnp.sort(jnp.bincount(igr_hfof, minlength=particlesz.pos.shape[0]))[::-1]
+
+    assert jnp.all(group_sizes_jz == pytest.approx(group_sizes_hfof)), "group size mismatch"
+    assert jnp.all(igr_hfof_jz == igr_hfof), "group label mismatch"
+    assert jnp.all(igr_jz_hfof == igr_jz), "group label mismatch"
+    # print(group_sizes_jz)
+    # print(group_sizes_hfof)

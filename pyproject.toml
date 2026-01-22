@@ -31,10 +31,7 @@ cuda13 = [
 dev = [
     "ipykernel>=6.30.1",
     "matplotlib>=3.10.6",
-    "pytest>=8.4.2"
-]
-build = [
-    "scikit-build-core>=0.11",
-    "nanobind>=2.9.2",
-    "cmake>=3.24"
+    "pytest>=8.4.2",
+    "hdf5plugin",
+    "hdf5"
 ]
