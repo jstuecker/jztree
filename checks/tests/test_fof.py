@@ -87,23 +87,38 @@ def test_CAMELS(camels_data, camels_jz_fof):
     print("\n","Comparing CAMELS and jz_tree","\n")
 
     results = jztree.fof.fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
+    results.npart = results.npart[:results.ngroups]
+    results.pos = results.pos[:results.ngroups]
+    results.vel = results.vel[:results.ngroups]
+
+    sort_by_mass_CAMELS = jnp.argsort(group_len)
+    sort_by_mass_jz_tree = jnp.argsort(results.npart)
     
     print("# of halos indentified:")
-    print("CAMELS:", pos_h.shape[0])
-    print("jz_tree:", results.ngroups,"\n")
+    print("CAMELS:\n", pos_h.shape[0])
+    print("jz_tree:\n", results.ngroups,"\n")
 
     print("# particles in heaviest 25 halos:")
-    print("CAMELS:", jnp.sort(group_len)[-25:])
-    print("jz_tree:", jnp.sort(results.npart[:results.ngroups])[-25:],"\n")
-
+    print("CAMELS:\n", group_len[sort_by_mass_CAMELS][-25:])
+    print("jz_tree:\n", results.npart[sort_by_mass_jz_tree][-25:],"\n")
+    
     print("# of minimal mass (32 particles) halos:")
-    print("CAMELS:", jnp.sum(group_len == 32))
-    print("jz_tree:", jnp.sum(results.npart[:results.ngroups] == 32),"\n")
+    print("CAMELS:\n", jnp.sum(group_len == 32))
+    print("jz_tree:\n", jnp.sum(results.npart == 32),"\n")
+
     
     print("Total number of particles in all halos combined:")
-    print("CAMELS", jnp.sum(group_len))
-    print("jz_tree:", jnp.sum(results.npart[:results.ngroups]))
-    print("difference (CAMELS - jz_tree):", jnp.sum(group_len) - jnp.sum(results.npart[:results.ngroups]),"\n")
+    print("CAMELS:\n", jnp.sum(group_len))
+    print("jz_tree:\n", jnp.sum(results.npart))
+    print("difference (CAMELS - jz_tree):\n", jnp.sum(group_len) - jnp.sum(results.npart[:results.ngroups]),"\n")
+
+    print("Positions 5 most massive:")
+    print("CAMELS:\n", pos_h[sort_by_mass_CAMELS][-5:])
+    print("jz_tree:\n", results.pos[sort_by_mass_jz_tree][-5:],"\n")
+
+    print("Velocities 5 most massive:")
+    print("CAMELS:\n", vel_h[sort_by_mass_CAMELS][-5:])
+    print("jz_tree:\n", results.vel[sort_by_mass_jz_tree][-5:],"\n")
 
 @pytest.mark.skipif(not has_hfof, reason="requires hfof module installed")
 def test_vs_hfof_camels(camels_data, camels_jz_fof):
