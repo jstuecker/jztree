@@ -8,8 +8,10 @@ from fmdj.comm import get_rank_info
 import jztree
 from fmdj_utils.ics import gaussian_blob
 from fmdj.tools import cumsum_starting_with_zero, multi_to_dense
-
+from jztree.data import ParticleData
 from jztree.fof import Link, link_distributed, Label, insert_links
+import importlib
+has_discodj = importlib.util.find_spec("discodj") is not None
 
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 sharding = NamedSharding(mesh, P('gpus'))
@@ -86,3 +88,92 @@ def test_distr_fof(seed):
     igroup2 = jztree.fof.fof_z.jit(partz.pos, rlink=0.1)
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
+
+def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
+    G = 43.007105731706317
+    Hubble = 100.0
+    return 1e10 * omega_m * 3 * Hubble * Hubble / (8 * np.pi * G) * boxsize ** 3 / npart
+
+def dj_sim():
+    from discodj import DiscoDJ
+    from discodj.core.scatter_and_gather import ScatterGatherProperties
+
+    ndev = jax.device_count()
+
+    nres = np.int64(((np.cbrt(512**3 * ndev))//ndev)*ndev)
+
+    print(f"total grid dim {nres}, particles per GPU {np.cbrt(nres**3/ndev):.2f}**3")
+    
+    scat = ScatterGatherProperties(
+        res=nres,
+        res_pm=nres,
+        num_devices=ndev,
+        use_distributed_scatter_gather=True,
+        use_vjp_gather=False,
+        use_vjp_scatter=False,
+        scatter_gather_check=False
+    )
+
+    boxsize = 1000.
+
+    dj = DiscoDJ(dim=3, res=scat.res, boxsize=boxsize)
+    dj = dj.with_timetables()
+    pkstate = dj.with_linear_ps()
+    ics = dj.with_ics(pkstate, seed=0)
+    lpt_state = dj.with_lpt(ics, n_order=1)
+    sim_ini = dj.with_lpt_ics(lpt_state, n_order=1, a_ini=0.02)
+    X, P, a = dj.run_nbody(
+        sim_ini, a_end=1.0, n_steps=16, res_pm=scat.res_pm, stepper="bullfrog",
+        scatter_gather_props=scat
+    )
+
+    return X, P, a
+
+@pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+def test_discodj_fof():
+    mesh = jax.make_mesh((jax.device_count(),), ("gpus",))
+    ndev = jax.device_count()
+    boxsize = 1000.
+
+    pos, vel, a = jax.jit(dj_sim)()
+    pos, vel = pos.reshape(-1,3), vel.reshape(-1,3)
+    npart_tot = len(pos)
+    nper_dev = npart_tot // ndev
+
+    part = ParticleData(pos, vel)
+    
+    rlink = 0.2 * boxsize / np.cbrt(npart_tot)
+
+    @jax.jit
+    @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
+    def distr_fof(part):
+        rank = jax.lax.axis_index("gpus")
+
+        part = ParticleData(
+            jnp.pad(part.pos, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
+            jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan)
+        )
+
+        cfg = jztree.data.FofConfig()
+
+        partz, th = fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
+        labels = jztree.fof.distr_fof_z_with_tree(partz.pos, th, rlink=rlink)
+
+        # Warning!
+        # This Reduction looses particles lying on other tasks
+        # Fix this later!
+        idx = jnp.where(labels.irank == rank, labels.igroup, len(labels.igroup))
+        counts = jnp.zeros(len(labels.igroup)).at[idx].add(1)
+        counts = jnp.sort(counts, descending=True)
+        
+        return partz, labels, counts
+       
+    partz, labels, counts = distr_fof(part)
+
+    masses = counts.reshape(4,-1) * _particle_mass(0.3, 1000., npart_tot)
+
+    print("Masses:")
+    print(jnp.log10(masses[:,0:20].flatten() ))
+
+    assert (jnp.max(masses) >= 1e15) & (jnp.max(masses) <= 1e17)
