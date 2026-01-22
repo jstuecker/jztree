@@ -156,6 +156,7 @@ def test_discodj_fof():
         )
 
         cfg = jztree.data.FofConfig()
+        cfg.tree.alloc_fac_nodes = 1.2
 
         partz, th = fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
         labels = jztree.fof.distr_fof_z_with_tree(partz.pos, th, rlink=rlink)
@@ -171,9 +172,10 @@ def test_discodj_fof():
        
     partz, labels, counts = distr_fof(part)
 
-    masses = counts.reshape(4,-1) * _particle_mass(0.3, 1000., npart_tot)
+    masses = counts.reshape(ndev,-1) * _particle_mass(0.3, 1000., npart_tot)
 
     print("Masses:")
-    print(jnp.log10(masses[:,0:20].flatten() ))
+    masses = jax.device_put(masses[:,0:20].flatten(), jax.NamedSharding(mesh, P()))
+    print(masses)
 
     assert (jnp.max(masses) >= 1e15) & (jnp.max(masses) <= 1e17)
