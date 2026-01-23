@@ -1,11 +1,12 @@
-import jax
-import jax.numpy as jnp
 from dataclasses import dataclass, field
 from functools import partial
+from typing import List, Iterator
+import jax
+import jax.numpy as jnp
+
 from .config import TreeConfig
 from .comm import pcast_like, pcast_vma
 from .tools import set_range, inverse_of_splits, cumsum_starting_with_zero
-from typing import List, Iterator
 
 def static_field(*args, **kwargs):
     return field(*args, metadata=dict(static=True), **kwargs)

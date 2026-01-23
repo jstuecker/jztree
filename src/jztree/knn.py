@@ -1,12 +1,13 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
-from jztree_cuda import ffi_knn
-from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
-from .tools import conditional_callback, inverse_indices
+
 from .config import KNNConfig
 from .data import KNNData
+from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
+from .tools import conditional_callback, inverse_indices
 
+from jztree_cuda import ffi_knn
 jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")

@@ -1,19 +1,20 @@
 import numpy as np
+from typing import Tuple
 import jax
 import jax.numpy as jnp
-from jztree_cuda import ffi_fof
-from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy, distr_zsort_and_tree
-from .tools import conditional_callback
+from dataclasses import replace
+
 from .config import FofConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
-from jztree.data import InteractionList, PackedArray, TreeHierarchy, Pos
-from typing import Tuple
-from jztree.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
-from jztree.tree import simplify_interaction_list, dense_interaction_list
-from jztree.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
-from dataclasses import dataclass, replace
-from jztree.comm import pcast_vma, pcast_like
+from .data import InteractionList, PackedArray, TreeHierarchy, Pos
+from .tools import conditional_callback, inverse_of_splits, cumsum_starting_with_zero, offset_sum
+from .tools import div_ceil
+from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
+from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
+from .comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
+from .comm import all_to_all_request_children, pcast_vma, pcast_like
 
+from jztree_cuda import ffi_fof
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA")
 jax.ffi.register_ffi_target("InsertLinks", ffi_fof.InsertLinks(), platform="CUDA")
@@ -22,7 +23,6 @@ jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), plat
 # ------------------------------------------------------------------------------------------------ #
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
-
 
 def node_fof_and_ilist(
         node_ilist: InteractionList, isplit: jax.Array, 

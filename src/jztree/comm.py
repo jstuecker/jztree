@@ -1,12 +1,13 @@
-from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-import jax
-import jax.numpy as jnp
-from typing import Tuple, Any, TypeAlias
-from .tools import conditional_callback, cumsum_starting_with_zero, inverse_of_splits
-from jax.typing import ArrayLike
 from dataclasses import dataclass
 import numpy as np
 import os
+
+import jax
+import jax.numpy as jnp
+from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
+from typing import Tuple, Any, TypeAlias
+
+from .tools import conditional_callback, cumsum_starting_with_zero, inverse_of_splits
 
 # Currently jax doesn't have a typehint for pytrees. We simply define one ourselves for clarity
 Pytree: TypeAlias = Any
@@ -178,7 +179,7 @@ def send_to_left(x, axis_name, invalid_float=jnp.nan, invalid_int=0):
     return xin
 
 def get_pos(x):
-    if isinstance(x, jax.typing.ArrayLike):
+    if isinstance(x, jax.Array):
         return x
     else: # assume x is a pytree with .pos attribute
         return x.pos
@@ -320,7 +321,7 @@ def dynamic_all_gather(x, nsend, output=None, axis_name="gpus", verify=True):
 
     return jax.tree.map(comm, x, output), dev_spl
 
-def arange_for_comm(irank: jax.Array, x: jax.typing.ArrayLike, 
+def arange_for_comm(irank: jax.Array, x: jax.Array, 
                     num: jax.Array | int |None = None, axis_name="gpus"):
     rank = jax.lax.axis_index(axis_name)
     ndev = jax.lax.axis_size(axis_name)

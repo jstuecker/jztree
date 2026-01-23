@@ -3,6 +3,7 @@ import os
 import jax
 from jax.experimental import io_callback
 import jax.numpy as jnp
+
 from .config import LoggingConfig
 
 def conditional_callback(flag, f, *args, **kwargs):

@@ -1,5 +1,3 @@
-import jax
-import jax.numpy as jnp
 from dataclasses import dataclass
 
 @dataclass(unsafe_hash=True)
