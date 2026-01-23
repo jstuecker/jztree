@@ -65,3 +65,41 @@ gen.generate_ffi_module_file(
     functions = functions,
     includes = default_includes + ["../fof.cuh"]
 )
+
+# ------------------------------------------------------------------------------------------------ #
+#                                             tree.cuh                                             #
+# ------------------------------------------------------------------------------------------------ #
+
+functions = parse.get_functions_from_file(
+    str(HERE / "tree.cuh"),
+    names=["PosZorderSort", "FlagLeafBoundaries", "FindNodeBoundaries", "GetNodeGeometry", 
+           "SearchSortedZ", "GetBoundaryExtendPerLevel"],
+    only_kernels=False
+)
+
+functions["PosZorderSort"].par["size"].expression = "pos_in.element_count()/3"
+functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
+
+functions["FlagLeafBoundaries"].par["size_part"].expression = "posz.element_count()/3"
+functions["FlagLeafBoundaries"].grid_size_expression = "div_ceil(size_part+1, block_size)"
+functions["FlagLeafBoundaries"].smem_size_expression = "(block_size + 2*scan_size + 1) * sizeof(int32_t)"
+
+functions["FindNodeBoundaries"].par["size_nodes"].expression = "nodes_levels->element_count()"
+functions["FindNodeBoundaries"].grid_size_expression = "div_ceil(size_nodes, block_size)"
+
+functions["GetNodeGeometry"].par["size_nodes"].expression = "level->element_count()"
+functions["GetNodeGeometry"].par["size_part"].expression = "pos.element_count()/3"
+functions["GetNodeGeometry"].grid_size_expression = "div_ceil(size_nodes, block_size)"
+
+functions["SearchSortedZ"].par["n_have"].expression = "posz_have.element_count()/3"
+functions["SearchSortedZ"].par["n_query"].expression = "posz_query.element_count()/3"
+functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"
+
+functions["GetBoundaryExtendPerLevel"].par["size"].expression = "posz.element_count()/3"
+functions["GetBoundaryExtendPerLevel"].template_par["left"].instances = ["true", "false"]
+
+gen.generate_ffi_module_file(
+    output_file = str(HERE / "generated/ffi_tree.cu"), 
+    functions = functions, 
+    includes = default_includes + ["../tree.cuh"]
+)

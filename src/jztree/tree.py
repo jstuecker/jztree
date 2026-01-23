@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from typing import Tuple
-from fmdj_cuda import ffi_tree
+from jztree_cuda import ffi_tree
 from .tools import conditional_callback, div_ceil
 from .data import TreePlane, Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .config import TreeConfig
