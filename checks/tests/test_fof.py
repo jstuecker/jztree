@@ -25,20 +25,12 @@ def test_vs_hfof_uniform():
     igr_jz = jztree.fof.fof.jit(pos, rlink=rlink, boxsize=boxsize)
     igr_hfof = fof(pos, rlink, boxsize=boxsize)
 
-    # uniquely map every jzfof-label to an hfof-label
-    label_map = jnp.zeros(len(pos), dtype=jnp.int32).at[igr_jz].set(igr_hfof)
-    label_map_rev = jnp.arange(len(pos), dtype=jnp.int32).at[igr_hfof].set(igr_jz)
-
-    igr_hfof_jz = label_map[igr_jz]
-    igr_jz_hfof = label_map_rev[igr_hfof]
-
-    assert igr_hfof_jz == pytest.approx(igr_hfof)
-    assert igr_jz_hfof == pytest.approx(igr_jz)
+    # Since labels may differ, test set wise >= from both directions
+    assert jztree.fof.fof_is_superset(igr_hfof, igr_jz)
+    assert jztree.fof.fof_is_superset(igr_jz, igr_hfof)
 
     group_sizes_jz = jnp.sort(jnp.bincount(igr_jz, minlength=len(pos)))[::-1]
     group_sizes_hfof = jnp.sort(jnp.bincount(igr_hfof, minlength=len(pos)))[::-1]
-
-    # print(group_sizes_jz[0:10])
 
     assert group_sizes_jz == pytest.approx(group_sizes_hfof)
 

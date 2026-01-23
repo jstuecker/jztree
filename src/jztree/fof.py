@@ -616,6 +616,21 @@ def distr_fof(part: fmdj.data.Pos, npart_tot: int, rlink: float, boxsize: float 
 
     return partz, labels
 
+# ------------------------------------------------------------------------------------------------ #
+#                                Functions for interpreting FoF Data                               #
+# ------------------------------------------------------------------------------------------------ #
+
+def fof_is_superset(igroup_sup, igroup):
+    """Checks whether every FoF group in igroup_up is a superset of sets in igroup_low"""
+    # For this we need to check that if we link groups together as indicated by the super-grouping
+    # that they are identical to the super groups
+
+    # indicates the super group of each label in igroup
+    label_map = jnp.zeros(len(igroup), dtype=jnp.int32).at[igroup].set(igroup_sup)
+    
+    return jnp.all(igroup_sup == label_map[igroup])
+
+
 def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
                   boxsize : float, mpart : float | None = None, Nmin : int = 20):
     ''' Reduce particle data to FOF group data.
