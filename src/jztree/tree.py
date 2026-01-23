@@ -18,7 +18,7 @@ jax.ffi.register_ffi_target("FlagLeafBoundaries", ffi_tree.FlagLeafBoundaries(),
 jax.ffi.register_ffi_target("FindNodeBoundaries", ffi_tree.FindNodeBoundaries(), platform="CUDA")
 jax.ffi.register_ffi_target("GetNodeGeometry", ffi_tree.GetNodeGeometry(), platform="CUDA")
 jax.ffi.register_ffi_target("GetBoundaryExtendPerLevel", ffi_tree.GetBoundaryExtendPerLevel(), platform="CUDA")
-
+jax.ffi.register_ffi_target("CenterOfMass", ffi_tree.CenterOfMass(), platform="CUDA")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                         Helper Functions                                         #
@@ -214,6 +214,26 @@ def distr_zsort_and_tree(part: Pos, npart_tot: int, cfg_tree: TreeConfig
 
     return partz, th
 
+def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True, block_size=32
+                   ) -> PosMass:
+    """Computes the center of mass of the nodes in the tree plane"""
+    assert part.pos.dtype == jnp.float32
+    assert ispl.dtype == jnp.int32
+
+    out_xcent = jax.ShapeDtypeStruct((ispl.size-1, 4), part.pos.dtype)
+
+    xm = jax.ffi.ffi_call("CenterOfMass", (out_xcent,))(
+        ispl, part.pos, part.mass,
+        kahan = kahan_summation,
+        block_size=np.uint64(block_size)
+    )[0]
+
+    xm = jax.lax.pcast(xm, tuple(jax.typeof(part.pos).vma), to="varying")
+
+    return PosMass(pos=xm[...,0:3], mass=xm[...,4])
+center_of_mass.jit = jax.jit(center_of_mass, static_argnames=['kahan_summation', 'block_size'])
+
+
 # ------------------------------------------------------------------------------------------------ #
 #                                       Domain Decomposition                                       #
 # ------------------------------------------------------------------------------------------------ #
@@ -384,9 +404,6 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
 
 def get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedArray, PackedArray]:
     prop_array_spl = cumsum_starting_with_zero(ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1)
-
-    # Need to fix this later
-    from fmdj.multipoles import center_of_mass
 
     def handle_mcent_level(i, carry):
         node_mcent, node_mass, posm = carry

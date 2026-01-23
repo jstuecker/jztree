@@ -95,7 +95,7 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "tree.cuh"),
-    names=["FlagLeafBoundaries", "FindNodeBoundaries", "GetNodeGeometry", 
+    names=["FlagLeafBoundaries", "FindNodeBoundaries", "GetNodeGeometry", "CenterOfMass",
            "GetBoundaryExtendPerLevel"],
     only_kernels=False
 )
@@ -113,6 +113,10 @@ functions["GetNodeGeometry"].grid_size_expression = "div_ceil(size_nodes, block_
 
 functions["GetBoundaryExtendPerLevel"].par["size"].expression = "posz.element_count()/3"
 functions["GetBoundaryExtendPerLevel"].template_par["left"].instances = ["true", "false"]
+
+functions["CenterOfMass"].grid_size_expression = "div_ceil(isplit.element_count() - 1, block_size)"
+functions["CenterOfMass"].par["nnodes"].expression = "isplit.element_count() - 1"
+
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tree.cu"), 

@@ -321,4 +321,52 @@ __global__ void GetNodeGeometry(
     extent[idx] = node_ext.extent;
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                         Center of Mass                                         */
+/* ---------------------------------------------------------------------------------------------- */
+
+__global__ void CenterOfMass(
+    const int* __restrict__ isplit,
+    const float3* __restrict__ pos,
+    const float* __restrict__ mass,
+    PosMass* __restrict__ com_out,
+    int nnodes,
+    bool kahan
+) {
+    int inode = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (inode >= nnodes)
+        return;
+
+    int istart = isplit[inode], iend = isplit[inode + 1];
+
+    if(istart >= iend) {
+        com_out[inode] = {CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F};
+        return;
+    }
+    
+    float4 mp_sum = {0.f, 0.f, 0.f, 0.f};
+    float4 mp_kahan = {0.f, 0.f, 0.f, 0.f};
+
+    for(int ip = istart; ip < iend; ip++) {
+        float m = mass[ip];
+        float4 mpnew = {m, pos[ip].x * m, pos[ip].y * m, pos[ip].z * m};
+
+        if(kahan)
+            kahan_add_f4(mp_sum, mpnew, mp_kahan);
+        else
+            mp_sum = mp_sum + mpnew;
+    }
+
+    if (mp_sum.x > 0.f) {
+        PosMass out;
+        out.pos = (1.f / mp_sum.x) * make_float3(mp_sum.y, mp_sum.z, mp_sum.w);
+        out.mass = mp_sum.x;
+        com_out[inode] = out;
+    }
+    else {
+        com_out[inode].f4 = make_float4(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
+    }
+}
+
 #endif // TREE_H
