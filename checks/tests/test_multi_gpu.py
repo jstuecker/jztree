@@ -1,15 +1,15 @@
-import fmdj
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-from fmdj.comm import get_rank_info
-import jztree
+from jztree.comm import get_rank_info
 from fmdj_utils.ics import gaussian_blob
-from fmdj.tools import cumsum_starting_with_zero, multi_to_dense
-from jztree.data import ParticleData
-from jztree.fof import Link, link_distributed, Label, insert_links
+from jztree.config import FofConfig
+from jztree.tools import cumsum_starting_with_zero, multi_to_dense
+from jztree.data import ParticleData, Link, Label
+from jztree.ztree import distr_zsort_and_tree, pos_zorder_sort
+from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_z
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
@@ -56,20 +56,20 @@ def test_distributed_links(nperdev):
     assert jnp.all(igroup_a == igroup_b)
 
 def particles_and_tree(seed=0):
-    cfg = jztree.data.FofConfig()
+    cfg = FofConfig()
     rank, ndev, axis_name = get_rank_info()
     npart_tot = 1024*1024*ndev
 
     part = gaussian_blob(1024*1024, npad=1024*128*3, seed=rank+seed)
 
-    return fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
+    return distr_zsort_and_tree(part, npart_tot, cfg.tree)
 
 @jax.jit
 @jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
 def distr_fof(seed):
     rank, ndev, axis_name = get_rank_info()
     partz, th = particles_and_tree(seed)
-    igroup = jztree.fof.distr_fof_z_with_tree(partz.pos, th, rlink=0.1, linearize_labels=True)
+    igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.1, linearize_labels=True)
 
     num = jax.lax.all_gather(jnp.sum(~jnp.isnan(partz.pos[...,0]), axis=0), axis_name)
     dspl = cumsum_starting_with_zero(num)
@@ -84,8 +84,8 @@ def test_distr_fof(seed):
     # combine arrays into one:
     igroup1 = multi_to_dense.jit(igroup1, dev_spl[0])
 
-    partz = fmdj.ztree.pos_zorder_sort.jit(partz)[0]
-    igroup2 = jztree.fof.fof_z.jit(partz.pos, rlink=0.1)
+    partz = pos_zorder_sort.jit(partz)[0]
+    igroup2 = fof_z.jit(partz.pos, rlink=0.1)
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
 
@@ -155,11 +155,11 @@ def test_discodj_fof():
             jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan)
         )
 
-        cfg = jztree.data.FofConfig()
+        cfg = FofConfig()
         cfg.tree.alloc_fac_nodes = 1.2
 
-        partz, th = fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
-        labels = jztree.fof.distr_fof_z_with_tree(partz.pos, th, rlink=rlink)
+        partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
+        labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink)
 
         # Warning!
         # This Reduction looses particles lying on other tasks

@@ -1,12 +1,7 @@
-import fmdj
 import pytest
-from fmdj.config import Config, FMMConfig
 import jax
 import jax.numpy as jnp
-import fmdj.fmm
-from fmdj.config import Config, FMMConfig
-from dataclasses import replace
-from fmdj.tools import conditional_callback
+from jztree.tools import conditional_callback
 from jax.experimental import io_callback
 from jztree.fof import masked_min_scatter
 

@@ -1,9 +1,11 @@
 import jax
 import jax.numpy as jnp
-import jztree as jz
 import pytest
 import numpy as np
 from scipy.spatial import cKDTree
+from jztree.config import KNNConfig
+from jztree.knn import knn_z, segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z_new, evaluate_knn, knn
+from jztree.ztree import pos_zorder_sort
 
 def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
     pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)
@@ -20,7 +22,7 @@ def test_segment_sort():
     r = jax.random.uniform(jax.random.PRNGKey(1), (spl[-1],), minval=0, maxval=1)
 
     ikey  = jnp.arange(len(r))
-    rnew, inew = jz.knn.segment_sort(r, ikey, spl, smem_size=64)
+    rnew, inew = segment_sort(r, ikey, spl, smem_size=64)
 
     # for this test, we can emulate a segmented sort through a lexsort in jax
     # (it takes a factor 10 longer though)
@@ -31,8 +33,8 @@ def test_segment_sort():
     assert jnp.all(rnew == r[inew2])
 
 def check_against_ckdtree(posz, k=16, boxsize=0.):
-    cfg = jz.knn.KNNConfig()
-    rnn, inn = jz.knn.knn_z(posz, k=k, boxsize=boxsize, cfg=cfg)
+    cfg = KNNConfig()
+    rnn, inn = knn_z(posz, k=k, boxsize=boxsize, cfg=cfg)
 
     tree = cKDTree(np.array(posz), boxsize=boxsize)
     rnn2, inn2 = tree.query(np.array(posz), k=k)
@@ -49,28 +51,28 @@ def check_against_ckdtree(posz, k=16, boxsize=0.):
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("xmin,xmax", [(-0.3,0.7), (0.1, 0.4), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_domain(xmin, xmax):
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=xmin, xmax=xmax))
+    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=xmin, xmax=xmax))
 
     check_against_ckdtree(posz)
 
 @pytest.mark.shrink_in_quick(keep_index=3)
 @pytest.mark.parametrize("k", [4,8,12,16,32,64])
 def test_k(k):
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10.))
+    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10.))
 
     check_against_ckdtree(posz, k=k)
 
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("boxsize", [0.03,1.,170.])
 def test_boxisze(boxsize):
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=boxsize))
+    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=boxsize))
 
     check_against_ckdtree(posz, boxsize=boxsize)
 
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("npart", [1e5, 1e6, 4e6])
 def test_npart(npart):
-    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
+    posz, idz = pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
 
     check_against_ckdtree(posz)
 
@@ -78,10 +80,10 @@ def test_npart(npart):
 def test_query_skip():
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
 
-    data = jz.knn.prepare_knn.jit(pos0, k=16)
+    data = prepare_knn.jit(pos0, k=16)
 
-    rnnz, innz = jz.knn.evaluate_knn_z.jit(data)
-    rnnz2, innz2 = jz.knn.evaluate_knn_z.jit(data, posz_query=data.posz[::2])
+    rnnz, innz = evaluate_knn_z.jit(data)
+    rnnz2, innz2 = evaluate_knn_z.jit(data, posz_query=data.posz[::2])
 
     assert jnp.all(rnnz[::2] == rnnz2)
     print(jnp.all(innz[::2] == innz2))
@@ -89,14 +91,14 @@ def test_query_skip():
 def test_io_order():
     # tests (and demonstrates) the different output/input ordering options
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
-    posz, idz = jz.tree.pos_zorder_sort.jit(pos0)
+    posz, idz = pos_zorder_sort.jit(pos0)
 
-    data = jz.knn.prepare_knn.jit(pos0, k=16)
-    dataz = jz.knn.prepare_knn_z_new.jit(posz, k=16)
+    data = prepare_knn.jit(pos0, k=16)
+    dataz = prepare_knn_z_new.jit(posz, k=16)
 
-    rnn00, inn00 = jz.knn.evaluate_knn.jit(data)    # ids and outputs in original order
-    rnn0z, inn0z = jz.knn.evaluate_knn_z.jit(data)   # ids original order, outputs in z-order
-    rnnzz, innzz = jz.knn.evaluate_knn_z.jit(dataz)  # ids and outputs in z-order
+    rnn00, inn00 = evaluate_knn.jit(data)    # ids and outputs in original order
+    rnn0z, inn0z = evaluate_knn_z.jit(data)   # ids original order, outputs in z-order
+    rnnzz, innzz = evaluate_knn_z.jit(dataz)  # ids and outputs in z-order
 
     print("radii only depent on output order:")
     assert jnp.all(rnn00[data.idz] == rnn0z)
@@ -112,9 +114,9 @@ def test_twice_knn():
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
 
     def twice_knn(pos0):
-        rnn, inn = jz.knn.knn(pos0, k=16)
+        rnn, inn = knn(pos0, k=16)
         pos0 = pos0 + rnn[:,0:1] * 1e-3 # Basically adds zero, since nearest neighbor distance is 0
-        rnn, inn = jz.knn.knn(pos0, k=16)
+        rnn, inn = knn(pos0, k=16)
         return rnn, inn
     twice_knn.jit = jax.jit(twice_knn)
 
@@ -130,8 +132,8 @@ def test_twice_query():
     posb = get_pos(1024*32, xmin=0., xmax=1.0, seed=3)
 
     def twice_knn(pos0, posa, posb):
-        rnna, inn = jz.knn.knn(pos0, k=16, pos_query=posa)
-        rnnb, inn = jz.knn.knn(pos0, k=16, pos_query=posb)
+        rnna, inn = knn(pos0, k=16, pos_query=posa)
+        rnnb, inn = knn(pos0, k=16, pos_query=posb)
         return 0.5*(rnna+rnnb), inn
     twice_knn.jit = jax.jit(twice_knn)
 
@@ -145,13 +147,13 @@ def test_scan_knn():
     pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
 
     def myknn(pos0, i):
-        rnn, inn = jz.knn.knn(pos0, k=16)
+        rnn, inn = knn(pos0, k=16)
         return pos0+1e-3, jnp.mean(rnn)
     myknn.jit = jax.jit(myknn)
 
     pos, rmean = jax.lax.scan(myknn, pos0, jnp.arange(0,10))
 
-    rmean2 = jnp.mean(jz.knn.knn(pos, k=16)[0])
+    rmean2 = jnp.mean(knn(pos, k=16)[0])
 
     assert jnp.allclose(rmean, rmean2)
 
@@ -163,8 +165,8 @@ def test_scan_query():
 
     def myknn(carry, i):
         pos0, posa, posb = carry
-        rnna, inna = jz.knn.knn(pos0, k=16, pos_query=posa)
-        rnnb, innb = jz.knn.knn(pos0, k=16, pos_query=posb)
+        rnna, inna = knn(pos0, k=16, pos_query=posa)
+        rnnb, innb = knn(pos0, k=16, pos_query=posb)
         return (pos0+rnna[0,0], posa+rnnb[0,0], posb+rnnb[0,0]), jnp.mean(rnna + rnnb)
     # myknn.jit = jax.jit(myknn)
 

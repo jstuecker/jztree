@@ -1,0 +1,608 @@
+import numpy as np
+import jax
+import jax.numpy as jnp
+
+from typing import Tuple
+from fmdj_cuda import ffi_tree
+from .tools import conditional_callback, div_ceil
+from .data import TreePlane, Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
+from .config import TreeConfig
+from .tools import cumsum_starting_with_zero, masked_prefix_sum, div_ceil
+from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
+from dataclasses import replace
+
+jax.ffi.register_ffi_target("PosZorderSort", ffi_tree.PosZorderSort(), platform="CUDA")
+jax.ffi.register_ffi_target("FlagLeafBoundaries", ffi_tree.FlagLeafBoundaries(), platform="CUDA")
+jax.ffi.register_ffi_target("FindNodeBoundaries", ffi_tree.FindNodeBoundaries(), platform="CUDA")
+jax.ffi.register_ffi_target("GetNodeGeometry", ffi_tree.GetNodeGeometry(), platform="CUDA")
+jax.ffi.register_ffi_target("SearchSortedZ", ffi_tree.SearchSortedZ(), platform="CUDA")
+jax.ffi.register_ffi_target("GetBoundaryExtendPerLevel", ffi_tree.GetBoundaryExtendPerLevel(), platform="CUDA")
+
+
+# ------------------------------------------------------------------------------------------------ #
+#                                         Helper Functions                                         #
+# ------------------------------------------------------------------------------------------------ #
+
+def lvl_to_ext(level_binary):
+    olvl, omod = level_binary//3, level_binary % 3
+    levels_3d = jnp.stack((olvl, olvl + (omod >= 2).astype(jnp.int32), olvl + (omod >= 1).astype(jnp.int32)),axis=-1)
+    return 2.**levels_3d
+
+def get_node_box(x, level_binary):
+    node_size = lvl_to_ext(level_binary)
+    node_cent = x + jnp.sign(x)*(0.5 * node_size - jnp.mod(jnp.abs(x), node_size))
+    return node_cent, node_size
+
+# ------------------------------------------------------------------------------------------------ #
+#                                             FFI Calls                                            #
+# ------------------------------------------------------------------------------------------------ #
+
+def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
+    assert x.dtype == jnp.float32
+    assert x.shape[-1] == 3
+
+    # To optimize memory layout, we bundle position and id together into a single array
+    # We later need to reinterprete the output to extract positions and ids
+    out_type = jax.ShapeDtypeStruct((x.shape[0],4), jnp.int32)
+    # This is a guess, how much a temporary storage in cub::DeviceMergeSort::SortKeys requires
+    # If we estimate too little, an error will be thrown from the C++ code:
+    tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), 4), jnp.int32)
+    isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type), vmap_method="sequential")(x, block_size=np.uint64(block_size))[0]
+
+    pos = isort[:, :3].view(jnp.float32)
+    ids = isort[:, 3].view(jnp.int32)
+
+    return pos, ids
+
+def pos_zorder_sort(x: jax.Array | Pos):
+    """Brings 3d-positions into z-order
+
+    If x is a pytree, it needs to have a "pos" attribute which will be used as the sorting key. 
+    All remaining leaves of the pytree will be sorted accordingly along the leading axis (which 
+    should have consistent length)
+    """
+    @jax.custom_vjp
+    def eval(x):
+        if isinstance(x, jax.Array):
+            return _pos_zorder_sort_impl(x)
+        else: # assuming x is a pytree with x.pos attribute
+            posz, idz = _pos_zorder_sort_impl(x.pos)
+            def apply_sort(val):
+                return val[idz]
+            out = jax.tree.map(apply_sort, x)
+            out.pos = posz # overwiting here allows jit to discard the unnecessary position gather
+
+            return out, idz
+    
+    def eval_fwd(x):
+        pos, idz = eval(x)
+        return (pos, idz), idz
+    
+    def eval_bwd(idz, g):
+        gxout, gids = g
+        # Scatter the gradients back to the original ordering
+        idinv = jnp.zeros_like(idz).at[idz].set(jnp.arange(len(idz), dtype=idz.dtype))
+        
+        return (jax.tree.map(lambda x: x[idinv], gxout),)
+    
+    eval.defvjp(eval_fwd, eval_bwd)
+
+    return eval(x)
+pos_zorder_sort.jit = jax.jit(pos_zorder_sort)
+
+def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
+    """Finds the indices in xz where elements of xz_query would be inserted to keep order.
+    This is similar to np.searchsorted, but works for 3D points sorted in Z-order.
+    On equality maintains the rule: xz[idx] < v <= xz[idx+1]
+    if leaf_search is True, it is assumed that xz contains one point per leaf and we 
+    return the index of the leaf that the query point belongs to.
+    """
+    assert xz.dtype ==  xz_query.dtype == jnp.float32
+    assert xz.shape[-1] == xz_query.shape[-1] == 3
+
+    out_type = jax.ShapeDtypeStruct((xz_query.shape[0],), jnp.int32)
+    inds = jax.ffi.ffi_call("SearchSortedZ", (out_type,))(
+        xz, xz_query, block_size=np.uint64(block_size), leaf_search=leaf_search)[0]
+    return inds
+search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "leaf_search"))
+
+def detect_leaf_boundaries(
+        posz: jax.Array, leaf_size: int = 32, lvl_bound = (388, 388),
+        block_size: int = 64, alloc_size: int | None = None
+    ) -> jax.Array:
+    if alloc_size is None:
+        alloc_size = int(div_ceil(len(posz), np.maximum(leaf_size//2, 1))) + 1
+
+    out_type = jax.ShapeDtypeStruct((posz.shape[0]+1,), jnp.int8)
+
+    npart = jnp.sum(~jnp.isnan(posz[...,0]))
+
+    flag_split = jax.ffi.ffi_call("FlagLeafBoundaries", (out_type,), vmap_method="sequential")(
+        posz, jnp.asarray(lvl_bound), npart, max_size=np.int32(leaf_size),
+        block_size=np.uint64(block_size), scan_size=np.int32(leaf_size+1)
+    )[0]
+
+    # Check that the allocation was big enough
+    def alloc_err(filled, size):
+        raise RuntimeError(f"Coarsen Leaves: allocation too small: filled {filled}, size {size}.\n"
+                            "Increase alloc_fac_nodes in FMMConfig.")
+    nfilled = jnp.sum(flag_split)
+    flag_split = flag_split + conditional_callback(
+        nfilled > alloc_size, alloc_err, nfilled, alloc_size,
+    )
+    
+    splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
+
+    return splits
+detect_leaf_boundaries.jit = jax.jit(detect_leaf_boundaries, static_argnames=("leaf_size", "block_size"))
+
+def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: jnp.array = None) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    """Builds a Z-order tree from positions"""
+    if nleaves is None:
+        nleaves = jnp.array(len(posz))
+    nleaves = jnp.minimum(len(posz), nleaves)
+    
+    # Set domain boundaries to behave like infinities
+    # Note that this is fine for multi-GPU, because we ensure in advance that no
+    # top-node intersects the boundary.
+    pos_bound = jnp.full((2,3), jnp.nan, dtype=posz.dtype)
+
+    out_types = (jax.ShapeDtypeStruct((posz.shape[0]+1,), jnp.int32),)*3
+    lvl, lbound, rbound = jax.ffi.ffi_call("FindNodeBoundaries", out_types)(
+        posz, pos_bound, nleaves, block_size=np.uint64(block_size)
+    )
+
+    return lvl, lbound, rbound
+determine_znode_boundaries.jit = jax.jit(determine_znode_boundaries)
+
+def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array, 
+                      num: jnp.array = None, block_size: int = 64
+                      ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    assert lbound.shape == rbound.shape    
+
+    if num is None:
+        num = jnp.array(len(lbound))
+
+    out_types = (jax.ShapeDtypeStruct((lbound.shape[0],), jnp.int32),
+                 jax.ShapeDtypeStruct((lbound.shape[0], 3), jnp.float32),
+                 jax.ShapeDtypeStruct((lbound.shape[0], 3), jnp.float32))
+    
+    lvl, node_cent, node_ext = jax.ffi.ffi_call("GetNodeGeometry", out_types)(
+        posz, lbound, rbound, num, block_size=np.uint64(block_size)
+    )
+
+    return lvl, node_cent, node_ext
+get_node_geometry.jit = jax.jit(get_node_geometry)
+
+def distr_boundary_extend(posz, npart=None, block_size: int = 64):
+    rank, ndev, axis_name = get_rank_info()
+
+    if npart is None:
+        npart = jnp.sum(~jnp.isnan(posz[...,0]))
+    
+    nlevels = 388 + 450 + 1
+    out_types = (jax.ShapeDtypeStruct((nlevels,), jnp.int32),)
+
+    irange = jnp.array([0, npart])
+
+    # Distance from the left boundary where each levels node ends
+    xleft = send_to_right(posz[npart-1], axis_name, invalid_float=-jnp.inf)
+    ext_lr = jax.ffi.ffi_call("GetBoundaryExtendPerLevel", out_types)(
+        xleft, irange, posz, block_size=np.uint64(block_size), left=True
+    )[0]
+
+    # Distance from the right boundary where each levels node starts
+    xright = send_to_left(posz[0], axis_name, invalid_float=jnp.inf)
+    ext_rl = jax.ffi.ffi_call("GetBoundaryExtendPerLevel", out_types)(
+        xright, irange, posz, block_size=np.uint64(block_size), left=False
+    )[0]
+
+    ext_rr = send_to_left(ext_lr, axis_name, invalid_int=0)
+    ext_ll =  send_to_right(ext_rl-npart, axis_name, invalid_int=0)
+
+    return ext_ll, ext_lr, ext_rl, ext_rr
+
+def distr_zsort_and_tree(part: Pos, npart_tot: int, cfg_tree: TreeConfig
+                         ) -> Tuple[Pos, TreeHierarchy]:
+    partz = distributed_zsort(part, nsamp=cfg_tree.nsamp)
+
+    top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
+    partz, npart, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
+
+    th = build_tree_hierarchy(partz, cfg_tree, npart_tot=npart_tot, lvl_bound=lvl_bound)
+
+    return partz, th
+
+# ------------------------------------------------------------------------------------------------ #
+#                                       Domain Decomposition                                       #
+# ------------------------------------------------------------------------------------------------ #
+
+def get_pos(x):
+    if isinstance(x, jax.Array):
+        return x
+    else: # assume x is a pytree with .pos attribute
+        return x.pos
+
+def determine_npart(x):
+    """Determines the number of valid particles (that are not nan)"""
+    valid = ~jnp.isnan(get_pos(x))
+    return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
+
+def distributed_zsort(x: jax.Array | Pos, nsamp: int = 1024):
+    rank, ndev, axis_name = get_rank_info()
+
+    if ndev == 1:
+        return pos_zorder_sort(x)[0]
+
+    pos = get_pos(x)
+
+    npart = determine_npart(x)
+    nparttot = jax.lax.psum(npart, axis_name=axis_name)
+
+    # Sample based domain decomposition
+    key = jax.random.key(0)
+    isamp = jax.random.randint(key, shape=(nsamp,), minval=0, maxval=npart)
+    posall = jax.lax.all_gather(pos[isamp], axis_name=axis_name, tiled=True)
+    xpivot = pos_zorder_sort(posall)[0][nsamp::nsamp]
+    xpivot = jnp.pad(xpivot, ((1,1), (0,0)), constant_values=jnp.inf).at[0].set(-jnp.inf)
+
+    # Now organize and determine which chunks need to be send to each rank
+    xz, idz = pos_zorder_sort(x)
+    spl = search_sorted_z(get_pos(xz), xpivot)
+
+    def err(n1, n2):
+        raise MemoryError(f"Size of buffer is too small: need {n1}, have {n2}.\n")
+    nneed = jnp.max(spl[1:] - spl[:-1])
+    spl = spl + conditional_callback(nneed > pos.shape[0], err, nneed, pos.shape[0])
+
+    from .comm import all_to_all_with_splits, global_splits
+
+    x = all_to_all_with_splits(xz, spl, axis_name=axis_name)[0]
+    xz, idz = pos_zorder_sort(x)
+
+    # We have posz globally and locally in z-order now
+    # Let's do another communication step to improve the balance
+    npart = determine_npart(xz)
+    spl_have = global_splits(npart, axis_name=axis_name)
+    spl_target = (jnp.arange(0, ndev+1) * (nparttot // ndev)).at[-1].set(nparttot)
+    spl_send = jnp.clip(spl_target - spl_have[rank], 0, npart)
+
+    xz = all_to_all_with_splits(xz, spl_send, axis_name=axis_name)[0]
+
+    return xz
+distributed_zsort.jit = jax.jit(distributed_zsort, static_argnames="nsamp")
+
+def adjust_domain_for_nodesize(xz: jax.Array | Pos, max_node_size: int, npart: int = None):
+    """Shifts particles so that nodes with size <= max_node_size always lie on a single GPU"""
+    rank, ndev, axis_name = get_rank_info()
+
+    if npart is None:
+        npart = determine_npart(xz)
+
+    ext_ll, ext_lr, ext_rl, ext_rr = distr_boundary_extend(get_pos(xz), npart=npart)
+    npart_l = ext_lr - ext_ll
+    
+    ilvl_max = jnp.max(jnp.where(npart_l <= max_node_size, jnp.arange(len(npart_l)), -1))
+
+    npshift = ext_lr[ilvl_max]
+
+    xz, npart = shift_particles_left(xz, npshift, max_send=max_node_size, npart=npart)
+
+    # Find the level of the new boundary
+    posz = get_pos(xz)
+
+    xr = send_to_left(posz[0], axis_name)
+    xl = send_to_right(posz[npart-1], axis_name)
+
+    lvl_bound = get_node_geometry(
+        jnp.array([xl, posz[0], posz[npart-1], xr]), 
+        lbound=jnp.array([0,2]), rbound=jnp.array([2,4]), num=2
+    )[0]
+
+    return xz, npart, lvl_bound
+adjust_domain_for_nodesize.jit = jax.jit(adjust_domain_for_nodesize, static_argnames="max_node_size")
+
+# ------------------------------------------------------------------------------------------------ #
+#                                      Tree Building Functions                                     #
+# ------------------------------------------------------------------------------------------------ #
+
+def estimate_node_number(npart, max_node_size, alloc_fac=1.):
+    """Gives an estimate of the number of nodes
+    
+    Assumes that particles are grouped in z-order into nodes that have <= node_size particles each.
+    """
+    # Since most nodes with size <= max_node_size/2 can be grouped, we generally get a reasonably 
+    # safe estimate by dividing node_size/2. However, the estimate is not totally guaranteed, since
+    # imbalanced distributions may require some nodes with size >= max_node_size/2 may block
+    # multiple nodes with size <= max_node_size/2 from being summarized.
+    return int(div_ceil(npart*alloc_fac, np.maximum(max_node_size//2, 1))) + 1
+
+def define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
+    max_num_leaves = estimate_node_number(npart, cfg_tree.max_leaf_size)
+
+    nlevels = np.log(max_num_leaves / cfg_tree.stop_coarsen) / np.log(cfg_tree.coarse_fac)
+    nlevels = np.maximum(int(np.ceil(nlevels)), 1)
+
+    node_sizes = [int(cfg_tree.max_leaf_size * (cfg_tree.coarse_fac ** i)) for i in range(0, nlevels)]
+
+    return node_sizes
+
+def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: int,
+                           lvl_bound = (388,388)) -> Tuple[jax.Array, PackedArray, PackedArray]:
+    """Finds the splitting point of the tree hierarchy
+
+    returns
+      ispl: the splitting points of leafs in the particle array
+      ispl_n2n: a PackedArray that defines the node to node splitting points per level
+      ispl_n2l: a PackedArray that defines the node to leaf splitting points per level
+    """
+    nlevels = len(node_sizes)
+    
+    ispl =  detect_leaf_boundaries(posz, leaf_size=node_sizes[0], alloc_size=alloc_size, lvl_bound=lvl_bound)
+
+    nleaves = jnp.argmax(ispl)
+    lvl, lbound, rbound = determine_znode_boundaries(posz[ispl[:-1]], nleaves=nleaves)
+
+    npart_node = ispl[rbound] - ispl[lbound]
+
+    # At each level of the hierarchy, the active nodes are determined by the node sizes
+    active_on_level = npart_node[None,:] > jnp.array(node_sizes, dtype=jnp.int32)[:,None]
+    # Additionally we need to activate domain boundary nodes that lie above the boudary level
+    active_on_level = active_on_level | ((lbound <= 0) & (lvl > lvl_bound[0]))
+    active_on_level = active_on_level | ((rbound >= nleaves) & (lvl > lvl_bound[1]))
+    # Calculate a prefix accross hierarchy levels to densly stack the nodes later
+    offsets = jnp.cumsum(active_on_level.flatten()).reshape(active_on_level.shape)
+    level_spl = jnp.pad(offsets[:,-1], (1,0), constant_values=0) # save level start/end points
+    nnodes_on_level = level_spl[1:] - level_spl[:-1] - 1 # -1 since splits are always 1 larger than nodes
+
+    # Check that the allocation is big enough
+    def alloc_err(filled, size):
+        raise RuntimeError(f"Tree allocation too small: filled {filled}, size {size}.\n"
+                            "Increase alloc_fac_nodes in Config")
+    level_spl = level_spl + conditional_callback(
+        level_spl[-1] > alloc_size, alloc_err, level_spl[-1], alloc_size,
+    )
+
+    # correct offsets to exclude the element at hand and invalidate inactive elements:
+    offsets = jnp.where(active_on_level, offsets - active_on_level, alloc_size)
+    
+    # node-to-leaf relation is given by the leaf that is active at the node location
+    ispl_n2l = jnp.zeros(alloc_size, dtype=jnp.int32).at[offsets].set(offsets[0:1,:])
+    ispl_n2l = PackedArray.from_data(ispl_n2l, level_spl, fill_values=nnodes_on_level[0])
+
+    # node-to-node relation is given by the last level node that is active at the node location
+    # for the leaf-level we insert the leaf to particle relation here
+    ilevel = jnp.arange(nlevels)
+    value = jnp.where(ilevel[:,None] == 0, ispl, offsets[ilevel-1,:] - level_spl[ilevel-1,None])
+    ispl_n2n = jnp.zeros(alloc_size, dtype=jnp.int32).at[offsets].set(value)
+    # out of bounds access shall give nnodes of next smaller level (or npart for leaves):
+    fill_val = jnp.pad(nnodes_on_level[:-1], (1,0), constant_values=ispl[-1])
+    ispl_n2n = PackedArray.from_data(ispl_n2n, level_spl, fill_values=fill_val)
+    
+    return ispl, ispl_n2l, ispl_n2n
+
+def get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedArray, PackedArray]:
+    prop_array_spl = cumsum_starting_with_zero(ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1)
+
+    # Need to fix this later
+    from fmdj.multipoles import center_of_mass
+
+    def handle_mcent_level(i, carry):
+        node_mcent, node_mass, posm = carry
+        posm = center_of_mass(ispl_n2n.get(i, size=len(posm.mass)+1), posm)
+        node_mass = node_mass.set(i, posm.mass, num=ispl_n2n.num(i)-1)
+        node_mcent = node_mcent.set(i, posm.pos, num=ispl_n2n.num(i)-1)
+        return node_mcent, node_mass, posm
+    
+    posm = center_of_mass(ispl_n2n.get(0), part)
+    npos = PackedArray.from_data(posm.pos, ispl=prop_array_spl, fill_values=jnp.nan)
+    node_mass = PackedArray.from_data(posm.mass, ispl=prop_array_spl, fill_values=jnp.nan)
+
+    node_mcent, node_mass, _ = jax.lax.fori_loop(
+        1, ispl_n2n.nlevels(), handle_mcent_level, (npos, node_mass, posm)
+    )
+
+    return node_mcent, node_mass
+
+def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig,
+                         npart_tot: int | None = None, lvl_bound=(388, 388)) -> TreeHierarchy:
+    """Builds a tree hierarchy from z-order positions
+
+    The zeroth level of the tree corresponds to leaves, which contain multiple particles.
+    Nodes (and leaves) are selected so that they are as big as possible while not containing more
+    than a maximum number of particles that starts at cfg_tree.max_leaf_size and increases per level
+    by a factor cfg_tree.coarse_fac.
+    
+    Nodes are parameterized through a set of splits. For example the particles that lie in the leaf
+    with index i are given py part[ispl_n2n.get(level=0)[i]: ispl_n2n.get(level=0)[i+1]]
+    The ith node of level n contain all level n-1 nodes in the range :
+    ispl_n2n.get(n)[i]: ispl_n2n.get(n)[i+1]
+
+    In jax memory size needs to be known at compile time, but the required number of nodes is 
+    data dependent on each level. To limit the number of allocations that we need to predict, we
+    use the PackedArray class, that helps us to stack multiple different levels into a single
+    continguous array, but to access it "almost" as if they were separate arrays.
+    """
+    rank, ndev, axis_name = get_rank_info()
+
+    if isinstance(part, jax.Array):
+        assert part.shape[-1] == 3
+        posz = part
+    elif hasattr(part, "pos"):
+        posz = part.pos
+    else:
+        raise ValueError("Invalid input particles")
+    
+    if npart_tot is None:
+        npart_tot = len(posz)
+    npart_loc = npart_tot // ndev # static estimate of number of unpadded-particles
+
+    node_sizes = define_tree_level_node_sizes(npart_tot, cfg_tree)
+    nlevels = len(node_sizes)
+
+    alloc_size = estimate_node_number(npart_loc, cfg_tree.max_leaf_size, cfg_tree.alloc_fac_nodes)
+
+    ispl, ispl_n2l, ispl_n2n = define_split_hierarchy(posz, node_sizes, alloc_size, lvl_bound)
+
+    # We can handle all levels at once for node geometry:
+    ispl_n2p = ispl[ispl_n2l.data] # node to particle relation
+    lvl, geom_cent, ext = get_node_geometry(
+        posz, ispl_n2p[:-1], ispl_n2p[1:], num=ispl_n2l.nfilled()-1
+    )
+    # However, the splits are discontinuous at level boundaries. We have to delete the extra entries
+    lvl = jnp.delete(lvl, ispl_n2l.ispl[1:-1]-1, assume_unique_indices=True)
+    geom_cent = jnp.delete(geom_cent, ispl_n2l.ispl[1:-1]-1, axis=0, assume_unique_indices=True)
+
+    # node property arrays are on each level one element smaller than the splitting point arrays
+    prop_array_spl = cumsum_starting_with_zero(ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1)
+    lvl = PackedArray.from_data(lvl, prop_array_spl, fill_values=-1000)
+    geom_cent = PackedArray.from_data(geom_cent, prop_array_spl, fill_values=jnp.nan)
+
+    if cfg_tree.mass_centered:
+        assert hasattr(part, "mass"), "To use mass centering, please provide PosMass input"
+        nmass_cent, nmass = get_tree_mass_centers(part, ispl_n2n)
+    else:
+        nmass_cent, nmass = None, None
+        
+    # Predict maximum plane (at compile time) and check whether the prediction was large enough
+    # Note: This step can probably be skipped after I adapted the code to use fixed size arrays
+    plane_sizes = [estimate_node_number(npart_loc, node_sizes[i], alloc_fac=cfg_tree.alloc_fac_nodes)
+                   for i in range(0, nlevels)]
+
+    def plane_size_err(num, sizes):
+        raise RuntimeError(f"Tree allocation too small: \nplanes filled: {num} \nsize: {sizes}.\n"
+                            "Increase alloc_fac_nodes in FMMConfig.")
+    
+    nsizes = ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1
+    ispl_n2l.ispl = ispl_n2l.ispl + conditional_callback(
+        jnp.any(nsizes > jnp.array(plane_sizes)), plane_size_err,
+        nsizes, jnp.array(plane_sizes),
+    )
+
+    th = TreeHierarchy(
+        ispl_n2n, ispl_n2l, lvl, geom_cent, mass = nmass, mass_cent = nmass_cent,
+        plane_sizes = plane_sizes
+    )
+    
+    return th
+build_tree_hierarchy.jit = jax.jit(build_tree_hierarchy, static_argnames=['cfg_tree', 'npart_tot'])
+
+# ------------------------------------------------------------------------------------------------ #
+#                                     Interaction List Helpers                                     #
+# ------------------------------------------------------------------------------------------------ #
+
+def dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
+                           node_range: jax.Array | None = None) -> InteractionList:
+    """A dense interaction list where all nodes interact with all other nodes.
+
+    size_ilist: size of the interaction list. (Required at compile time)
+    nnodes: actual number of filled nodes (Can be dynamic, used to invalidating unused nodes)
+    """
+
+    dtype = nnodes.dtype
+
+    idx = jnp.arange(size_ilist)
+    if node_range is not None:
+        # !!! Put some checks here!
+        nint = nnodes*(node_range[1] - node_range[0])
+        ilist = jnp.where(idx < nint, idx % nnodes, 0)
+        node_idx = jnp.arange(size_nodes)
+        ispl = cumsum_starting_with_zero((node_idx >= node_range[0]) & (node_idx < node_range[1])) * nnodes
+    else:
+        nint = nnodes*nnodes
+        ilist = jnp.where(idx < nint, idx % nnodes, 0)
+        ispl = jnp.minimum(jnp.arange(0, size_nodes+1, dtype=dtype) * nnodes, nint)
+
+    def size_err(nnodes, size_nodes, nint, size_ilist):
+        raise ValueError("Cannot fit {nnodes}/{size_nodes}, {nint}/{size_ilist}")
+
+    ispl = ispl + conditional_callback(
+        (nnodes > size_nodes) | (nint > size_ilist), size_err,
+        nnodes, size_nodes, nint, size_ilist
+    )
+    
+    return InteractionList(ispl=ispl, iother=ilist)
+dense_interaction_list.jit = jax.jit(dense_interaction_list, static_argnames=['size_ilist', 'size_nodes'])
+
+def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
+                                   ngroup: int = 32, size_super: int | None = None,
+                                   node_range: jax.Array | None = None
+                                   ) -> Tuple[jax.Array, InteractionList, jax.Array]:
+    """Defines an all-to-all interaction list over super-nodes and a super-node to node relation
+
+    This is useful for evaluating all-to-all interactions in a grouped manner on GPU
+
+    node_range: if specified, the interaction list will only contain interactions with
+                receiving indices in node_range will be evaluated
+    """
+
+    if size_super is None: # if not provided, guarantee a sufficient allocation
+        size_super = np.ceil(np.sqrt(size_ilist)).astype(np.int64) + 2
+    
+    # define the super node to node relation
+    if node_range is None:
+        nsuper_nodes = div_ceil(nnodes, ngroup)
+        ninteractions = nsuper_nodes*nsuper_nodes
+        spl_super = jnp.minimum(jnp.arange(size_super+1) * ngroup, nnodes)
+        ispl = jnp.minimum(jnp.arange(size_super+1) * nsuper_nodes, ninteractions)
+    else:
+        node_range = jnp.asarray(node_range)
+        super_range = node_range // ngroup
+        # In this case we only evaluate receiving nodes that lie inside of the node_range
+        # further, we have to make sure that spl_super splits at our indices
+        nsuper_nodes = div_ceil(nnodes, ngroup) + 2
+        spl_super = jnp.minimum(jnp.arange(size_super+1) * ngroup, nnodes)
+        spl_super = jnp.insert(spl_super, super_range + 1, node_range)
+
+        valid = (spl_super[:-1] >= node_range[0]) & (spl_super[1:] <= node_range[1])
+        valid = valid & (spl_super[1:] > spl_super[:-1]) # may have some 0 nodes due to way we inserted
+        ispl = cumsum_starting_with_zero(jnp.where(valid, nsuper_nodes, 0))
+        ninteractions = ispl[-1]
+
+    def ilist_size_error(n, size):
+        raise MemoryError(f"Cannot fit {n} interactions into ilist with size {size}")
+    nsuper_nodes = nsuper_nodes + conditional_callback(
+        ninteractions > size_ilist, ilist_size_error, ninteractions, size_ilist
+    )
+    
+    idx = jnp.arange(size_ilist)
+    ilist = jnp.where(idx < ninteractions, idx % nsuper_nodes, 0)
+
+    ilist = InteractionList(ispl=ispl, iother=ilist)
+
+    return spl_super, ilist, nsuper_nodes
+grouped_dense_interaction_list.jit = jax.jit(
+    grouped_dense_interaction_list, static_argnames=["size_ilist", "size_super"]
+)
+
+def masked_scatter(mask, arr, indices, values):
+    indices = jnp.where(mask, indices, len(arr))
+    return arr.at[indices].set(values)
+
+def simplify_interaction_list(ilist: InteractionList, num_always_keep: jax.Array | None = None
+                              ) -> InteractionList:
+    """Get reduced version of the interaction and node list skipping nodes without interactions
+    
+    Useful in multi-GPU scenarios where many non-local nodes will not have any local interactions
+    """
+    size_nodes = ilist.ispl.size - 1
+    idx = jnp.arange(ilist.iother.size)
+
+    # flag all nodes that appear at least in one interaction
+    ioth = jnp.where(idx < ilist.ispl[-1], ilist.iother, size_nodes)
+    flag = ilist.ispl[1:] > ilist.ispl[:-1] # appears as receiver
+    flag = flag.at[ioth].set(True) # appears as source
+    if num_always_keep is not None:
+        flag = flag | (jnp.arange(len(ilist.ids)) < num_always_keep)
+    
+    # create reduced id list
+    prefix = cumsum_starting_with_zero(flag)
+
+    reduced_ids = masked_scatter(flag, jnp.zeros_like(ilist.ids), prefix[:-1], ilist.ids)
+    reduced_dev_spl = prefix[ilist.dev_spl]
+
+    # change the label and the offsets of the interaction list
+    ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
+    ilist = InteractionList(ispl, prefix[ilist.iother], reduced_ids, reduced_dev_spl)
+    
+    return ilist

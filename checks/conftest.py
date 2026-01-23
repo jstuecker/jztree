@@ -1,8 +1,10 @@
 import jax
 import jax.numpy as jnp
 import pytest
-from jztree.tree import pos_zorder_sort
-from fmdj.comm import should_init_jax_distributed
+from jztree.config import TreeConfig
+from jztree.data import PosMass
+from jztree.ztree import pos_zorder_sort, build_tree_hierarchy
+from jztree.comm import should_init_jax_distributed
 import sys
 import os
 
@@ -111,3 +113,14 @@ def pos(npart):
 def pos_z(pos):
     posz, isort = pos_zorder_sort(pos)
     return posz
+
+@pytest.fixture
+def pos_mass_z(npart):
+    pos0 = jax.random.normal(jax.random.PRNGKey(0), (npart,3))
+    posz, isort = pos_zorder_sort(pos0)
+    return PosMass(posz, jnp.ones(posz.shape[0]))
+
+@pytest.fixture
+def tree_hierarchy(pos_mass_z):
+    th = jax.block_until_ready(build_tree_hierarchy.jit(pos_mass_z, cfg_tree=TreeConfig()))
+    return th

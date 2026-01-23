@@ -1,12 +1,13 @@
 import pytest
-import jztree.fof
 import jax
 import jax.numpy as jnp
 import pytest
 import importlib
 from pathlib import Path
+from jztree.config import FofConfig
 from jztree.data import ParticleData
-from fmdj.ztree import pos_zorder_sort
+from jztree.ztree import pos_zorder_sort
+from jztree.fof import fof, fof_is_superset, fof_z, fof_reduction
 import h5py
 import hdf5plugin
 
@@ -14,7 +15,7 @@ has_hfof = importlib.util.find_spec("hfof") is not None
 
 @pytest.mark.skipif(not has_hfof, reason="requires hfof module installed")
 def test_vs_hfof_uniform():
-    from hfof import fof
+    from hfof import fof as fof_hfof
 
     boxsize = 1.0
 
@@ -22,12 +23,12 @@ def test_vs_hfof_uniform():
 
     rlink = 0.8 * boxsize / len(pos)**(1/3)
 
-    igr_jz = jztree.fof.fof.jit(pos, rlink=rlink, boxsize=boxsize)
-    igr_hfof = fof(pos, rlink, boxsize=boxsize)
+    igr_jz = fof.jit(pos, rlink=rlink, boxsize=boxsize)
+    igr_hfof = fof_hfof(pos, rlink, boxsize=boxsize)
 
     # Since labels may differ, test set wise >= from both directions
-    assert jztree.fof.fof_is_superset(igr_hfof, igr_jz)
-    assert jztree.fof.fof_is_superset(igr_jz, igr_hfof)
+    assert fof_is_superset(igr_hfof, igr_jz)
+    assert fof_is_superset(igr_jz, igr_hfof)
 
     group_sizes_jz = jnp.sort(jnp.bincount(igr_jz, minlength=len(pos)))[::-1]
     group_sizes_hfof = jnp.sort(jnp.bincount(igr_hfof, minlength=len(pos)))[::-1]
@@ -62,13 +63,13 @@ def camels_jz_fof(camels_data):
     boxsize = 25
     b = 0.2
     rlink = b * boxsize / res
-    cfg = jztree.data.FofConfig()
+    cfg = FofConfig()
     cfg.tree.alloc_fac_nodes = 2
     
     particles = ParticleData(jnp.asarray(pos), jnp.asarray(vel))
     
     particlesz, idz = pos_zorder_sort.jit(particles)
-    igr_jz = jztree.fof.fof_z.jit(particlesz.pos, rlink, boxsize=boxsize, cfg=cfg)
+    igr_jz = fof_z.jit(particlesz.pos, rlink, boxsize=boxsize, cfg=cfg)
 
     return particlesz, igr_jz, rlink, boxsize
 
@@ -78,7 +79,7 @@ def test_CAMELS(camels_data, camels_jz_fof):
 
     print("\n","Comparing CAMELS and jz_tree","\n")
 
-    results = jztree.fof.fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
+    results = fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
     results.npart = results.npart[:results.ngroups]
     results.pos = results.pos[:results.ngroups]
     results.vel = results.vel[:results.ngroups]

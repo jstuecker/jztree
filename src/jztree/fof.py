@@ -2,17 +2,17 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_fof
-from .tree import pos_zorder_sort, grouped_dense_interaction_list
+from .ztree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy, distr_zsort_and_tree
 from .common import conditional_callback
-from .data import  FofConfig, FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
-from fmdj.data import InteractionList, PackedArray
+from .config import FofConfig
+from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
+from jztree.data import InteractionList, PackedArray, TreeHierarchy, Pos
 from typing import Tuple
-from fmdj.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
-from fmdj.ztree import simplify_interaction_list
-from fmdj.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
+from jztree.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
+from jztree.ztree import simplify_interaction_list, dense_interaction_list
+from jztree.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from dataclasses import dataclass, replace
-import fmdj
-from fmdj.comm import pcast_vma, pcast_like
+from jztree.comm import pcast_vma, pcast_like
 
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA")
@@ -108,7 +108,7 @@ node_to_child_label.jit = jax.jit(node_to_child_label, static_argnames=("size_ch
 
 #     return igroup
 
-def node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
+def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
                   ) -> Tuple[FofNodeData, InteractionList]:
     nplanes = th.num_planes()
 
@@ -446,7 +446,7 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev) >= rank))
 
     # Define a dense interaction list on top-nodes:
-    ilist = fmdj.ztree.dense_interaction_list(
+    ilist = dense_interaction_list(
         dev_spl[-1], size, int(size*alloc_fac_ilist),
         node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
     )
@@ -455,7 +455,7 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     
     return node_data, ilist
 
-def distr_node_node_fof(th: fmdj.data.TreeHierarchy, rlink: float, boxsize: float = 0., 
+def distr_node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float = 0., 
                         alloc_fac_ilist = 32, size_links = None
                         ) -> Tuple[FofNodeData, InteractionList, PackedArray]:
     rank, ndev, axis_name = get_rank_info()
@@ -561,7 +561,7 @@ distr_particle_particle_fof.jit = jax.jit(distr_particle_particle_fof, static_ar
 # ------------------------------------------------------------------------------------------------ #
 
 def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
-    th = fmdj.ztree.build_tree_hierarchy(posz, cfg_tree=cfg.tree)
+    th = build_tree_hierarchy(posz, cfg_tree=cfg.tree)
     node_data, ilist = node_node_fof(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
@@ -581,7 +581,7 @@ def fof(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofC
 fof.jit = jax.jit(fof, static_argnames=["rlink", "boxsize", "cfg"])
 
 def distr_fof_z_with_tree(
-        posz: jax.Array, th: fmdj.data.TreeHierarchy, rlink: float, 
+        posz: jax.Array, th: TreeHierarchy, rlink: float, 
         boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False
     ) -> Label:
     """
@@ -608,9 +608,9 @@ distr_fof_z_with_tree.jit = jax.jit(
     distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
 )
 
-def distr_fof(part: fmdj.data.Pos, npart_tot: int, rlink: float, boxsize: float = 0., 
+def distr_fof(part: Pos, npart_tot: int, rlink: float, boxsize: float = 0., 
               cfg: FofConfig = FofConfig):
-    partz, th = fmdj.ztree.distr_zsort_and_tree(part, npart_tot, cfg.tree)
+    partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
 
     labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
 

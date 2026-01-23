@@ -1,6 +1,7 @@
 import pytest
-import jztree.fof
-from fmdj.ztree import pos_zorder_sort
+from jztree.config import FofConfig
+from jztree.ztree import pos_zorder_sort
+from jztree.fof import fof_z
 import jax
 import jax.numpy as jnp
 import pytest
@@ -12,11 +13,11 @@ has_hfof = importlib.util.find_spec("hfof") is not None
 boxsize = 1.0
 pos = jax.random.uniform(jax.random.PRNGKey(0), (int(1e6), 3), minval=0.0, maxval=boxsize)
 rlink = 0.8 * boxsize / len(pos)**(1/3)
-cfg = jztree.data.FofConfig()
+cfg = FofConfig()
 
 # run jztree-fof
 posz, idz = pos_zorder_sort.jit(pos)
-igr_jz = jztree.fof.fof_z.jit(posz, rlink, boxsize=boxsize, cfg=cfg)
+igr_jz = fof_z.jit(posz, rlink, boxsize=boxsize, cfg=cfg)
 
 # check outputs
 group_sizes_jz = jnp.sort(jnp.bincount(igr_jz, minlength=len(posz)))[::-1]

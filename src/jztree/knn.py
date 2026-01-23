@@ -2,11 +2,10 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_knn
-from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list
+from .ztree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .common import conditional_callback, masked_prefix_sum, cumsum_starting_with_zero, inverse_indices
-from .data import KNNData, KNNConfig
-
-import fmdj
+from .config import KNNConfig
+from .data import KNNData
 
 jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
 jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
@@ -140,7 +139,7 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     """
     boxsize = 0. if boxsize is None else boxsize
 
-    th = fmdj.ztree.build_tree_hierarchy(posz, cfg.tree)
+    th = build_tree_hierarchy(posz, cfg.tree)
     
     nplanes = th.num_planes()
     valid = jnp.arange(th.plane_sizes[-1], dtype=jnp.int32) < th.lvl.num(nplanes-1)
