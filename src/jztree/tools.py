@@ -82,6 +82,12 @@ def inverse_of_splits(ispl, size):
     mask = jnp.zeros(size, dtype=jnp.int32).at[ispl].add(1)
     return jnp.cumsum(mask) - 1
 
+def inverse_indices(iargsort):
+    """Given the indices that would sort an array, return the indices that would unsort it"""
+    iunsort = jnp.zeros_like(iargsort)
+    iunsort = iunsort.at[iargsort].set(jnp.arange(len(iargsort), dtype=iargsort.dtype))
+    return iunsort
+
 # ------------------------------------------------------------------------------------------------ #
 #                                          Scatter Helpers                                         #
 # ------------------------------------------------------------------------------------------------ #

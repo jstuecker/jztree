@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_fof
 from .ztree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy, distr_zsort_and_tree
-from .common import conditional_callback
+from .tools import conditional_callback
 from .config import FofConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
 from jztree.data import InteractionList, PackedArray, TreeHierarchy, Pos
