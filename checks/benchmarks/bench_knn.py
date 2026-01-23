@@ -2,7 +2,7 @@ import pytest
 import jax
 import jax.numpy as jnp
 from dataclasses import replace
-from jztree.ztree import pos_zorder_sort
+from jztree.tree import pos_zorder_sort
 from jztree.knn import prepare_knn, prepare_knn_z_new, evaluate_knn, evaluate_knn_z, knn, knn_z
 
 @pytest.mark.shrink_in_quick(keep_index=1)

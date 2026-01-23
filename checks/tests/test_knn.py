@@ -5,7 +5,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from jztree.config import KNNConfig
 from jztree.knn import knn_z, segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z_new, evaluate_knn, knn
-from jztree.ztree import pos_zorder_sort
+from jztree.tree import pos_zorder_sort
 
 def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
     pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)

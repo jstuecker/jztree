@@ -1,6 +1,6 @@
 import pytest
 from jztree.config import FofConfig
-from jztree.ztree import pos_zorder_sort
+from jztree.tree import pos_zorder_sort
 from jztree.fof import fof_z
 import jax
 import jax.numpy as jnp

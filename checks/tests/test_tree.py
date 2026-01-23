@@ -4,7 +4,7 @@ from jztree.data import PosMass, TreePlane, TreeHierarchy
 import pytest
 import numpy.testing as npt
 from jztree.config import TreeConfig
-from jztree.ztree import get_node_geometry, search_sorted_z, pos_zorder_sort, build_tree_hierarchy
+from jztree.tree import get_node_geometry, search_sorted_z, pos_zorder_sort, build_tree_hierarchy
 
 def test_tree_hierarchy(tree_hierarchy : TreeHierarchy):
     th = tree_hierarchy

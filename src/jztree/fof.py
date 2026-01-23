@@ -2,14 +2,14 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_fof
-from .ztree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy, distr_zsort_and_tree
+from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy, distr_zsort_and_tree
 from .tools import conditional_callback
 from .config import FofConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
 from jztree.data import InteractionList, PackedArray, TreeHierarchy, Pos
 from typing import Tuple
 from jztree.comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request, all_to_all_request_children
-from jztree.ztree import simplify_interaction_list, dense_interaction_list
+from jztree.tree import simplify_interaction_list, dense_interaction_list
 from jztree.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from dataclasses import dataclass, replace
 from jztree.comm import pcast_vma, pcast_like

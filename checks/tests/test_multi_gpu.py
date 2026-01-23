@@ -8,7 +8,7 @@ from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
 from jztree.data import ParticleData, Link, Label
-from jztree.ztree import distr_zsort_and_tree, pos_zorder_sort
+from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_z
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None

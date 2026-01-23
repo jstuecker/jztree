@@ -6,8 +6,8 @@ from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.comm import get_rank_info
 from jztree.config import TreeConfig
 from jztree.data import PosMass, TreeHierarchy
-from jztree.ztree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
-from jztree.ztree import detect_leaf_boundaries, build_tree_hierarchy, define_tree_level_node_sizes
+from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
+from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, define_tree_level_node_sizes
 
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 sharding = NamedSharding(mesh, P('gpus'))
@@ -44,7 +44,7 @@ def test_mutli_zsort():
 
 @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
 def fcoarsen(posz: jnp.ndarray):
-    # return jztree.ztree.distributed_define_leaves(posz, leaf_size=256)
+    # return jztree.tree.distributed_define_leaves(posz, leaf_size=256)
     posz, npart, lvl_bound = adjust_domain_for_nodesize(posz, 256)
     ispl = detect_leaf_boundaries(posz, leaf_size=256, lvl_bound=lvl_bound)
 

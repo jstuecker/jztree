@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from dataclasses import replace
 from jztree.config import FofConfig
-from jztree.ztree import pos_zorder_sort, build_tree_hierarchy
+from jztree.tree import pos_zorder_sort, build_tree_hierarchy
 from jztree.fof import node_node_fof, particle_particle_fof, fof
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None

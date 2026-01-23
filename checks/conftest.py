@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import pytest
 from jztree.config import TreeConfig
 from jztree.data import PosMass
-from jztree.ztree import pos_zorder_sort, build_tree_hierarchy
+from jztree.tree import pos_zorder_sort, build_tree_hierarchy
 from jztree.comm import should_init_jax_distributed
 import sys
 import os

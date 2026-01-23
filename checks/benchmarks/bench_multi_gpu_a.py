@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from fmdj.data import PosMass
-from jztree.ztree import distributed_zsort, distr_zsort_and_tree
+from jztree.tree import distributed_zsort, distr_zsort_and_tree
 from jztree.config import TreeConfig
 
 from fmdj_utils.ics import gaussian_blob

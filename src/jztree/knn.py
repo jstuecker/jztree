@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jztree_cuda import ffi_knn
-from .ztree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
+from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .tools import conditional_callback, inverse_indices
 from .config import KNNConfig
 from .data import KNNData

@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from dataclasses import replace
 from jztree.config import FofConfig
-from jztree.ztree import distr_zsort_and_tree
+from jztree.tree import distr_zsort_and_tree
 from jztree.fof import distr_fof_z_with_tree, distr_node_node_fof, distr_particle_particle_fof
 from jztree.comm import get_rank_info
 from fmdj_utils.ics import gaussian_blob
