@@ -12,6 +12,7 @@ from fmdj.ztree import simplify_interaction_list
 from fmdj.tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from dataclasses import dataclass, replace
 import fmdj
+from fmdj.comm import pcast_vma, pcast_like
 
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
 jax.ffi.register_ffi_target("ParticleFof", ffi_fof.ParticleFof(), platform="CUDA")
@@ -22,11 +23,6 @@ jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), plat
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
-def pcast_vma(x, vma):
-    return jax.lax.pcast(x, tuple(vma), to="varying")
-
-def pcast_like(x, like):
-    return jax.lax.pcast(x, tuple(jax.typeof(like).vma), to="varying")
 
 def node_fof_and_ilist(
         node_ilist: InteractionList, isplit: jax.Array, 
@@ -439,8 +435,8 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     # Define splits and their data
     spl, nsuper = linearly_grouped(num_local, size, ngroup=32)
     
-    labels = jax.lax.pcast(jnp.arange(size), axis_name, to="varying")
-    node_lvl = jax.lax.pcast(jnp.full(size, 388), axis_name, to="varying")
+    labels = pcast_vma(jnp.arange(size), axis_name)
+    node_lvl = pcast_vma(jnp.full(size, 388), axis_name)
     node_data = FofNodeData(node_lvl, labels, spl)
     
     # define interaction list with remote interactions
