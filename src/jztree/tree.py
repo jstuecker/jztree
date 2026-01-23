@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from typing import Tuple
-from jztree_cuda import ffi_tree
+from jztree_cuda import ffi_tree, ffi_sort
 from .tools import conditional_callback, div_ceil
 from .data import TreePlane, Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .config import TreeConfig
@@ -11,11 +11,12 @@ from .tools import cumsum_starting_with_zero, masked_prefix_sum, div_ceil
 from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
 from dataclasses import replace
 
-jax.ffi.register_ffi_target("PosZorderSort", ffi_tree.PosZorderSort(), platform="CUDA")
+jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")
+jax.ffi.register_ffi_target("SearchSortedZ", ffi_sort.SearchSortedZ(), platform="CUDA")
+
 jax.ffi.register_ffi_target("FlagLeafBoundaries", ffi_tree.FlagLeafBoundaries(), platform="CUDA")
 jax.ffi.register_ffi_target("FindNodeBoundaries", ffi_tree.FindNodeBoundaries(), platform="CUDA")
 jax.ffi.register_ffi_target("GetNodeGeometry", ffi_tree.GetNodeGeometry(), platform="CUDA")
-jax.ffi.register_ffi_target("SearchSortedZ", ffi_tree.SearchSortedZ(), platform="CUDA")
 jax.ffi.register_ffi_target("GetBoundaryExtendPerLevel", ffi_tree.GetBoundaryExtendPerLevel(), platform="CUDA")
 
 

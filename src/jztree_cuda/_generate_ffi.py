@@ -67,18 +67,38 @@ gen.generate_ffi_module_file(
 )
 
 # ------------------------------------------------------------------------------------------------ #
-#                                             tree.cuh                                             #
+#                                             sort.cuh                                             #
 # ------------------------------------------------------------------------------------------------ #
 
 functions = parse.get_functions_from_file(
-    str(HERE / "tree.cuh"),
-    names=["PosZorderSort", "FlagLeafBoundaries", "FindNodeBoundaries", "GetNodeGeometry", 
-           "SearchSortedZ", "GetBoundaryExtendPerLevel"],
+    str(HERE / "sort.cuh"),
+    names=["PosZorderSort", "SearchSortedZ"],
     only_kernels=False
 )
 
 functions["PosZorderSort"].par["size"].expression = "pos_in.element_count()/3"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
+
+functions["SearchSortedZ"].par["n_have"].expression = "posz_have.element_count()/3"
+functions["SearchSortedZ"].par["n_query"].expression = "posz_query.element_count()/3"
+functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"
+
+gen.generate_ffi_module_file(
+    output_file = str(HERE / "generated/ffi_sort.cu"), 
+    functions = functions, 
+    includes = default_includes + ["../sort.cuh"]
+)
+
+# ------------------------------------------------------------------------------------------------ #
+#                                             tree.cuh                                             #
+# ------------------------------------------------------------------------------------------------ #
+
+functions = parse.get_functions_from_file(
+    str(HERE / "tree.cuh"),
+    names=["FlagLeafBoundaries", "FindNodeBoundaries", "GetNodeGeometry", 
+           "GetBoundaryExtendPerLevel"],
+    only_kernels=False
+)
 
 functions["FlagLeafBoundaries"].par["size_part"].expression = "posz.element_count()/3"
 functions["FlagLeafBoundaries"].grid_size_expression = "div_ceil(size_part+1, block_size)"
@@ -90,10 +110,6 @@ functions["FindNodeBoundaries"].grid_size_expression = "div_ceil(size_nodes, blo
 functions["GetNodeGeometry"].par["size_nodes"].expression = "level->element_count()"
 functions["GetNodeGeometry"].par["size_part"].expression = "pos.element_count()/3"
 functions["GetNodeGeometry"].grid_size_expression = "div_ceil(size_nodes, block_size)"
-
-functions["SearchSortedZ"].par["n_have"].expression = "posz_have.element_count()/3"
-functions["SearchSortedZ"].par["n_query"].expression = "posz_query.element_count()/3"
-functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"
 
 functions["GetBoundaryExtendPerLevel"].par["size"].expression = "posz.element_count()/3"
 functions["GetBoundaryExtendPerLevel"].template_par["left"].instances = ["true", "false"]

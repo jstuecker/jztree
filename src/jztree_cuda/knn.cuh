@@ -8,7 +8,7 @@
 #include "common/math.cuh"
 #include "common/iterators.cuh"
 #include "xla/ffi/api/ffi.h"
-#include "common/segment_sort.cuh"
+#include "sort.cuh"
 
 #if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2
 #error "CUB version 2.0.0 or higher required"
