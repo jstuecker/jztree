@@ -7,7 +7,6 @@
 #include "common/data.cuh"
 #include "common/math.cuh"
 #include "common/iterators.cuh"
-#include "common/knn_math.cuh"
 #include "xla/ffi/api/ffi.h"
 #include "common/segment_sort.cuh"
 

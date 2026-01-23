@@ -5,7 +5,6 @@
 
 #include "common/data.cuh"
 #include "common/math.cuh"
-#include "common/knn_math.cuh"
 #include "common/iterators.cuh"
 
 #include "xla/ffi/api/ffi.h"
