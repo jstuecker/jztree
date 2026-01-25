@@ -3,11 +3,11 @@ import jax
 import jax.numpy as jnp
 from typing import Tuple
 
-from .tools import conditional_callback, div_ceil
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .config import TreeConfig
-from .tools import cumsum_starting_with_zero, div_ceil
+from .tools import cumsum_starting_with_zero, div_ceil, raise_if
 from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
+from .comm import all_to_all_with_splits, global_splits
 
 from jztree_cuda import ffi_tree, ffi_sort
 jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")
@@ -121,13 +121,11 @@ def detect_leaf_boundaries(
         block_size=np.uint64(block_size), scan_size=np.int32(leaf_size+1)
     )[0]
 
-    # Check that the allocation was big enough
-    def alloc_err(filled, size):
-        raise RuntimeError(f"Coarsen Leaves: allocation too small: filled {filled}, size {size}.\n"
-                            "Increase alloc_fac_nodes in FMMConfig.")
     nfilled = jnp.sum(flag_split)
-    flag_split = flag_split + conditional_callback(
-        nfilled > alloc_size, alloc_err, nfilled, alloc_size,
+    flag_split = flag_split + raise_if(nfilled > alloc_size,
+        "Tree-Leaf allocation too small: filled={filled} size={size}.\n"
+        "Hint: Increase alloc_fac_nodes or max_leaf_size",
+        filled=nfilled, size=alloc_size, max_trace_depth=5
     )
     
     splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
@@ -269,12 +267,11 @@ def distributed_zsort(x: jax.Array | Pos, nsamp: int = 1024):
     xz, idz = pos_zorder_sort(x)
     spl = search_sorted_z(get_pos(xz), xpivot)
 
-    def err(n1, n2):
-        raise MemoryError(f"Size of buffer is too small: need {n1}, have {n2}.\n")
     nneed = jnp.max(spl[1:] - spl[:-1])
-    spl = spl + conditional_callback(nneed > pos.shape[0], err, nneed, pos.shape[0])
-
-    from .comm import all_to_all_with_splits, global_splits
+    spl = spl + raise_if(nneed > pos.shape[0],
+        "Size of buffer is too small, need {n1}, have {n2}\n"
+        "Hint: Pad particles more or increase sort sampling.", n1=nneed, n2=pos.shape[0]
+    )
 
     x = all_to_all_with_splits(xz, spl, axis_name=axis_name)[0]
     xz, idz = pos_zorder_sort(x)
@@ -375,11 +372,10 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
     nnodes_on_level = level_spl[1:] - level_spl[:-1] - 1 # -1 since splits are always 1 larger than nodes
 
     # Check that the allocation is big enough
-    def alloc_err(filled, size):
-        raise RuntimeError(f"Tree allocation too small: filled {filled}, size {size}.\n"
-                            "Increase alloc_fac_nodes in Config")
-    level_spl = level_spl + conditional_callback(
-        level_spl[-1] > alloc_size, alloc_err, level_spl[-1], alloc_size,
+    level_spl = level_spl + raise_if(level_spl[-1] > alloc_size,
+        "Tree-Leaf allocation too small: filled={filled} size={size}.\n"
+        "Hint: Increase alloc_fac_nodes, max_leaf_size or coarse_fac",
+        filled=level_spl[-1], size=alloc_size
     )
 
     # correct offsets to exclude the element at hand and invalidate inactive elements:
@@ -481,18 +477,14 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig,
         nmass_cent, nmass = None, None
         
     # Predict maximum plane (at compile time) and check whether the prediction was large enough
-    # Note: This step can probably be skipped after I adapted the code to use fixed size arrays
+    # Note: This step can probably be skipped after I adapt the code to use fixed size arrays
     plane_sizes = [estimate_node_number(npart_loc, node_sizes[i], alloc_fac=cfg_tree.alloc_fac_nodes)
                    for i in range(0, nlevels)]
 
-    def plane_size_err(num, sizes):
-        raise RuntimeError(f"Tree allocation too small: \nplanes filled: {num} \nsize: {sizes}.\n"
-                            "Increase alloc_fac_nodes in FMMConfig.")
-    
     nsizes = ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1
-    ispl_n2l.ispl = ispl_n2l.ispl + conditional_callback(
-        jnp.any(nsizes > jnp.array(plane_sizes)), plane_size_err,
-        nsizes, jnp.array(plane_sizes),
+    ispl_n2l.ispl = ispl_n2l.ispl + raise_if(jnp.any(nsizes > jnp.array(plane_sizes)),
+        "Tree allocation too small:\n Planes filled: {num} sizes: {sizes}\n"
+        "Hint: Increase alloc_fac_nodes", num=nsizes, sizes=jnp.array(plane_sizes)
     )
 
     th = TreeHierarchy(
@@ -529,12 +521,10 @@ def dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
         ilist = jnp.where(idx < nint, idx % nnodes, 0)
         ispl = jnp.minimum(jnp.arange(0, size_nodes+1, dtype=dtype) * nnodes, nint)
 
-    def size_err(nnodes, size_nodes, nint, size_ilist):
-        raise ValueError("Cannot fit {nnodes}/{size_nodes}, {nint}/{size_ilist}")
-
-    ispl = ispl + conditional_callback(
-        (nnodes > size_nodes) | (nint > size_ilist), size_err,
-        nnodes, size_nodes, nint, size_ilist
+    ispl = ispl + raise_if((nnodes > size_nodes) | (nint > size_ilist),
+        "Cannot fit {nnodes}/{size_nodes}, {nint}/{size_ilist}\n"
+        "Hint: Increase alloc_fac_ilist",
+        nnodes=nnodes, size_nodes=size_nodes, nint=nint, size_ilist=size_ilist
     )
     
     return InteractionList(ispl=ispl, iother=ilist)
@@ -575,10 +565,10 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
         ispl = cumsum_starting_with_zero(jnp.where(valid, nsuper_nodes, 0))
         ninteractions = ispl[-1]
 
-    def ilist_size_error(n, size):
-        raise MemoryError(f"Cannot fit {n} interactions into ilist with size {size}")
-    nsuper_nodes = nsuper_nodes + conditional_callback(
-        ninteractions > size_ilist, ilist_size_error, ninteractions, size_ilist
+    nsuper_nodes = nsuper_nodes + raise_if(ninteractions > size_ilist,
+        "Cannot fit {n} interactions into interaction list with size {size}\n"
+        "Hint: Increase alloc_fac_ilist",
+        n=ninteractions, size=size_ilist
     )
     
     idx = jnp.arange(size_ilist)

@@ -190,7 +190,7 @@ def _format_trace(frames):
         lines.append(f'  File "{fi.filename}", line {fi.lineno}, in {fi.function}')
     return lines
 
-def raise_if( pred, msg, *fmt_args, exc: ValueError=ValueError, max_trace_depth=12, **fmt_kwargs, ):
+def raise_if( pred, msg, *fmt_args, exc=RuntimeError, max_trace_depth=12, **fmt_kwargs, ):
     pred = jnp.asarray(pred)
 
     # Capture trace-time call chain starting at the *callsite* of raise_if
@@ -208,7 +208,7 @@ def raise_if( pred, msg, *fmt_args, exc: ValueError=ValueError, max_trace_depth=
         main = msg.format(*args, **kwargs)
 
         txt = "\n======== Relevant Error Message =========\n"
-        txt += f"{exc.__name__}: {callsite}: {main}\n"
+        txt += f"{exc.__name__} at {callsite}:\n{main}\n"
 
         txt = txt + f" Trace (last {max_trace_depth}, tracing time, most recent call last):\n"
         txt = txt + "-----------------------------------------\n"
