@@ -340,14 +340,20 @@ def all_to_all_with_irank(
         verify: bool = True,
         err_hint: str = "",
         copy_self: bool = True,
-        pack_pytree: bool = True
+        pack_pytree: bool = True,
+        get_inverse: bool = False
     ):
     """Communicate by indicating the rank of the receiving device
 
     To understand most arguments, see documentation of all_to_all_with_splits
     """
     xsort, dev_spl, isort = arange_for_comm(irank, x, num=num, axis_name=axis_name)
-    return all_to_all_with_splits(xsort, dev_spl, output, axis_name, verify=verify, err_hint=err_hint, copy_self=copy_self, pack_pytree=pack_pytree)
+    x, dev_spl = all_to_all_with_splits(xsort, dev_spl, output, axis_name, verify=verify, err_hint=err_hint, copy_self=copy_self, pack_pytree=pack_pytree)
+    if get_inverse:
+        invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort), dtype=isort.dtype))
+        return x, dev_spl, invsort
+    else:
+        return x, dev_spl
 
 def all_to_all_request(
     irank: jax.Array,
