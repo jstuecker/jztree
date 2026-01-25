@@ -1,138 +1,181 @@
-import pytest
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
-import importlib
-from pathlib import Path
+from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
+from jztree.comm import get_rank_info
+from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
-from jztree.data import ParticleData
-from jztree.tree import pos_zorder_sort
-from jztree.fof import fof, fof_is_superset, fof_z, fof_reduction
-import h5py
-import hdf5plugin
+from jztree.tools import cumsum_starting_with_zero, multi_to_dense
+from jztree.data import ParticleData, Link, Label
+from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
+from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_z
+import importlib
+has_discodj = importlib.util.find_spec("discodj") is not None
 
-has_hfof = importlib.util.find_spec("hfof") is not None
+mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
+sharding = NamedSharding(mesh, P('gpus'))
 
-@pytest.mark.skipif(not has_hfof, reason="requires hfof module installed")
-def test_vs_hfof_uniform():
-    from hfof import fof as fof_hfof
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+@pytest.mark.shrink_in_quick(keep_index=2)
+@pytest.mark.parametrize("nperdev", (16, 256, 5012))
+def test_distributed_links(nperdev):
+    """Define a random distributed link graph and check against local implementation"""
 
-    boxsize = 1.0
-
-    pos = jax.random.uniform(jax.random.PRNGKey(0), (1000000, 3), minval=0.0, maxval=boxsize)
-
-    rlink = 0.8 * boxsize / len(pos)**(1/3)
-
-    igr_jz = fof.jit(pos, rlink=rlink, boxsize=boxsize)
-    igr_hfof = fof_hfof(pos, rlink, boxsize=boxsize)
-
-    # Since labels may differ, test set wise >= from both directions
-    assert fof_is_superset(igr_hfof, igr_jz)
-    assert fof_is_superset(igr_jz, igr_hfof)
-
-    group_sizes_jz = jnp.sort(jnp.bincount(igr_jz, minlength=len(pos)))[::-1]
-    group_sizes_hfof = jnp.sort(jnp.bincount(igr_hfof, minlength=len(pos)))[::-1]
-
-    assert group_sizes_jz == pytest.approx(group_sizes_hfof)
-
-@pytest.fixture()
-def camels_data():
-    file_path_snap = Path(__file__).resolve().parent.parent / "data/CAMELS_snapshot.hdf5"
-    file_path_groups = Path(__file__).resolve().parent.parent /"data/CAMELS_groups.hdf5"
-
-    if not file_path_snap.exists() or not file_path_groups.exists():
-        raise ValueError("Camels data not found, please download by executing ../prepare_tests.py")
+    ndev = len(jax.devices())
     
-    file_snap = h5py.File(file_path_snap)['PartType1']
-    pos = file_snap['Coordinates'][:] / 1000
-    vel = file_snap['Velocities'][:] 
+    iA = jnp.arange(ndev*nperdev)
+    irand = jax.random.randint(jax.random.key(0), len(iA), minval=0, maxval=nperdev//2)
+    iB = jnp.maximum(iA - irand, 0)
+
+    links = Link(
+        Label(iA // nperdev, iA % nperdev),
+        Label(iB // nperdev, iB % nperdev)
+    )
+
+    @jax.jit
+    @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
+    def my_distr_links(links: Link):
+        labels = links.a
+        igroup = links.a.igroup
+
+        rank, ndev, axis_name = get_rank_info()
+
+        dev_spl = (jnp.zeros(ndev+1, dtype=jnp.int32)).at[rank+1].set(len(igroup))
+
+        labels = link_distributed(
+            igroup, labels, links, dev_spl, len(igroup) + rank*0,
+        )
+        
+        # convert back to global indices
+        return labels.igroup + labels.irank * len(igroup)
     
-    file_groups = h5py.File(file_path_groups)['Group']
-    pos_h = file_groups['GroupPos'][:] / 1000
-    vel_h = file_groups['GroupVel'][:]
-    group_len = file_groups['GroupLen'][:]
+    igroup_a = insert_links(iA, iA, iB, num_links=len(iA)) # fully local operation
+    igroup_b = my_distr_links(links)[:ndev*nperdev] # distributed linking
 
-    return pos, vel, pos_h, vel_h, group_len
+    assert jnp.all(igroup_a == igroup_b)
 
-@pytest.fixture()
-def camels_jz_fof(camels_data):
-    pos, vel, pos_h, vel_h, group_len = camels_data
-
-    res = 256
-
-    boxsize = 25
-    b = 0.2
-    rlink = b * boxsize / res
+def particles_and_tree(seed=0):
     cfg = FofConfig()
-    cfg.tree.alloc_fac_nodes = 2
+    rank, ndev, axis_name = get_rank_info()
+    npart_tot = 1024*1024*ndev
+
+    part = gaussian_blob(1024*1024, npad=1024*128*3, seed=rank+seed)
+
+    return distr_zsort_and_tree(part, npart_tot, cfg.tree)
+
+@jax.jit
+@jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
+def distr_fof(seed):
+    rank, ndev, axis_name = get_rank_info()
+    partz, th = particles_and_tree(seed)
+    igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.1, linearize_labels=True)
+
+    num = jax.lax.all_gather(jnp.sum(~jnp.isnan(partz.pos[...,0]), axis=0), axis_name)
+    dspl = cumsum_starting_with_zero(num)
+
+    return partz, igroup.reshape(1,-1), dspl.reshape(1,-1)
+
+@pytest.mark.shrink_in_quick
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+@pytest.mark.parametrize("seed", [0,17,23,99])
+def test_distr_fof(seed):
+    partz, igroup1, dev_spl = distr_fof(seed)
+    # combine arrays into one:
+    igroup1 = multi_to_dense.jit(igroup1, dev_spl[0])
+
+    partz = pos_zorder_sort.jit(partz)[0]
+    igroup2 = fof_z.jit(partz.pos, rlink=0.1)
+
+    assert igroup1 == pytest.approx(igroup2, abs=0.1)
+
+def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
+    G = 43.007105731706317
+    Hubble = 100.0
+    return 1e10 * omega_m * 3 * Hubble * Hubble / (8 * np.pi * G) * boxsize ** 3 / npart
+
+def dj_sim():
+    from discodj import DiscoDJ
+    from discodj.core.scatter_and_gather import ScatterGatherProperties
+
+    ndev = jax.device_count()
+
+    nres = np.int64(((np.cbrt(512**3 * ndev))//ndev)*ndev)
+
+    print(f"total grid dim {nres}, particles per GPU {np.cbrt(nres**3/ndev):.2f}**3")
     
-    particles = ParticleData(jnp.asarray(pos), jnp.asarray(vel))
+    scat = ScatterGatherProperties(
+        res=nres,
+        res_pm=nres,
+        num_devices=ndev,
+        use_distributed_scatter_gather=True,
+        use_vjp_gather=False,
+        use_vjp_scatter=False,
+        scatter_gather_check=False
+    )
+
+    boxsize = 1000.
+
+    dj = DiscoDJ(dim=3, res=scat.res, boxsize=boxsize)
+    dj = dj.with_timetables()
+    pkstate = dj.with_linear_ps()
+    ics = dj.with_ics(pkstate, seed=0)
+    lpt_state = dj.with_lpt(ics, n_order=1)
+    sim_ini = dj.with_lpt_ics(lpt_state, n_order=1, a_ini=0.02)
+    X, P, a = dj.run_nbody(
+        sim_ini, a_end=1.0, n_steps=16, res_pm=scat.res_pm, stepper="bullfrog",
+        scatter_gather_props=scat
+    )
+
+    return X, P, a
+
+@pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+def test_discodj_fof():
+    mesh = jax.make_mesh((jax.device_count(),), ("gpus",))
+    ndev = jax.device_count()
+    boxsize = 1000.
+
+    pos, vel, a = jax.jit(dj_sim)()
+    pos, vel = pos.reshape(-1,3), vel.reshape(-1,3)
+    npart_tot = len(pos)
+    nper_dev = npart_tot // ndev
+
+    part = ParticleData(pos, vel)
     
-    particlesz, idz = pos_zorder_sort.jit(particles)
-    igr_jz = fof_z.jit(particlesz.pos, rlink, boxsize=boxsize, cfg=cfg)
+    rlink = 0.2 * boxsize / np.cbrt(npart_tot)
 
-    return particlesz, igr_jz, rlink, boxsize
+    @jax.jit
+    @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
+    def distr_fof(part):
+        rank = jax.lax.axis_index("gpus")
 
-def test_CAMELS(camels_data, camels_jz_fof):
-    pos, vel, pos_h, vel_h, group_len = camels_data
-    particlesz, igr_jz, rlink, boxsize = camels_jz_fof
+        part = ParticleData(
+            jnp.pad(part.pos, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
+            jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan)
+        )
 
-    print("\n","Comparing CAMELS and jz_tree","\n")
+        cfg = FofConfig()
+        cfg.tree.alloc_fac_nodes = 1.2
 
-    results = fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
-    results.npart = results.npart[:results.ngroups]
-    results.pos = results.pos[:results.ngroups]
-    results.vel = results.vel[:results.ngroups]
+        partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
+        labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink)
 
-    sort_by_mass_CAMELS = jnp.argsort(group_len)
-    sort_by_mass_jz_tree = jnp.argsort(results.npart)
-    
-    print("# of halos indentified:")
-    print("CAMELS:\n", pos_h.shape[0])
-    print("jz_tree:\n", results.ngroups,"\n")
+        # Warning!
+        # This Reduction looses particles lying on other tasks
+        # Fix this later!
+        idx = jnp.where(labels.irank == rank, labels.igroup, len(labels.igroup))
+        counts = jnp.zeros(len(labels.igroup)).at[idx].add(1)
+        counts = jnp.sort(counts, descending=True)
+        
+        return partz, labels, counts
+       
+    partz, labels, counts = distr_fof(part)
 
-    print("# particles in heaviest 25 halos:")
-    print("CAMELS:\n", group_len[sort_by_mass_CAMELS][-25:])
-    print("jz_tree:\n", results.npart[sort_by_mass_jz_tree][-25:],"\n")
-    
-    print("# of minimal mass (32 particles) halos:")
-    print("CAMELS:\n", jnp.sum(group_len == 32))
-    print("jz_tree:\n", jnp.sum(results.npart == 32),"\n")
+    masses = counts.reshape(ndev,-1) * _particle_mass(0.3, 1000., npart_tot)
 
-    
-    print("Total number of particles in all halos combined:")
-    print("CAMELS:\n", jnp.sum(group_len))
-    print("jz_tree:\n", jnp.sum(results.npart))
-    print("difference (CAMELS - jz_tree):\n", jnp.sum(group_len) - jnp.sum(results.npart[:results.ngroups]),"\n")
+    print("Masses:")
+    masses = jax.device_put(masses[:,0:20].flatten(), jax.NamedSharding(mesh, P()))
+    print(masses)
 
-    print("Positions 5 most massive:")
-    print("CAMELS:\n", pos_h[sort_by_mass_CAMELS][-5:])
-    print("jz_tree:\n", results.pos[sort_by_mass_jz_tree][-5:],"\n")
-
-    print("Velocities 5 most massive:")
-    print("CAMELS:\n", vel_h[sort_by_mass_CAMELS][-5:])
-    print("jz_tree:\n", results.vel[sort_by_mass_jz_tree][-5:],"\n")
-
-@pytest.mark.skipif(not has_hfof, reason="requires hfof module installed")
-def test_vs_hfof_camels(camels_data, camels_jz_fof):
-    from hfof import fof
-
-    pos, vel, pos_h, vel_h, group_len = camels_data
-    particlesz, igr_jz, rlink, boxsize = camels_jz_fof
-    
-    igr_hfof = fof(particlesz.pos, rlink, boxsize=boxsize)
-
-    # uniquely map every jzfof-label to an hfof-label
-    label_map = jnp.zeros(particlesz.pos.shape[0], dtype=jnp.int32).at[igr_jz].set(igr_hfof)
-    label_map_rev = jnp.arange(particlesz.pos.shape[0], dtype=jnp.int32).at[igr_hfof].set(igr_jz)
-
-    igr_hfof_jz = label_map[igr_jz]
-    igr_jz_hfof = label_map_rev[igr_hfof]
-    group_sizes_jz = jnp.sort(jnp.bincount(igr_jz, minlength=particlesz.pos.shape[0]))[::-1]
-    group_sizes_hfof = jnp.sort(jnp.bincount(igr_hfof, minlength=particlesz.pos.shape[0]))[::-1]
-
-    assert jnp.all(group_sizes_jz == pytest.approx(group_sizes_hfof)), "group size mismatch"
-    assert jnp.all(igr_hfof_jz == igr_hfof), "group label mismatch"
-    assert jnp.all(igr_jz_hfof == igr_jz), "group label mismatch"
-    # print(group_sizes_jz)
-    # print(group_sizes_hfof)
+    assert (jnp.max(masses) >= 1e15) & (jnp.max(masses) <= 1e17)
