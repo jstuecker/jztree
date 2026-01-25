@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from typing import Tuple, Any, TypeAlias
 
-from .tools import conditional_callback, cumsum_starting_with_zero, inverse_of_splits
+from .tools import cumsum_starting_with_zero, inverse_of_splits, raise_if
 
 # Currently jax doesn't have a typehint for pytrees. We simply define one ourselves for clarity
 Pytree: TypeAlias = Any
@@ -188,21 +188,16 @@ def shift_particles_left(x, nsend, max_send, npart):
     rank, ndev, axis_name = get_rank_info()
     
     # Validate that send buffer is large enough
-    def send_size_err(nsend, max_send):
-        raise ValueError(f"Cannot fit {nsend} particles into buffer of size {max_send}!")
-    npart = npart + conditional_callback(
-        nsend >= max_send, send_size_err, nsend, max_send,
+    npart = npart + raise_if(nsend >= max_send,
+        "Cannot fit {nsend} particles into buffer of size {max_send}!",
+        nsend=nsend, max_send=max_send
     )
 
     # Validate that particle array has enough free space
     nget = send_to_left(nsend, axis_name)
-    def array_size_err(nhave, nget, nsend, nmax):
-        raise MemoryError(
-            f"Cannot shift particles: have={nhave}, get={nget}, send={nsend}, max={nmax}."
-            "(fix: larger allocaction)"
-        )
-    npart = npart + conditional_callback((
-        npart + nget - nsend >= pytree_len(x)), array_size_err, npart, nget, nsend, pytree_len(x)
+    npart = npart + raise_if(npart + nget - nsend >= pytree_len(x),
+        "Cannot shift particles: have={nhave}, get={nget}, send={nsend}, max={nmax}.",
+        nhave=npart, nget=nget, nsend=nsend, nmax=pytree_len(x)
     )
 
     # Send the particles
@@ -224,7 +219,7 @@ def shift_particles_left(x, nsend, max_send, npart):
 #                                     All To All communication                                     #
 # ------------------------------------------------------------------------------------------------ #
 
-def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, copy_self=True, pack_pytree=True):
+def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, err_hint="", copy_self=True, pack_pytree=True):
     """all_to_all communication with data-dependent communication volume
     
     We send to rank i: x[ispl[i]:ispl[i+1]] 
@@ -236,6 +231,7 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
             If not provided, we use a copy of x filled with jnp.nan (or 0 for integers)
     verify: If True, throws an error if output buffer is too small. Otherwise out-of-range values
             will simply be discarded.
+    err_hint: If given, add a hint to the potential error message, indicating how to fix it
     copy_self: Extract self-send data and copy it directly (surprisingly this is faster)
     """
     if output is None:
@@ -250,10 +246,11 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
     output_offsets = dev_spl[:-1]
 
     if verify:
-        def myerr(need, have):
-            raise MemoryError(f"The receiving buffer is too small, need={need}, have={have}")
         need = jnp.sum(recv_sizes)
-        recv_sizes = recv_sizes + conditional_callback(need > out_size, myerr, need, out_size)
+        recv_sizes = recv_sizes + raise_if(need > out_size,
+            "The receiving buffer is too small, need={need}, have={have}" + err_hint,
+            need=need, have=out_size
+        )
 
     if copy_self:
         # avoid communication for self i/o
@@ -304,10 +301,9 @@ def dynamic_all_gather(x, nsend, output=None, axis_name="gpus", verify=True):
 
     if verify:
         out_size = pytree_len(output)
-        def recv_buffer_err(need, out_size):
-            raise MemoryError(f"The receive buffer (size: {out_size}) is to small (need: {need})")
-        dev_spl = dev_spl + conditional_callback(
-            dev_spl[-1] >= out_size, recv_buffer_err, dev_spl[-1], out_size
+        dev_spl = dev_spl + raise_if(dev_spl[-1] >= out_size,
+            "The receiveing buffer (size: {out_size}) is to small (need: {need})",
+            out_size=out_size, need=dev_spl[-1],
         )
 
     input_off = jnp.zeros(ndev, jnp.int32)
@@ -341,7 +337,8 @@ def all_to_all_with_irank(
         output: jax.Array | Pytree | None = None,
         num: jax.Array | int | None = None,
         axis_name: str = "gpus",
-        verify: bool = True, 
+        verify: bool = True,
+        err_hint: str = "",
         copy_self: bool = True,
         pack_pytree: bool = True
     ):
@@ -350,7 +347,7 @@ def all_to_all_with_irank(
     To understand most arguments, see documentation of all_to_all_with_splits
     """
     xsort, dev_spl, isort = arange_for_comm(irank, x, num=num, axis_name=axis_name)
-    return all_to_all_with_splits(xsort, dev_spl, output, axis_name, verify=verify, copy_self=copy_self, pack_pytree=pack_pytree)
+    return all_to_all_with_splits(xsort, dev_spl, output, axis_name, verify=verify, err_hint=err_hint, copy_self=copy_self, pack_pytree=pack_pytree)
 
 def all_to_all_request(
     irank: jax.Array,
@@ -359,18 +356,21 @@ def all_to_all_request(
     output: jax.Array | Pytree | None = None,
     num: jax.Array | int | None = None,
     axis_name: str = "gpus",
-    verify: bool = True, 
+    verify: bool = True,
+    err_hint: str = "",
     copy_self: bool = True,
     pack_pytree: bool = True
 ) -> jax.Array:
     # First inform the task with the data which indices we need
     indices_sort, dev_spl, isort = arange_for_comm(irank, indices, num=num, axis_name=axis_name)
     indices, dev_spl = all_to_all_with_splits(
-        indices_sort, dev_spl, output=None, axis_name=axis_name, verify=verify, copy_self=copy_self, pack_pytree=pack_pytree
+        indices_sort, dev_spl, output=None, axis_name=axis_name, verify=verify, err_hint=err_hint,
+        copy_self=copy_self, pack_pytree=pack_pytree
     )
     # Then send back the data at those locations
     xsort, dev_spl = all_to_all_with_splits(
-        x[indices], dev_spl, output, axis_name=axis_name, verify=verify, copy_self=copy_self, pack_pytree=pack_pytree
+        x[indices], dev_spl, output, axis_name=axis_name, verify=verify, err_hint=err_hint,
+        copy_self=copy_self, pack_pytree=pack_pytree
     )
     # rearange to the original order
     invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort), dtype=isort.dtype))
@@ -383,7 +383,8 @@ def all_to_all_request_children(
     data: jax.Array | Pytree,
     output: jax.Array | Pytree | None = None,
     axis_name: str = "gpus",
-    verify: bool = True, 
+    verify: bool = True,
+    err_hint: str = "",
     copy_self: bool = True,
     pack_pytree: bool = True
 ):
@@ -394,7 +395,8 @@ def all_to_all_request_children(
 
     # First inform the task with the data which indices we need
     indices, dev_spl = all_to_all_with_splits(
-        indices, dev_spl, output=None, axis_name=axis_name, verify=verify, copy_self=copy_self, pack_pytree=pack_pytree
+        indices, dev_spl, output=None, axis_name=axis_name, verify=verify, err_hint=err_hint,
+        copy_self=copy_self, pack_pytree=pack_pytree
     )
         
     # fill a continous buffer with the requested data
@@ -407,12 +409,16 @@ def all_to_all_request_children(
     child_dev_spl = out_node_spl[dev_spl]
 
     # send back the node_sizes so the receiver knows where each node starts
-    node_sizes, node_dev_spl = all_to_all_with_splits(node_sizes, dev_spl, axis_name=axis_name, pack_pytree=pack_pytree)
+    node_sizes, node_dev_spl = all_to_all_with_splits(
+        node_sizes, dev_spl, axis_name=axis_name, verify=verify, err_hint=err_hint, 
+        pack_pytree=pack_pytree,
+    )
     node_spl = cumsum_starting_with_zero(node_sizes)
     
     # Now send the child data
     xchild, child_dev_spl = all_to_all_with_splits(
-        child_data, child_dev_spl, output, axis_name=axis_name, verify=verify, copy_self=copy_self, pack_pytree=pack_pytree
+        child_data, child_dev_spl, output, axis_name=axis_name, verify=verify, err_hint=err_hint,
+        copy_self=copy_self, pack_pytree=pack_pytree
     )
     
     return xchild, node_spl, child_dev_spl
@@ -444,10 +450,11 @@ def all_to_all_with_permute(x, ispl, buffer_bytes=8*1024**2, axis_name=None, ver
     ispl_recv = jnp.pad(jnp.cumsum(nrecv), (1,0))
 
     if verify:
-        def myerr(need, have):
-            raise MemoryError(f"The receiving buffer is too small, need={need}, have={have}")
-        need, have = ispl_recv[-1], len(output)
-        ispl_recv = ispl_recv + conditional_callback(need > have, myerr, need, have)
+        out_size = pytree_len(output)
+        ispl_recv = ispl_recv + raise_if(ispl_recv[-1] >= out_size,
+            "The receiving buffer (size: {out_size}) is to small (need: {need})",
+            out_size=out_size, need=ispl_recv[-1],
+        )
 
     nsteps = (jnp.roll(nsend, -rank) + bsize - 1) // bsize
     nsteps = jax.lax.pmax(nsteps, axis_name)

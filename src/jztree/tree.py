@@ -267,13 +267,9 @@ def distributed_zsort(x: jax.Array | Pos, nsamp: int = 1024):
     xz, idz = pos_zorder_sort(x)
     spl = search_sorted_z(get_pos(xz), xpivot)
 
-    nneed = jnp.max(spl[1:] - spl[:-1])
-    spl = spl + raise_if(nneed > pos.shape[0],
-        "Size of buffer is too small, need {n1}, have {n2}\n"
-        "Hint: Pad particles more or increase sort sampling.", n1=nneed, n2=pos.shape[0]
-    )
-
-    x = all_to_all_with_splits(xz, spl, axis_name=axis_name)[0]
+    x = all_to_all_with_splits(
+        xz, spl, axis_name=axis_name, err_hint="\nHint: Increase padding of positions"
+    )[0]
     xz, idz = pos_zorder_sort(x)
 
     # We have posz globally and locally in z-order now
@@ -283,7 +279,9 @@ def distributed_zsort(x: jax.Array | Pos, nsamp: int = 1024):
     spl_target = (jnp.arange(0, ndev+1) * (nparttot // ndev)).at[-1].set(nparttot)
     spl_send = jnp.clip(spl_target - spl_have[rank], 0, npart)
 
-    xz = all_to_all_with_splits(xz, spl_send, axis_name=axis_name)[0]
+    xz = all_to_all_with_splits(
+        xz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions"
+    )[0]
 
     return xz
 distributed_zsort.jit = jax.jit(distributed_zsort, static_argnames="nsamp")

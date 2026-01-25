@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from .config import KNNConfig
 from .data import KNNData
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
-from .tools import conditional_callback, inverse_indices
+from .tools import raise_if, inverse_indices
 
 from jztree_cuda import ffi_knn
 jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
@@ -64,10 +64,11 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
         rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize)
     )
 
-    def myerror(n1, n2):
-        raise MemoryError(f"The interaction list allocation is too small. (need: {n1} have: {n2})" +
-                          f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
-    ispl = ispl + conditional_callback(ispl[-1] > il.size, myerror, ispl[-1], il.size)
+    ispl = ispl + raise_if(ispl[-1] > il.size,
+        "The interaction list allocation is too small. (need: {n1}, have: {n2})\n"
+        "Hint: increase alloc_fac_ilist at least by a factor of {ratio:.1f}",
+        n1=ispl[-1], n2=il.size, ratio=ispl[-1]/il.size
+    )
 
     return il, ir2l, ispl
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac"])

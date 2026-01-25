@@ -7,8 +7,7 @@ from dataclasses import replace
 from .config import FofConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos
-from .tools import conditional_callback, inverse_of_splits, cumsum_starting_with_zero, offset_sum
-from .tools import div_ceil
+from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil, raise_if
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
 from .comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
@@ -49,11 +48,12 @@ def node_fof_and_ilist(
     child_igroup_out, child_ilist_ispl, child_ilist = pcast_like(res, like=node_ilist.iother)
     child_ilist = InteractionList(child_ilist_ispl, child_ilist)
 
-    def err(n1, n2):
-        raise MemoryError(f"The interaction list allocation is too small. (need: {n1} have: {n2})" +
-                          f"increase alloc_fac at least by a factor of {n1/n2:.1f}")
     n1, n2 = child_ilist.nfilled(), child_ilist.iother.shape[0]
-    child_igroup_out = child_igroup_out + conditional_callback(n1 > n2, err, n1, n2)
+    child_igroup_out = child_igroup_out + raise_if(n1 > n2,
+        "The interaction list allocation is too small. (need: {n1} have: {n2})\n"
+        "Hint: Increase alloc_fac_ilist at least by a factor of {ratio:.1f}",
+        n1=n1, n2=n2, ratio=n1/n2
+    )
 
     return child_igroup_out, child_ilist
 node_fof_and_ilist.jit = jax.jit(
