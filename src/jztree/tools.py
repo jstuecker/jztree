@@ -187,7 +187,7 @@ def _format_trace(frames):
     """
     lines = []
     for fi in reversed(frames):
-        lines.append(f"{fi.filename}:{fi.lineno} {fi.function}")
+        lines.append(f'  File "{fi.filename}", line {fi.lineno}, in {fi.function}')
     return lines
 
 def raise_if( pred, msg, *fmt_args, exc: ValueError=ValueError, max_trace_depth=12, **fmt_kwargs, ):
@@ -210,8 +210,10 @@ def raise_if( pred, msg, *fmt_args, exc: ValueError=ValueError, max_trace_depth=
         txt = "\n======== Relevant Error Message =========\n"
         txt += f"{exc.__name__}: {callsite}: {main}\n"
 
-        txt = txt + " Trace (tracing time, most recent call last):\n" + "\n".join(trace_lines)
-        txt = txt + "\n=========================================\n"
+        txt = txt + f" Trace (last {max_trace_depth}, tracing time, most recent call last):\n"
+        txt = txt + "-----------------------------------------\n"
+        txt = txt + "\n".join(trace_lines) + "\n"
+        txt = txt + "=========================================\n"
 
         raise exc(txt)
 
