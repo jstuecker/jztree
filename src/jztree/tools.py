@@ -156,3 +156,66 @@ def fori_dynamic_over_static(lower, upper, body_fun, init_val, *, unroll=None, n
 
     ndynamic = div_ceil(upper - lower, nstatic)
     return jax.lax.fori_loop(0, ndynamic, outer_body, init_val)
+
+# ------------------------------------------------------------------------------------------------ #
+#                                          Error handling                                          #
+# ------------------------------------------------------------------------------------------------ #
+
+def _capture_frames_above_raise_if(*, depth_from_here=2, max_depth=12):
+    """
+    Return a list[FrameInfo] starting at the user callsite (where raise_if is used),
+    then its callers, etc., up to max_depth.
+    """
+    frame = inspect.currentframe()
+    for _ in range(depth_from_here):
+        frame = frame.f_back if frame is not None else None
+    if frame is None:
+        return []
+
+    out = []
+    for _ in range(max_depth):
+        if frame is None:
+            break
+        out.append(inspect.getframeinfo(frame))
+        frame = frame.f_back
+    return out
+
+def _format_trace(frames):
+    """
+    Python-traceback-like ordering: most recent call last (outermost first).
+    We collected from inner->outer, so reverse.
+    """
+    lines = []
+    for fi in reversed(frames):
+        lines.append(f"{fi.filename}:{fi.lineno} {fi.function}")
+    return lines
+
+def raise_if( pred, msg, *fmt_args, exc: ValueError=ValueError, max_trace_depth=12, **fmt_kwargs, ):
+    pred = jnp.asarray(pred)
+
+    # Capture trace-time call chain starting at the *callsite* of raise_if
+    frames = _capture_frames_above_raise_if(depth_from_here=2, max_depth=max_trace_depth)
+
+    # The callsite frame is the first element we captured (innermost)
+    if frames:
+        callsite = f"{frames[0].filename}:{frames[0].lineno}"
+    else:
+        callsite = "<unknown>:0"
+
+    trace_lines = _format_trace(frames)
+
+    def _raise(*args, **kwargs):
+        main = msg.format(*args, **kwargs)
+
+        txt = "\n======== Relevant Error Message =========\n"
+        txt += f"{exc.__name__}: {callsite}: {main}\n"
+
+        txt = txt + " Trace (tracing time, most recent call last):\n" + "\n".join(trace_lines)
+        txt = txt + "\n=========================================\n"
+
+        raise exc(txt)
+
+    def do_raise(_):
+        return io_callback( _raise, jax.ShapeDtypeStruct((), jnp.int32), *fmt_args, **fmt_kwargs, )
+
+    return jax.lax.cond(pred, do_raise, lambda _: jnp.int32(0), operand=None)
