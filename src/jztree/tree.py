@@ -7,7 +7,7 @@ from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .config import TreeConfig
 from .tools import cumsum_starting_with_zero, div_ceil, raise_if
 from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
-from .comm import all_to_all_with_splits, global_splits
+from .comm import all_to_all_with_splits, global_splits, pcast_like, pcast_vma
 
 from jztree_cuda import ffi_tree, ffi_sort
 jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")
@@ -224,7 +224,7 @@ def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True,
         block_size=np.uint64(block_size)
     )[0]
 
-    xm = jax.lax.pcast(xm, tuple(jax.typeof(part.pos).vma), to="varying")
+    xm = pcast_like(xm, like=part.pos)
 
     return PosMass(pos=xm[...,0:3], mass=xm[...,4])
 center_of_mass.jit = jax.jit(center_of_mass, static_argnames=['kahan_summation', 'block_size'])
