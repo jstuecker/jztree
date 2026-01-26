@@ -8,10 +8,11 @@ from .config import FofConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil, raise_if
+from .tools import bucket_prefix_sum
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
 from .comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
-from .comm import all_to_all_request_children, pcast_vma, pcast_like
+from .comm import all_to_all_request_children, pcast_vma, pcast_like, all_to_all_with_splits
 
 from jztree_cuda import ffi_fof
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
@@ -630,6 +631,67 @@ def fof_is_superset(igroup_sup, igroup):
     
     return jnp.all(igroup_sup == label_map[igroup])
 
+from .comm import Pytree
+def distr_fof_order(label: Label, part: Pytree, npart: int):
+    # Labels point towards the root of a group, which may lie on another task
+    # Groups may be split over several tasks. We call disjoint parts of the group
+    # that may lie on other tasks "segments". To count particles we first count
+    # in segments and then send the segments to the root task
+    iseg = global_to_local_label(label)
+
+    size = len(iseg)
+    axis_name="gpus"
+    rank = jax.lax.axis_index(axis_name)
+    ndev = jax.lax.axis_size(axis_name)
+
+    # Count locally known roots
+    is_segment_root = iseg == jnp.arange(len(iseg))
+    seg_idx, num_segs = offset_sum(is_segment_root)
+    seg_idx = jnp.where(jnp.arange(size) < npart, seg_idx[iseg], size) # mask invalid particles
+    seg_counts = jnp.zeros(size, dtype=jnp.int32).at[seg_idx].add(1)
+
+    # Send segments to root task
+    segment_inv = jnp.where(is_segment_root, size=size, fill_value=size)[0]
+    seg_label = label[segment_inv]
+    
+    (seg_counts, seg_igroup), dev_spl, inv = all_to_all_with_irank(
+        seg_label.irank, (seg_counts, seg_label.igroup), 
+        num=num_segs, get_inverse=True, axis_name=axis_name
+    )
+    group_counts = jnp.zeros(size, dtype=jnp.int32).at[seg_idx[seg_igroup]].add(seg_counts)
+    # Mark counts at root particles for later
+    idx = jnp.arange(size)
+    is_group_root = (label.igroup == idx) & (label.irank == rank) & (idx < npart)
+    root_group_counts = jnp.where(is_group_root, group_counts[seg_idx], 0)
+
+    dev_counts = jax.lax.all_gather(jnp.sum(group_counts), axis_name)
+    seg_offsets = bucket_prefix_sum(seg_igroup, seg_counts)
+
+    # send back offsets
+    dense_seg_offsets, dev_spl = all_to_all_with_splits(
+        seg_offsets, dev_spl, axis_name=axis_name
+    )
+    seg_offsets = dense_seg_offsets[inv]
+
+    with jax.enable_x64():
+        dev_offsets = cumsum_starting_with_zero(jnp.astype(dev_counts, jnp.int64))
+        seg_offsets = jnp.astype(dense_seg_offsets[inv], jnp.int64) + dev_offsets[seg_label.irank]
+        
+        part_gid = seg_offsets[seg_idx] + bucket_prefix_sum(iseg)
+
+        nparttot = dev_offsets[-1]
+        target_global_dev_spl = jnp.pad(jnp.arange(ndev) * (nparttot // ndev), (0,1), constant_values=nparttot)
+
+        send_irank = jnp.searchsorted(target_global_dev_spl, part_gid, side="right") - 1
+        (gid, part, gcnt), dev_spl = all_to_all_with_irank(send_irank, (part_gid, part, root_group_counts), num=npart)
+
+        valid = jnp.arange(len(gid)) < dev_spl[-1]
+        itarget = jnp.where(valid, gid - target_global_dev_spl[rank], size)
+        isort = jnp.zeros_like(itarget).at[itarget].set(jnp.arange(size))
+        label = label[isort]
+        part = jax.tree.map(lambda x: x[isort], part)
+    
+    return part, gcnt[isort], dev_spl[-1]
 
 def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
                   boxsize : float, mpart : float | None = None, Nmin : int = 20):
