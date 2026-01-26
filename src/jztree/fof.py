@@ -307,8 +307,6 @@ def contract_distributed(labels: Label, igroup: jax.Array, dev_spl: int):
     is_local_root = idx == igroup
     valid = (idx >= dev_spl[rank]) & (idx < dev_spl[rank+1])
     mask = valid & is_local_root & (labels.irank != rank)
-
-    # jax.debug.log("n-to-contract: {}", jnp.sum(mask))
     
     def contraction_step(carry):
         labels, mask, _ = carry
@@ -637,12 +635,11 @@ def distr_fof_order(label: Label, part: Pytree, npart: int):
     # Groups may be split over several tasks. We call disjoint parts of the group
     # that may lie on other tasks "segments". To count particles we first count
     # in segments and then send the segments to the root task
+    rank, ndev, axis_name = get_rank_info()
+
     iseg = global_to_local_label(label)
 
     size = len(iseg)
-    axis_name="gpus"
-    rank = jax.lax.axis_index(axis_name)
-    ndev = jax.lax.axis_size(axis_name)
 
     # Count locally known roots
     is_segment_root = iseg == jnp.arange(len(iseg))
@@ -659,13 +656,14 @@ def distr_fof_order(label: Label, part: Pytree, npart: int):
         num=num_segs, get_inverse=True, axis_name=axis_name
     )
     group_counts = jnp.zeros(size, dtype=jnp.int32).at[seg_idx[seg_igroup]].add(seg_counts)
+    group_offsets = cumsum_starting_with_zero(group_counts)
     # Mark counts at root particles for later
     idx = jnp.arange(size)
     is_group_root = (label.igroup == idx) & (label.irank == rank) & (idx < npart)
     root_group_counts = jnp.where(is_group_root, group_counts[seg_idx], 0)
 
     dev_counts = jax.lax.all_gather(jnp.sum(group_counts), axis_name)
-    seg_offsets = bucket_prefix_sum(seg_igroup, seg_counts)
+    seg_offsets = group_offsets[seg_idx[seg_igroup]] + bucket_prefix_sum(seg_igroup, seg_counts, num=dev_spl[-1])
 
     # send back offsets
     dense_seg_offsets, dev_spl = all_to_all_with_splits(
@@ -677,7 +675,7 @@ def distr_fof_order(label: Label, part: Pytree, npart: int):
         dev_offsets = cumsum_starting_with_zero(jnp.astype(dev_counts, jnp.int64))
         seg_offsets = jnp.astype(dense_seg_offsets[inv], jnp.int64) + dev_offsets[seg_label.irank]
         
-        part_gid = seg_offsets[seg_idx] + bucket_prefix_sum(iseg)
+        part_gid = seg_offsets[seg_idx] + bucket_prefix_sum(iseg, num=npart)
 
         nparttot = dev_offsets[-1]
         target_global_dev_spl = jnp.pad(jnp.arange(ndev) * (nparttot // ndev), (0,1), constant_values=nparttot)
@@ -687,14 +685,16 @@ def distr_fof_order(label: Label, part: Pytree, npart: int):
 
         valid = jnp.arange(len(gid)) < dev_spl[-1]
         itarget = jnp.where(valid, gid - target_global_dev_spl[rank], size)
+
         isort = jnp.zeros_like(itarget).at[itarget].set(jnp.arange(size))
-        label = label[isort]
+        
+        gcnt = gcnt[isort]
         part = jax.tree.map(lambda x: x[isort], part)
     
-    return part, gcnt[isort], dev_spl[-1]
+    return part, gcnt, dev_spl[-1]
 
 def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
-                  boxsize : float, mpart : float | None = None, Nmin : int = 20):
+                  boxsize: float | None = None, mpart : float | None = None, Nmin : int = 20):
     ''' Reduce particle data to FOF group data.
     Parameters
     ----------
@@ -743,12 +743,14 @@ def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
     # center each position around its group's root/parent
     # and create shortest distance in periodic geometry
     displacement_group = pos - pos[igroup_z] 
-    displacement_group -= boxsize * jnp.round(displacement_group / boxsize)
+    if boxsize is not None:
+        displacement_group -= boxsize * jnp.round(displacement_group / boxsize)
     # add positions to the corresponding groups and take mean
     pos_COM = pos_COM.at[index_offset].add(displacement_group) / npart[:,None]
     # add the centers back and apply periodicity
     pos_COM = pos_COM.at[index_roots].add(pos)
-    pos_COM %= boxsize
+    if boxsize is not None:
+        pos_COM %= boxsize
 
     ## VELOCITIES
     vel_COM = None

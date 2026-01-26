@@ -89,9 +89,12 @@ def inverse_indices(iargsort):
     iunsort = iunsort.at[iargsort].set(jnp.arange(len(iargsort), dtype=iargsort.dtype))
     return iunsort
 
-def bucket_prefix_sum(key, count=None):
+def bucket_prefix_sum(key, count=None, num=None):
     """A prefix sum per key: result = sum(count[key[:i] == key[i]]), but jittable
     i.e. the prefix-sum of points with the same index"""
+    if num is not None:
+        key = jnp.where(jnp.arange(len(key)) < num, key, jnp.iinfo(key.dtype).max)
+
     isort = jnp.argsort(key, stable=True)
     key_sort = key[isort]
     if count is None:
@@ -100,8 +103,11 @@ def bucket_prefix_sum(key, count=None):
         count_sort = count[isort]
         csum_sort = jnp.cumsum(count_sort) - count_sort
     ifirst = jnp.searchsorted(key_sort, key_sort, side="left")
+    rank = jax.lax.axis_index("gpus")
     
     cdiff = csum_sort - csum_sort[ifirst]
+    if num is not None:
+        isort = jnp.where(jnp.arange(len(isort)) < num, isort, len(isort))
     invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort)))
 
     return cdiff[invsort]
