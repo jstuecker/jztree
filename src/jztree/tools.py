@@ -89,6 +89,23 @@ def inverse_indices(iargsort):
     iunsort = iunsort.at[iargsort].set(jnp.arange(len(iargsort), dtype=iargsort.dtype))
     return iunsort
 
+def bucket_prefix_sum(key, count=None):
+    """A prefix sum per key: result = sum(count[key[:i] == key[i]]), but jittable
+    i.e. the prefix-sum of points with the same index"""
+    isort = jnp.argsort(key, stable=True)
+    key_sort = key[isort]
+    if count is None:
+        csum_sort = jnp.arange(len(key), dtype=key.dtype)
+    else:
+        count_sort = count[isort]
+        csum_sort = jnp.cumsum(count_sort) - count_sort
+    ifirst = jnp.searchsorted(key_sort, key_sort, side="left")
+    
+    cdiff = csum_sort - csum_sort[ifirst]
+    invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort)))
+
+    return cdiff[invsort]
+
 # ------------------------------------------------------------------------------------------------ #
 #                                          Scatter Helpers                                         #
 # ------------------------------------------------------------------------------------------------ #
