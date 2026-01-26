@@ -219,6 +219,34 @@ def shift_particles_left(x, nsend, max_send, npart):
 #                                     All To All communication                                     #
 # ------------------------------------------------------------------------------------------------ #
 
+def ragged_all_to_all_through_buf(operand, output, input_offsets, send_sizes, output_offsets, recv_sizes, *, axis_name, buf_size=1024):
+    """Does the same as jax.lax.ragged_all_to_all, but works on CPU and needs a buffer"""
+    ndev = jax.lax.axis_size(axis_name)
+    output_offsets = jax.lax.all_to_all(output_offsets, axis_name, 0, 0, tiled=True)
+
+    xp, xspec = _pack_pytree(operand)
+
+    def comm(icom, output):
+        igpu, ioff = jnp.indices((ndev, buf_size))
+        inoff = input_offsets[igpu] + icom*buf_size + ioff
+        xbuf = xp[inoff]
+
+        xrecv = jax.lax.all_to_all(xbuf, axis_name, 0, 0, tiled=True)
+
+        valid = icom*buf_size + ioff < recv_sizes[igpu]
+        outoff = output_offsets[igpu] + icom*buf_size + ioff
+        outoff = jnp.where(valid, outoff, output.size)
+        output = output.at[outoff].set(xrecv)
+
+        return output
+    
+    max_size = jax.lax.pmax(jnp.max(send_sizes), "gpus")
+    ncomm = (max_size + buf_size - 1) // buf_size
+    
+    op, ospec = _pack_pytree(output)
+    op = jax.lax.fori_loop(0, ncomm, comm, op)
+    return _unpack_pytree(op, ospec)
+
 def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, err_hint="", copy_self=True, pack_pytree=True):
     """all_to_all communication with data-dependent communication volume
     
@@ -276,6 +304,10 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
         return jax.lax.ragged_all_to_all(
             xi, outi, input_offsets, send_sizes, output_offsets, recv_sizes, axis_name=axis_name
         )
+        # uncomment this for CPU
+        # return ragged_all_to_all_through_buf(
+        #     xi, outi, input_offsets, send_sizes, output_offsets, recv_sizes, axis_name=axis_name
+        # )
 
     if pack_pytree:
         xp, xspec = _pack_pytree(x)
