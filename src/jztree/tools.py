@@ -106,6 +106,18 @@ def bucket_prefix_sum(key, count=None):
 
     return cdiff[invsort]
 
+def smallest_larger_than(values, ind, at_end=None):
+    """Assumes values are sorted"""
+    ibin = jnp.searchsorted(values, ind, side="right") - 1
+    ibin = jnp.where(ibin >= 0, ibin, len(values))
+
+    imin = jnp.full(len(values)-1, jnp.iinfo(jnp.int32).max).at[ibin].min(ind)
+    if at_end is not None:
+        imin = jnp.pad(imin, (0,1), constant_values=at_end)
+    imin = jnp.minimum.accumulate(imin[::-1])[::-1]
+    
+    return imin
+
 # ------------------------------------------------------------------------------------------------ #
 #                                          Scatter Helpers                                         #
 # ------------------------------------------------------------------------------------------------ #
