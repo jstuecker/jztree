@@ -5,7 +5,7 @@ import jax.numpy as jnp
 from dataclasses import replace
 
 from .config import FofConfig
-from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofReducedData
+from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil, raise_if
 from .tools import bucket_prefix_sum
@@ -693,8 +693,116 @@ def distr_fof_order(label: Label, part: Pytree, npart: int):
     
     return part, gcnt, dev_spl[-1]
 
+def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int = 20):
+    """The last group of each rank may span accross ranks. Here, we identify for each
+    rank the rank and the local remaining count of the first group which may have started elsewhere
+    a count of zero indicates no cross-task group
+    """
+    rank, ndev, axis_name = get_rank_info()
+
+    idx = jnp.arange(len(group_counts))
+    last_group_start = jnp.max(jnp.where((group_counts > 0) & (idx < npart), idx, 0))
+    last_group_count = group_counts[last_group_start]
+
+    with jax.enable_x64():
+        dev_npart = jax.lax.all_gather(npart, axis_name)
+        dev_spl = cumsum_starting_with_zero(jnp.astype(dev_npart, jnp.int64))
+
+        gl_last_group_end = dev_spl[rank] + last_group_start + last_group_count
+        dev_add_count = gl_last_group_end - dev_spl[:-1]
+        dev_add_count = jnp.where((last_group_count < Nmin) | (jnp.arange(ndev) <= rank), 0, dev_add_count)
+        dev_add_count = jnp.minimum(dev_add_count, dev_npart)
+
+        dev_recv_count = jax.lax.all_to_all(dev_add_count, axis_name, 0, 0, tiled=True)
+
+    first_group_count = jnp.max(dev_recv_count.astype(jnp.int32))
+    first_group_rank = jnp.argmax(dev_recv_count.astype(jnp.int32))
+
+    return last_group_start, first_group_rank, first_group_count
+
+
+def distr_fof_catalogue(part: ParticleData, group_counts: jax.Array, npart: int, Nmin: int = 20,
+                        boxsize: float = 0., pmass: float = 1., size_cata: int | None = None) -> FofCatalogue:
+    rank, ndev, axis_name = get_rank_info()
+
+    size_part = len(group_counts)
+
+    if size_cata is None:
+        size_cata = size_part // Nmin # Worst case estimate of catalogue size
+    
+    last_group_start, first_group_rank, first_group_count = distr_cross_task_group_info(
+        group_counts, npart, Nmin=Nmin
+    )
+    
+    # To simplify reductions we add an extra group at the beginning that carries everything
+    # that belongs to the previous task
+    keep_as_group = group_counts >= Nmin
+
+    # Create dense information
+    csum = jnp.cumsum(keep_as_group.astype(jnp.int32))
+    part_gr_idx, ngroups = csum, csum[-1]
+
+    gr_start = jnp.where(keep_as_group, fill_value=size_part, size=size_cata)[0]
+    gr_valid = jnp.arange(size_cata) < ngroups
+    gr_counts = group_counts[gr_start] * gr_valid
+
+    # add in extra group at beginning, we'll remove it later
+    gr_start = jnp.pad(gr_start, (1,0), constant_values=0)
+    gr_valid = jnp.pad(gr_valid, (1,0), constant_values=True)
+    gr_counts = jnp.pad(gr_counts, (1,0), constant_values=first_group_count)
+
+    idx = jnp.arange(size_part)
+    part_valid = (part_gr_idx >= 0) & (idx < npart) &  (idx < gr_start[part_gr_idx] + gr_counts[part_gr_idx])
+    part_gr_idx = jnp.where(part_valid, part_gr_idx, size_cata+1)
+
+    cata = FofCatalogue(ngroups=ngroups.reshape(1), counts=gr_counts)
+
+    # Masses
+    part_mass = getattr(part, "mass", pmass)
+
+    def sum_particles(val, invalid_val=0):
+        gr_val = jnp.zeros((size_cata+1,) + val.shape[1:], val.dtype)
+        gr_val = gr_val.at[part_gr_idx].add(val)
+        valid = gr_valid.reshape((size_cata+1,) + (1,) * (gr_val.ndim-1))
+        gr_val = jnp.where(valid, gr_val, invalid_val)
+
+        dev_mask = (np.arange(ndev) == first_group_rank).reshape((-1,) + (1,) * (gr_val.ndim-1))
+        send_val = jnp.where(dev_mask, gr_val[0], 0)
+        add_last_val = jax.lax.all_to_all(send_val, axis_name, 0, 0, tiled=True)
+        return gr_val.at[ngroups].add(jnp.sum(add_last_val, axis=0))
+    def get_gr_prop(val):
+        last_val = jax.lax.all_gather(val[ngroups], axis_name)
+        return val.at[0].set(last_val[first_group_rank])
+    def wrap_dx(dx):
+        if boxsize:
+            return ((dx + 0.5*boxsize) % boxsize) - 0.5 * boxsize
+        else:
+            return dx
+    def wrap_pos(x):
+        return x % boxsize if boxsize else x
+
+    cata.mass = sum_particles(part_mass)
+
+    if hasattr(part, "pos"):
+        pos0 = get_gr_prop(part.pos[gr_start])
+        m_x_pos = sum_particles(wrap_dx(part.pos - pos0[part_gr_idx]) * part_mass[:,None])
+        cata.com_pos = wrap_pos((m_x_pos / cata.mass[:,None]) + pos0)
+
+    if hasattr(part, "vel"):
+        vel0 = get_gr_prop(part.vel[gr_start])
+        m_x_vel = sum_particles((part.vel - vel0[part_gr_idx]) * part_mass[:,None])
+        cata.com_vel = (m_x_vel / cata.mass[:,None]) + vel0
+
+    def remove_last(x):
+        return x[1:] if len(x) == size_cata+1 else x
+
+    cata = jax.tree.map(remove_last, cata)
+
+    return cata
+
+
 def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
-                  boxsize: float | None = None, mpart : float | None = None, Nmin : int = 20):
+                  boxsize: float | None = None, Nmin : int = 20):
     ''' Reduce particle data to FOF group data.
     Parameters
     ----------
@@ -734,9 +842,11 @@ def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
     npart = jnp.where(npart == 0, jnp.nan, npart).astype(jnp.int32)
 
     ## MASSES
-    mass = None
+    mpart = getattr(particles_z, "mass", None)
     if mpart is not None:
-        mass = mpart * npart
+        mass = jnp.zeros(Ngroupsmax, jnp.float32).at[index_offset].add(mpart)
+    else:
+        mass = None
 
     ## POSITIONS
     pos_COM = jnp.zeros((Ngroupsmax, 3), jnp.float32)
@@ -763,4 +873,4 @@ def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
         vel_COM = vel_COM.at[index_roots].add(vel)
 
     ngroups = jnp.sum(index_roots < Ngroupsmax)
-    return FofReducedData(ngroups, npart, pos_COM, vel_COM, mass)
+    return FofCatalogue(ngroups, counts=npart, com_pos=pos_COM, com_vel=vel_COM, mass=mass)

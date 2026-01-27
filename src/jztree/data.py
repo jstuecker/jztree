@@ -46,16 +46,9 @@ class PosLvlId(PosLvl):
 @jax.jax.tree_util.register_dataclass
 @dataclass
 class ParticleData:
-    ''' Data class for particle data.
-    Attributes
-    ----------
-    pos : jax.Array
-        positions of the particles, shape (N, 3)
-    vel : jax.Array | None
-        velocities of the particles, shape (N, 3), optional
-    '''
-    pos : jax.Array
-    vel : jax.Array | None = None
+    pos: jax.Array
+    mass: jax.Array | None = None 
+    vel: jax.Array | None = None
 
     def __post_init__(self):
         assert self.pos.shape[1] == 3, "provide positions as an array of shape (N, 3)"
@@ -364,7 +357,7 @@ class FofData:
 
 @jax.jax.tree_util.register_dataclass
 @dataclass
-class FofReducedData:
+class FofCatalogue:
     ''' Data class for FOF group data.
     Attributes
     ----------
@@ -378,9 +371,9 @@ class FofReducedData:
         total mass of the groups, optional
     '''
     ngroups : int
-    npart : jax.Array
-    pos : jax.Array
-    vel : jax.Array | None = None
+    counts : jax.Array | None = None
+    com_pos : jax.Array | None = None
+    com_vel : jax.Array | None = None
     mass : jax.Array | None = None
     # TODO: add more properties
 
