@@ -800,7 +800,7 @@ def fof_catalogue(
     cata = FofCatalogue(ngroups=ngroups.reshape(1), count=gr_counts, offsets=gr_start)
 
     # Masses
-    if getattr(part, "mass") is not None:
+    if getattr(part, "mass", None) is not None:
         part_mass = getattr(part, "mass")
         if pmass is not None:
             print("Warning: Ignoring provided pmass, since particles have mass attribute")
@@ -810,7 +810,7 @@ def fof_catalogue(
         part_mass = jnp.asarray(pmass if pmass is not None else 1.0)
     cata.mass = sum_particles(part_mass)
 
-    if getattr(part, "pos") is not None:
+    if getattr(part, "pos", None) is not None:
         pos0 = get_gr_prop(part.pos[gr_start])
         m_x_pos = sum_particles(wrap_dx(part.pos - pos0[part_gr_idx]) * part_mass[...,None])
         cata.com_pos = wrap_pos((m_x_pos / cata.mass[:,None]) + pos0)
@@ -819,14 +819,14 @@ def fof_catalogue(
         m_x_r2 = sum_particles((dx[...,0]**2 + dx[...,1]**2 + dx[...,2]**2) * part_mass)
         cata.com_inertia_radius = jnp.sqrt(m_x_r2 / cata.mass)
 
-    if getattr(part, "vel") is not None:
+    if getattr(part, "vel", None) is not None:
         vel0 = get_gr_prop(part.vel[gr_start])
         m_x_vel = sum_particles((part.vel - vel0[part_gr_idx]) * part_mass[...,None])
         cata.com_vel = (m_x_vel / cata.mass[:,None]) + vel0
 
-    def remove_first(x): # remove the first "fake" group that we inserted
+    # remove the first "fake" group that we inserted:
+    def remove_first(x):
         return x[1:] if len(x) == size_cata+1 else x
-
     cata = jax.tree.map(remove_first, cata)
 
     return cata
