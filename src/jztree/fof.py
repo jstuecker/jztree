@@ -98,17 +98,6 @@ node_to_child_label.jit = jax.jit(node_to_child_label, static_argnames=("size_ch
 #     else:
 #         return jnp.stack((dx, dy, dz), axis=-1)
 
-# def node_to_child_label2(node_igroup, node_lvl, spl, size, rlink):
-#     inode = inverse_of_splits(spl, size)
-
-#     node_is_linked = jnp.arange(len(node_igroup)) != node_igroup
-#     node_is_linked = node_is_linked | (level_to_extend(node_lvl, diag=True) <= rlink)
-
-#     idx = jnp.arange(size)
-#     igroup = jnp.where(node_is_linked[inode], spl[node_igroup[inode]], idx)
-
-#     return igroup
-
 def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
                   ) -> Tuple[FofNodeData, InteractionList]:
     nplanes = th.num_planes()
@@ -169,32 +158,6 @@ def global_to_local_label(labels: Label) -> jax.Array:
     )
     
     return jnp.where(labels.igroup >= 0, indices[inv], labels.igroup)
-
-def masked_unique_pairs(pairs: jax.Array, mask: jax.Array) -> Tuple[jax.Array, jax.Array, jax.Array]:
-    """Get unique pairs among the masked locations
-
-    returns pairs_unique, indices, num
-
-    indices are so that pars == pairs_unique[indices] at locations where mask is True
-    assumes there are no negative values in tuples
-    """
-    masked_pairs, num, inv_mask = masked_to_dense(
-        pairs, mask, get_inverse=True, fill_value=-1
-    )
-    # To avoid counting invalid pairs as an extra label, we set them to the first valid label
-    masked_pairs = jnp.where(masked_pairs == -1, masked_pairs[0], masked_pairs)
-
-    pair_unique, inv = jnp.unique(
-        masked_pairs, axis=0, size=len(masked_pairs), return_inverse=True, fill_value=-1
-    )
-
-    return pair_unique, inv[inv_mask], jnp.sum(pair_unique[...,0] != -1)
-
-def unique_labels(labels: Label, mask: jax.Array) -> Tuple[Label, jax.Array, jax.Array]:
-    lab, inv, num = masked_unique_pairs(labels.stacked(), mask)
-
-    return Label(lab[...,0], lab[...,1]), inv, num
-
 
 def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
@@ -350,30 +313,6 @@ def link_distributed(
     )
 
     return contract_distributed(labels, igroup, dev_spl)
-
-def distr_node_to_child_label(nodes: FofNodeData, size_child: int, rlink: float) -> jax.Array:
-    rank, ndev, axis_name = get_rank_info()
-
-    valid = jnp.arange(len(nodes.lvl)) < nodes.num
-
-    local_child_labels = Label(
-        jnp.full(size_child, rank),
-        node_to_child_label(nodes.label.igroup, nodes.lvl, nodes.spl, size_child, rlink=rlink,
-                            flag_local=(nodes.label.irank == rank) & (valid)),
-    )
-
-    inode = inverse_of_splits(nodes.spl, size_child)
-
-    request, inv, num = unique_labels(nodes.label, (nodes.label.irank != rank) & valid)
-    remote_child_labels = all_to_all_request(
-        request.irank, request.igroup, local_child_labels[nodes.spl[:-1]], num=num, axis_name=axis_name
-    )
-
-    child_labels = tree_where(
-        nodes.label[inode].irank == rank, local_child_labels, remote_child_labels[inv[inode]]
-    )
-
-    return child_labels
 
 def get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
     """Finds the minimum of labels that are pointed to as the same local group"""
