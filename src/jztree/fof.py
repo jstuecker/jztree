@@ -595,7 +595,7 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
         (gid, part, gcnt), dev_spl = all_to_all_with_irank(send_irank, (part_gid, part, root_group_counts), num=npart)
 
         valid = jnp.arange(len(gid)) < dev_spl[-1]
-        itarget = jnp.where(valid, gid - target_global_dev_spl[rank], size)
+        itarget = jnp.where(valid, gid - target_global_dev_spl[rank], jnp.arange(len(gid)))
 
         isort = jnp.zeros_like(itarget).at[itarget].set(jnp.arange(size))
         
@@ -847,7 +847,7 @@ def distr_fof_and_catalogue(
     else:
         partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
     labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, cfg=cfg)
-    partf, counts, npart = distr_fof_order(labels, partz, size_out=1024*1024)
+    partf, counts, npart = distr_fof_order(labels, partz)
     catalogue = fof_catalogue_from_groups(partf, counts, npart, Nmin=20, boxsize=boxsize)
 
     return partf, catalogue
