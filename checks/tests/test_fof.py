@@ -80,12 +80,12 @@ def test_CAMELS(camels_data, camels_jz_fof):
     print("\n","Comparing CAMELS and jz_tree","\n")
 
     results = fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
-    results.counts = results.counts[:results.ngroups]
+    results.count = results.count[:results.ngroups]
     results.com_pos = results.com_pos[:results.ngroups]
     results.com_vel = results.com_vel[:results.ngroups]
 
     sort_by_mass_CAMELS = jnp.argsort(group_len)
-    sort_by_mass_jz_tree = jnp.argsort(results.counts)
+    sort_by_mass_jz_tree = jnp.argsort(results.count)
     
     print("# of halos indentified:")
     print("CAMELS:\n", pos_h.shape[0])
@@ -93,17 +93,17 @@ def test_CAMELS(camels_data, camels_jz_fof):
 
     print("# particles in heaviest 25 halos:")
     print("CAMELS:\n", group_len[sort_by_mass_CAMELS][-25:])
-    print("jz_tree:\n", results.counts[sort_by_mass_jz_tree][-25:],"\n")
+    print("jz_tree:\n", results.count[sort_by_mass_jz_tree][-25:],"\n")
     
     print("# of minimal mass (32 particles) halos:")
     print("CAMELS:\n", jnp.sum(group_len == 32))
-    print("jz_tree:\n", jnp.sum(results.counts == 32),"\n")
+    print("jz_tree:\n", jnp.sum(results.count == 32),"\n")
 
     
     print("Total number of particles in all halos combined:")
     print("CAMELS:\n", jnp.sum(group_len))
-    print("jz_tree:\n", jnp.sum(results.counts))
-    print("difference (CAMELS - jz_tree):\n", jnp.sum(group_len) - jnp.sum(results.counts[:results.ngroups]),"\n")
+    print("jz_tree:\n", jnp.sum(results.count))
+    print("difference (CAMELS - jz_tree):\n", jnp.sum(group_len) - jnp.sum(results.count[:results.ngroups]),"\n")
 
     print("Positions 5 most massive:")
     print("CAMELS:\n", pos_h[sort_by_mass_CAMELS][-5:])

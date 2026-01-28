@@ -358,24 +358,13 @@ class FofData:
 @jax.jax.tree_util.register_dataclass
 @dataclass
 class FofCatalogue:
-    ''' Data class for FOF group data.
-    Attributes
-    ----------
-    npart : jax.Array
-        number of particles in each group
-    pos : jax.Array
-        center of mass positions of the groups, shape (Ngroups, 3)
-    vel : jax.Array | None
-        center of mass velocities of the groups, shape (Ngroups, 3), optional
-    mass : jax.Array | None
-        total mass of the groups, optional
-    '''
-    ngroups : int
-    counts : jax.Array | None = None
-    com_pos : jax.Array | None = None
-    com_vel : jax.Array | None = None
-    mass : jax.Array | None = None
-    # TODO: add more properties
+    ngroups: int
+    mass: jax.Array | None = None
+    count: jax.Array | None = None
+    offsets: jax.Array | None = None
+    com_pos: jax.Array | None = None
+    com_vel: jax.Array | None = None
+    com_inertia_radius: jax.Array | None = None
 
 # ------------------------------------------------------------------------------------------------ #
 #                                     KNN Specific Data Classes                                    #
