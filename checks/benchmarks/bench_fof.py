@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from dataclasses import replace
 from jztree.config import FofConfig
 from jztree.tree import pos_zorder_sort, build_tree_hierarchy
-from jztree.fof import node_node_fof, particle_particle_fof, fof
+from jztree.fof import node_node_fof, particle_particle_fof, fof_labels
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
@@ -33,7 +33,7 @@ def bench_fof_steps(jax_bench, pos, N):
         tag="particle_particle"
     )[1]
 
-    jb.measure(fn_jit=fof.jit, pos=pos, rlink=rlink, boxsize=boxsize, tag="total")
+    jb.measure(fn_jit=fof_labels.jit, pos=pos, rlink=rlink, boxsize=boxsize, tag="total")
 
 @pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("N", [int(1e5), int(3e5), int(1e6), int(3e6), int(1e7)])
@@ -44,7 +44,7 @@ def bench_fof_uniform(jax_bench, pos, N):
     rlink = 0.2 * boxsize / N**(1/3)
     pos = jax.random.uniform(jax.random.PRNGKey(0), (N, 3), minval=0.0, maxval=boxsize)
 
-    jb.measure(fn_jit=fof.jit, pos=pos, rlink=rlink, boxsize=boxsize)
+    jb.measure(fn_jit=fof_labels.jit, pos=pos, rlink=rlink, boxsize=boxsize)
 
 def dj_sim(ngrid, boxsize):
     from discodj import DiscoDJ
@@ -73,4 +73,4 @@ def bench_fof_cosmo(jax_bench, pos, ngrid):
 
     cfg = FofConfig(alloc_fac_ilist=64)
 
-    jb.measure(fn_jit=fof.jit, pos=pos, rlink=0.2*boxsize/ngrid, boxsize=boxsize, cfg=cfg)
+    jb.measure(fn_jit=fof_labels.jit, pos=pos, rlink=0.2*boxsize/ngrid, boxsize=boxsize, cfg=cfg)

@@ -638,7 +638,7 @@ def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int =
 
     return first_group_rank, first_group_count
 
-def fof_catalogue(
+def fof_catalogue_from_groups(
         part: ParticleData, # Particles must be in Group order! (See fof_order/distr_fof_order)
         group_counts: jax.Array,
         npart: int | None = None,
@@ -750,7 +750,7 @@ def fof_catalogue(
 #                                          User Interface                                          #
 # ------------------------------------------------------------------------------------------------ #
 
-def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
+def fof_labels_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
     th = build_tree_hierarchy(posz, cfg_tree=cfg.tree)
     node_data, ilist = node_node_fof(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
@@ -758,17 +758,17 @@ def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = F
     return particle_particle_fof(
         node_data, ilist, posz, rlink=rlink, boxsize=boxsize
     )
-fof_z.jit = jax.jit(fof_z, static_argnames=["rlink", "boxsize", "cfg"])
+fof_labels_z.jit = jax.jit(fof_labels_z, static_argnames=["rlink", "boxsize", "cfg"])
 
-def fof(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
+def fof_labels(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
     posz, idz = pos_zorder_sort(pos)
     
-    igroupz = fof_z(posz, rlink, boxsize=boxsize, cfg=cfg)
+    igroupz = fof_labels_z(posz, rlink, boxsize=boxsize, cfg=cfg)
 
     igroup = igroupz.at[idz].set(igroupz)
 
     return igroup
-fof.jit = jax.jit(fof, static_argnames=["rlink", "boxsize", "cfg"])
+fof_labels.jit = jax.jit(fof_labels, static_argnames=["rlink", "boxsize", "cfg"])
 
 def distr_fof_z_with_tree(
         posz: jax.Array, th: TreeHierarchy, rlink: float, 
@@ -805,3 +805,52 @@ def distr_fof(part: Pos, npart_tot: int, rlink: float, boxsize: float = 0.,
     labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
 
     return partz, labels
+
+# ------------------------------------------------------------------------------------------------ #
+#                                        New User Interface                                        #
+# ------------------------------------------------------------------------------------------------ #
+
+def fof_and_catalogue(
+        part: ParticleData,
+        rlink: float,
+        boxsize: float=0.,
+        cfg: FofConfig = FofConfig(),
+        input_z_ordered: bool = False
+    ) -> Tuple[ParticleData, FofCatalogue]:
+    """Returns particles in FoF-order and the FoFCatalogue"""
+    if input_z_ordered:
+        partz = part
+    else:
+        partz = pos_zorder_sort(part)[0]
+    igroup = fof_labels_z(partz.pos, rlink=rlink, boxsize=boxsize, cfg=cfg)
+    partf, counts = fof_order(igroup, partz)
+    catalogue = fof_catalogue_from_groups(partf, counts, Nmin=20, boxsize=boxsize)
+
+    return partf, catalogue
+fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
+    static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
+)
+
+def distr_fof_and_catalogue(
+        part: ParticleData,
+        rlink: float,
+        npart_tot: int,
+        boxsize: float=0.,
+        cfg: FofConfig = FofConfig(),
+        input_z_ordered: bool = False,
+        th: TreeHierarchy | None = None
+    ) -> Tuple[ParticleData, FofCatalogue]:
+    """Returns particles in FoF-order and the FoFCatalogue"""
+    if input_z_ordered:
+        partz = part
+        assert th is not None, "To skip sort, provide tree (jztree.tree.distr_zsort_and_tree)"
+    else:
+        partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
+    labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, cfg=cfg)
+    partf, counts, npart = distr_fof_order(labels, partz, size_out=1024*1024)
+    catalogue = fof_catalogue_from_groups(partf, counts, npart, Nmin=20, boxsize=boxsize)
+
+    return partf, catalogue
+distr_fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
+    static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
+)

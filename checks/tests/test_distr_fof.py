@@ -9,8 +9,8 @@ from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
 from jztree.data import ParticleData, Link, Label
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
-from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_z
-from jztree.fof import distr_fof_order, fof_catalogue, fof_order
+from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
+from jztree.fof import distr_fof_order, fof_catalogue_from_groups, fof_order
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
@@ -86,7 +86,7 @@ def test_distr_fof(seed):
     igroup1 = multi_to_dense.jit(igroup1, dev_spl[0])
 
     partz = pos_zorder_sort.jit(partz)[0]
-    igroup2 = fof_z.jit(partz.pos, rlink=0.1)
+    igroup2 = fof_labels_z.jit(partz.pos, rlink=0.1)
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
 
@@ -99,14 +99,14 @@ def distr_fof_cata(seed):
     
     part_fof, counts, npart = distr_fof_order(label, partz)
     
-    return partz, fof_catalogue(part_fof, counts, npart)
+    return partz, fof_catalogue_from_groups(part_fof, counts, npart)
 
 @jax.jit
 def fof_cata(part):
     partz = pos_zorder_sort(part)[0]
-    igroup = fof_z(partz.pos, rlink=0.1)
+    igroup = fof_labels_z(partz.pos, rlink=0.1)
     part, counts = fof_order(igroup, partz)
-    return fof_catalogue(part, counts)
+    return fof_catalogue_from_groups(part, counts)
 
 @pytest.mark.shrink_in_quick
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")

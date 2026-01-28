@@ -7,7 +7,7 @@ from pathlib import Path
 from jztree.config import FofConfig
 from jztree.data import ParticleData
 from jztree.tree import pos_zorder_sort
-from jztree.fof import fof, fof_is_superset, fof_z, fof_order, fof_catalogue
+from jztree.fof import fof_labels, fof_is_superset, fof_labels_z, fof_order, fof_catalogue_from_groups
 import h5py
 import hdf5plugin
 
@@ -23,7 +23,7 @@ def test_vs_hfof_uniform():
 
     rlink = 0.8 * boxsize / len(pos)**(1/3)
 
-    igr_jz = fof.jit(pos, rlink=rlink, boxsize=boxsize)
+    igr_jz = fof_labels.jit(pos, rlink=rlink, boxsize=boxsize)
     igr_hfof = fof_hfof(pos, rlink, boxsize=boxsize)
 
     # Since labels may differ, test set wise >= from both directions
@@ -69,7 +69,7 @@ def camels_jz_fof(camels_data):
     particles = ParticleData(pos=jnp.asarray(pos), vel=jnp.asarray(vel))
     
     particlesz, idz = pos_zorder_sort.jit(particles)
-    igr_jz = fof_z.jit(particlesz.pos, rlink, boxsize=boxsize, cfg=cfg)
+    igr_jz = fof_labels_z.jit(particlesz.pos, rlink, boxsize=boxsize, cfg=cfg)
 
     return particlesz, igr_jz, rlink, boxsize
 
@@ -82,7 +82,7 @@ def test_CAMELS(camels_data, camels_jz_fof):
     print("\n","Comparing CAMELS and jz_tree","\n")
 
     # results = fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
-    results = fof_catalogue(part_fof, counts, len(pos), boxsize=boxsize)
+    results = fof_catalogue_from_groups(part_fof, counts, len(pos), boxsize=boxsize)
     results.count = results.count[:results.ngroups[0]]
     results.com_pos = results.com_pos[:results.ngroups[0]]
     results.com_vel = results.com_vel[:results.ngroups[0]]
