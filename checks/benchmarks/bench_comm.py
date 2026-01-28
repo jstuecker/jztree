@@ -41,7 +41,6 @@ def def_run(ndev, self_prob=0., copy_self=True, Nperdev=256**3, pytree = False, 
 
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.multi_gpu
 def bench_all_to_all(jax_bench, ndev):
     jb = jax_bench(jit_rounds=10, jit_loops=1, jit_warmup=2)
 
@@ -55,7 +54,6 @@ def bench_all_to_all(jax_bench, ndev):
 
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.multi_gpu
 def bench_permute_all_to_all(jax_bench, ndev):
     jb = jax_bench(jit_rounds=10, jit_loops=1, jit_warmup=2)
     prefix="permute"
@@ -67,7 +65,6 @@ def bench_permute_all_to_all(jax_bench, ndev):
 
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.multi_gpu
 def bench_pytree(jax_bench, ndev):
     jb = jax_bench(jit_rounds=10, jit_loops=1, jit_warmup=2)
 
@@ -86,7 +83,6 @@ def smap_jit(f, ndev):
 
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.multi_gpu
 def bench_meta_comm(jax_bench, ndev):
     Nperdev = 256**3
     axis_name = "gpus"

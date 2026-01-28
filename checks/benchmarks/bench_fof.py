@@ -46,16 +46,31 @@ def bench_fof_uniform(jax_bench, pos, N):
 
     jb.measure(fn_jit=fof.jit, pos=pos, rlink=rlink, boxsize=boxsize)
 
+def dj_sim(ngrid, boxsize):
+    from discodj import DiscoDJ
+
+    dj = DiscoDJ(dim=3, res=ngrid, boxsize=boxsize)
+    dj = dj.with_timetables()
+    pkstate = dj.with_linear_ps()
+    ics = dj.with_ics(pkstate, seed=0)
+    lpt_state = dj.with_lpt(ics, n_order=1)
+    sim_ini = dj.with_lpt_ics(lpt_state, n_order=1, a_ini=0.02)
+    X, P, a = dj.run_nbody(
+        sim_ini, a_end=1.0, n_steps=16, res_pm=ngrid, stepper="bullfrog"
+    )
+
+    return X, P, a
+dj_sim.jit = jax.jit(dj_sim, static_argnames=("ngrid", "boxsize"))
+
 @pytest.mark.shrink_in_quick(keep_index=3)
 @pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
 @pytest.mark.parametrize("ngrid", [16, 32, 64, 128, 256])
 def bench_fof_cosmo(jax_bench, pos, ngrid):
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
-
-    from fmdj_utils.ics import discodj_sim
-    pos = discodj_sim.jit(ngrid).pos
-
+    
     boxsize = 100.
-    rlink = 0.2 * boxsize / ngrid
+    pos = dj_sim.jit(ngrid, boxsize)[0].reshape(-1,3)
 
-    jb.measure(fn_jit=fof.jit, pos=pos, rlink=rlink, boxsize=boxsize)
+    cfg = FofConfig(alloc_fac_ilist=64)
+
+    jb.measure(fn_jit=fof.jit, pos=pos, rlink=0.2*boxsize/ngrid, boxsize=boxsize, cfg=cfg)

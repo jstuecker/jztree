@@ -133,7 +133,7 @@ def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
     Hubble = 100.0
     return 1e10 * omega_m * 3 * Hubble * Hubble / (8 * np.pi * G) * boxsize ** 3 / npart
 
-def dj_sim():
+def fistr_dj_sim():
     from discodj import DiscoDJ
     from discodj.core.scatter_and_gather import ScatterGatherProperties
 
@@ -175,12 +175,12 @@ def test_discodj_fof():
     ndev = jax.device_count()
     boxsize = 1000.
 
-    pos, vel, a = jax.jit(dj_sim)()
+    pos, vel, a = jax.jit(fistr_dj_sim)()
     pos, vel = pos.reshape(-1,3), vel.reshape(-1,3)
     npart_tot = len(pos)
     nper_dev = npart_tot // ndev
 
-    part = ParticleData(pos, vel)
+    part = ParticleData(pos=pos, vel=vel)
     
     rlink = 0.2 * boxsize / np.cbrt(npart_tot)
 

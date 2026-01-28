@@ -7,7 +7,7 @@ from pathlib import Path
 from jztree.config import FofConfig
 from jztree.data import ParticleData
 from jztree.tree import pos_zorder_sort
-from jztree.fof import fof, fof_is_superset, fof_z, fof_reduction, fof_order, fof_catalogue
+from jztree.fof import fof, fof_is_superset, fof_z, fof_order, fof_catalogue
 import h5py
 import hdf5plugin
 

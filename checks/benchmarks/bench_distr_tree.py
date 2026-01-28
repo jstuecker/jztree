@@ -44,7 +44,6 @@ def get_mesh(ndev=-1):
 
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.multi_gpu
 def bench_multi_zsort(jax_bench, ndev):
     Ntot = 256**3*ndev
     
@@ -59,7 +58,6 @@ def bench_multi_zsort(jax_bench, ndev):
 
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.multi_gpu
 def bench_multi_tree(jax_bench, ndev):
     Ntot = 256**3*ndev
 
