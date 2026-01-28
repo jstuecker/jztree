@@ -151,8 +151,8 @@ def test_discodj_fof():
         rank = jax.lax.axis_index("gpus")
 
         part = ParticleData(
-            jnp.pad(part.pos, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
-            jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan)
+            pos=jnp.pad(part.pos, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
+            vel=jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan)
         )
 
         cfg = FofConfig()

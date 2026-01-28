@@ -694,7 +694,8 @@ def distr_fof_order(label: Label, part: Pytree, npart: int):
 
     return part, gcnt, dev_spl[-1]
 
-def fof_order(igroup: jax.Array, part: Pytree, npart: int):
+def fof_order(igroup: jax.Array, part: Pytree, npart: int | None = None):
+    npart = npart or len(igroup)
     igr = jnp.where(jnp.arange(len(igroup)) < npart, igroup, len(igroup))
     counts = jnp.zeros(len(igroup), dtype=igroup.dtype).at[igr].add(1)
 
@@ -731,7 +732,6 @@ def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int =
     first_group_rank = jnp.argmax(dev_recv_count.astype(jnp.int32))
 
     return first_group_rank, first_group_count
-
 
 def fof_catalogue(
         part: ParticleData, # Particles must be in Group order! (See fof_order/distr_fof_order)
@@ -800,7 +800,7 @@ def fof_catalogue(
     cata = FofCatalogue(ngroups=ngroups.reshape(1), count=gr_counts, offsets=gr_start)
 
     # Masses
-    if hasattr(part, "mass"):
+    if getattr(part, "mass") is not None:
         part_mass = getattr(part, "mass")
         if pmass is not None:
             print("Warning: Ignoring provided pmass, since particles have mass attribute")
@@ -810,18 +810,18 @@ def fof_catalogue(
         part_mass = jnp.asarray(pmass if pmass is not None else 1.0)
     cata.mass = sum_particles(part_mass)
 
-    if hasattr(part, "pos"):
+    if getattr(part, "pos") is not None:
         pos0 = get_gr_prop(part.pos[gr_start])
-        m_x_pos = sum_particles(wrap_dx(part.pos - pos0[part_gr_idx]) * part_mass[:,None])
+        m_x_pos = sum_particles(wrap_dx(part.pos - pos0[part_gr_idx]) * part_mass[...,None])
         cata.com_pos = wrap_pos((m_x_pos / cata.mass[:,None]) + pos0)
 
         dx = wrap_dx(part.pos - get_gr_prop(cata.com_pos)[part_gr_idx])
         m_x_r2 = sum_particles((dx[...,0]**2 + dx[...,1]**2 + dx[...,2]**2) * part_mass)
         cata.com_inertia_radius = jnp.sqrt(m_x_r2 / cata.mass)
 
-    if hasattr(part, "vel"):
+    if getattr(part, "vel") is not None:
         vel0 = get_gr_prop(part.vel[gr_start])
-        m_x_vel = sum_particles((part.vel - vel0[part_gr_idx]) * part_mass[:,None])
+        m_x_vel = sum_particles((part.vel - vel0[part_gr_idx]) * part_mass[...,None])
         cata.com_vel = (m_x_vel / cata.mass[:,None]) + vel0
 
     def remove_first(x): # remove the first "fake" group that we inserted
@@ -830,78 +830,3 @@ def fof_catalogue(
     cata = jax.tree.map(remove_first, cata)
 
     return cata
-
-
-def fof_reduction(particles_z : ParticleData, igroup_z : jax.Array,
-                  boxsize: float | None = None, Nmin : int = 20):
-    ''' Reduce particle data to FOF group data.
-    Parameters
-    ----------
-    particles_z : ParticleData
-        z-ordered particle data to be reduced
-    igroup_z : jax.Array
-        z-ordered array of group indices for each particle
-    boxsize : float
-        size of the periodic box
-    mpart : float | None, optional
-        mass of each particle, by default None
-    Nmin : int, optional
-        minimum number of particles in a group to be considered, by default 20
-
-    Returns
-    -------
-    FofData
-        reduced FOF group data with number of particles, center of mass positions,
-        and, if provided, center of mass velocities and masses
-    '''
-    pos = particles_z.pos
-
-    npart = jnp.zeros((pos.shape[0],),dtype=jnp.int32)
-    npart = npart.at[igroup_z].add(1)
-    Ngroupsmax = pos.shape[0] // Nmin
-    mask_atleast_Nmin = npart >= Nmin
-
-    # take only indices that result in more than Nmin particles in the group
-    # else, add 'outside' the array
-    index_offset = jnp.where(mask_atleast_Nmin[igroup_z],
-                             (jnp.cumsum(mask_atleast_Nmin)-1)[igroup_z], Ngroupsmax)
-    index_roots = jnp.where(mask_atleast_Nmin,
-                             (jnp.cumsum(mask_atleast_Nmin)-1)[igroup_z], Ngroupsmax)
-    
-    npart = jnp.zeros(Ngroupsmax, jnp.int32)
-    npart = npart.at[index_offset].add(1)
-    npart = jnp.where(npart == 0, jnp.nan, npart).astype(jnp.int32)
-
-    ## MASSES
-    mpart = getattr(particles_z, "mass", None)
-    if mpart is not None:
-        mass = jnp.zeros(Ngroupsmax, jnp.float32).at[index_offset].add(mpart)
-    else:
-        mass = None
-
-    ## POSITIONS
-    pos_COM = jnp.zeros((Ngroupsmax, 3), jnp.float32)
-    # center each position around its group's root/parent
-    # and create shortest distance in periodic geometry
-    displacement_group = pos - pos[igroup_z] 
-    if boxsize is not None:
-        displacement_group -= boxsize * jnp.round(displacement_group / boxsize)
-    # add positions to the corresponding groups and take mean
-    pos_COM = pos_COM.at[index_offset].add(displacement_group) / npart[:,None]
-    # add the centers back and apply periodicity
-    pos_COM = pos_COM.at[index_roots].add(pos)
-    if boxsize is not None:
-        pos_COM %= boxsize
-
-    ## VELOCITIES
-    vel_COM = None
-    vel = getattr(particles_z, 'vel', None)
-    if vel is not None:
-        vel = particles_z.vel
-        vel_COM = jnp.zeros((Ngroupsmax, 3), jnp.float32)
-        # center each velocity around its group's root/parent to improve numerical precision
-        vel_COM = vel_COM.at[index_offset].add(vel - vel[igroup_z]) / npart[:,None]
-        vel_COM = vel_COM.at[index_roots].add(vel)
-
-    ngroups = jnp.sum(index_roots < Ngroupsmax)
-    return FofCatalogue(ngroups, count=npart, com_pos=pos_COM, com_vel=vel_COM, mass=mass)

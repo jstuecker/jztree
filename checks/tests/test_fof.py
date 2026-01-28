@@ -7,7 +7,7 @@ from pathlib import Path
 from jztree.config import FofConfig
 from jztree.data import ParticleData
 from jztree.tree import pos_zorder_sort
-from jztree.fof import fof, fof_is_superset, fof_z, fof_reduction
+from jztree.fof import fof, fof_is_superset, fof_z, fof_reduction, fof_order, fof_catalogue
 import h5py
 import hdf5plugin
 
@@ -66,7 +66,7 @@ def camels_jz_fof(camels_data):
     cfg = FofConfig()
     cfg.tree.alloc_fac_nodes = 2
     
-    particles = ParticleData(jnp.asarray(pos), jnp.asarray(vel))
+    particles = ParticleData(pos=jnp.asarray(pos), vel=jnp.asarray(vel))
     
     particlesz, idz = pos_zorder_sort.jit(particles)
     igr_jz = fof_z.jit(particlesz.pos, rlink, boxsize=boxsize, cfg=cfg)
@@ -77,19 +77,22 @@ def test_CAMELS(camels_data, camels_jz_fof):
     pos, vel, pos_h, vel_h, group_len = camels_data
     particlesz, igr_jz, rlink, boxsize = camels_jz_fof
 
+    part_fof, counts = fof_order(igr_jz, particlesz)
+
     print("\n","Comparing CAMELS and jz_tree","\n")
 
-    results = fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
-    results.count = results.count[:results.ngroups]
-    results.com_pos = results.com_pos[:results.ngroups]
-    results.com_vel = results.com_vel[:results.ngroups]
+    # results = fof_reduction(particlesz, igr_jz, boxsize=boxsize, Nmin=32)
+    results = fof_catalogue(part_fof, counts, len(pos), boxsize=boxsize)
+    results.count = results.count[:results.ngroups[0]]
+    results.com_pos = results.com_pos[:results.ngroups[0]]
+    results.com_vel = results.com_vel[:results.ngroups[0]]
 
     sort_by_mass_CAMELS = jnp.argsort(group_len)
     sort_by_mass_jz_tree = jnp.argsort(results.count)
     
     print("# of halos indentified:")
     print("CAMELS:\n", pos_h.shape[0])
-    print("jz_tree:\n", results.ngroups,"\n")
+    print("jz_tree:\n", results.ngroups[0],"\n")
 
     print("# particles in heaviest 25 halos:")
     print("CAMELS:\n", group_len[sort_by_mass_CAMELS][-25:])
@@ -103,7 +106,7 @@ def test_CAMELS(camels_data, camels_jz_fof):
     print("Total number of particles in all halos combined:")
     print("CAMELS:\n", jnp.sum(group_len))
     print("jz_tree:\n", jnp.sum(results.count))
-    print("difference (CAMELS - jz_tree):\n", jnp.sum(group_len) - jnp.sum(results.count[:results.ngroups]),"\n")
+    print("difference (CAMELS - jz_tree):\n", jnp.sum(group_len) - jnp.sum(results.count[:results.ngroups[0]]),"\n")
 
     print("Positions 5 most massive:")
     print("CAMELS:\n", pos_h[sort_by_mass_CAMELS][-5:])
