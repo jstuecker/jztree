@@ -145,7 +145,7 @@ def particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, posz: 
 particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
 
 # ------------------------------------------------------------------------------------------------ #
-#                              Functions specific to parallel version                              #
+#                                         Helper Functions                                         #
 # ------------------------------------------------------------------------------------------------ #
 
 def global_to_local_label(labels: Label) -> jax.Array:
@@ -195,6 +195,27 @@ def label_min_max(l1: Label, l2: Label):
     lmax = tree_where(l1 >= l2, l1, l2)
     lmin = tree_where(~(l1 >= l2), l1, l2)
     return lmin, lmax
+
+def get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
+    """Finds the minimum of labels that are pointed to as the same local group"""
+    irankmin = masked_min_scatter(valid, label.irank, igroup, label.irank)
+    is_min_rank = valid & (label.irank == irankmin[igroup])
+    igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup, label.igroup)
+    return Label(irankmin[igroup], igroupmin[igroup])
+
+def fof_is_superset(igroup_sup, igroup):
+    """Checks whether every FoF group in igroup_up is a superset of sets in igroup_low"""
+    # For this we need to check that if we link groups together as indicated by the super-grouping
+    # that they are identical to the super groups
+
+    # indicates the super group of each label in igroup
+    label_map = jnp.zeros(len(igroup), dtype=jnp.int32).at[igroup].set(igroup_sup)
+    
+    return jnp.all(igroup_sup == label_map[igroup])
+
+# ------------------------------------------------------------------------------------------------ #
+#                                        Distributed Linking                                       #
+# ------------------------------------------------------------------------------------------------ #
 
 def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.Array
                           ) -> Tuple[jax.Array, Label, Link, jax.Array]:
@@ -314,13 +335,6 @@ def link_distributed(
 
     return contract_distributed(labels, igroup, dev_spl)
 
-def get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
-    """Finds the minimum of labels that are pointed to as the same local group"""
-    irankmin = masked_min_scatter(valid, label.irank, igroup, label.irank)
-    is_min_rank = valid & (label.irank == irankmin[igroup])
-    igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup, label.igroup)
-    return Label(irankmin[igroup], igroupmin[igroup])
-
 def distr_local_to_global_label_change(igroup, igroup_new, label, dev_spl):
     rank, ndev, axis_name = get_rank_info()
     
@@ -361,6 +375,10 @@ def distr_detect_new_cross_task_links(igroup, igroup_new, origin_group, dev_spl)
     )
 
     return links, num_links
+
+# ------------------------------------------------------------------------------------------------ #
+#                                          Distributed FoF                                         #
+# ------------------------------------------------------------------------------------------------ #
 
 def linearly_grouped(num, size, ngroup=32):
     num_sup = div_ceil(num, ngroup)
@@ -495,78 +513,19 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
 distr_particle_particle_fof.jit = jax.jit(distr_particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
 
 # ------------------------------------------------------------------------------------------------ #
-#                                          User Interface                                          #
+#                                   Ordering particles by groups                                   #
 # ------------------------------------------------------------------------------------------------ #
 
-def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
-    th = build_tree_hierarchy(posz, cfg_tree=cfg.tree)
-    node_data, ilist = node_node_fof(
-        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
-    )
-    return particle_particle_fof(
-        node_data, ilist, posz, rlink=rlink, boxsize=boxsize
-    )
-fof_z.jit = jax.jit(fof_z, static_argnames=["rlink", "boxsize", "cfg"])
+def fof_order(igroup: jax.Array, part: ParticleData, npart: int | None = None):
+    if npart is None:
+        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
+    igr = jnp.where(jnp.arange(len(igroup)) < npart, igroup, len(igroup))
+    counts = jnp.zeros(len(igroup), dtype=igroup.dtype).at[igr].add(1)
 
-def fof(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
-    posz, idz = pos_zorder_sort(pos)
-    
-    igroupz = fof_z(posz, rlink, boxsize=boxsize, cfg=cfg)
+    isort = jnp.argsort(igr, stable=True)
+    part, counts = jax.tree.map(lambda x: x[isort], (part, counts))
 
-    igroup = igroupz.at[idz].set(igroupz)
-
-    return igroup
-fof.jit = jax.jit(fof, static_argnames=["rlink", "boxsize", "cfg"])
-
-def distr_fof_z_with_tree(
-        posz: jax.Array, th: TreeHierarchy, rlink: float, 
-        boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False
-    ) -> Label:
-    """
-    linearize_labels: only for testing against single-gpu version - converts (irank,igroup) labels to 
-        dense global linear ones
-    """
-    rank, ndev, axis_name = get_rank_info()
-
-    node_data, ilist, link_data = distr_node_node_fof(
-        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist, size_links=len(posz)
-    )
-
-    labels = distr_particle_particle_fof(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
-
-    if linearize_labels:
-        num = jax.lax.all_gather(jnp.sum(~jnp.isnan(posz[...,0]), axis=0), axis_name)
-        dspl = cumsum_starting_with_zero(num)
-        igroup = dspl[labels.irank] + labels.igroup
-
-        return igroup
-    else:
-        return labels
-distr_fof_z_with_tree.jit = jax.jit(
-    distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
-)
-
-def distr_fof(part: Pos, npart_tot: int, rlink: float, boxsize: float = 0., 
-              cfg: FofConfig = FofConfig):
-    partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
-
-    labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
-
-    return partz, labels
-
-# ------------------------------------------------------------------------------------------------ #
-#                                Functions for interpreting FoF Data                               #
-# ------------------------------------------------------------------------------------------------ #
-
-def fof_is_superset(igroup_sup, igroup):
-    """Checks whether every FoF group in igroup_up is a superset of sets in igroup_low"""
-    # For this we need to check that if we link groups together as indicated by the super-grouping
-    # that they are identical to the super groups
-
-    # indicates the super group of each label in igroup
-    label_map = jnp.zeros(len(igroup), dtype=jnp.int32).at[igroup].set(igroup_sup)
-    
-    return jnp.all(igroup_sup == label_map[igroup])
+    return part, counts
 
 def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, size_out: int | None = None):
     """Rearanges particles in group-order and determines group-count at root-particles
@@ -647,16 +606,9 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
 
     return part, gcnt, dev_spl[-1]
 
-def fof_order(igroup: jax.Array, part: ParticleData, npart: int | None = None):
-    if npart is None:
-        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
-    igr = jnp.where(jnp.arange(len(igroup)) < npart, igroup, len(igroup))
-    counts = jnp.zeros(len(igroup), dtype=igroup.dtype).at[igr].add(1)
-
-    isort = jnp.argsort(igr, stable=True)
-    part, counts = jax.tree.map(lambda x: x[isort], (part, counts))
-
-    return part, counts
+# ------------------------------------------------------------------------------------------------ #
+#                                      Fof Catalogue Reduction                                     #
+# ------------------------------------------------------------------------------------------------ #
 
 def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int = 20):
     """The last group of each rank may span accross ranks. Here, we identify for each
@@ -793,3 +745,63 @@ def fof_catalogue(
     cata = jax.tree.map(remove_first, cata)
 
     return cata
+
+# ------------------------------------------------------------------------------------------------ #
+#                                          User Interface                                          #
+# ------------------------------------------------------------------------------------------------ #
+
+def fof_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
+    th = build_tree_hierarchy(posz, cfg_tree=cfg.tree)
+    node_data, ilist = node_node_fof(
+        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
+    )
+    return particle_particle_fof(
+        node_data, ilist, posz, rlink=rlink, boxsize=boxsize
+    )
+fof_z.jit = jax.jit(fof_z, static_argnames=["rlink", "boxsize", "cfg"])
+
+def fof(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
+    posz, idz = pos_zorder_sort(pos)
+    
+    igroupz = fof_z(posz, rlink, boxsize=boxsize, cfg=cfg)
+
+    igroup = igroupz.at[idz].set(igroupz)
+
+    return igroup
+fof.jit = jax.jit(fof, static_argnames=["rlink", "boxsize", "cfg"])
+
+def distr_fof_z_with_tree(
+        posz: jax.Array, th: TreeHierarchy, rlink: float, 
+        boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False
+    ) -> Label:
+    """
+    linearize_labels: only for testing against single-gpu version - converts (irank,igroup) labels to 
+        dense global linear ones
+    """
+    rank, ndev, axis_name = get_rank_info()
+
+    node_data, ilist, link_data = distr_node_node_fof(
+        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist, size_links=len(posz)
+    )
+
+    labels = distr_particle_particle_fof(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
+
+    if linearize_labels:
+        num = jax.lax.all_gather(jnp.sum(~jnp.isnan(posz[...,0]), axis=0), axis_name)
+        dspl = cumsum_starting_with_zero(num)
+        igroup = dspl[labels.irank] + labels.igroup
+
+        return igroup
+    else:
+        return labels
+distr_fof_z_with_tree.jit = jax.jit(
+    distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
+)
+
+def distr_fof(part: Pos, npart_tot: int, rlink: float, boxsize: float = 0., 
+              cfg: FofConfig = FofConfig):
+    partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
+
+    labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
+
+    return partz, labels
