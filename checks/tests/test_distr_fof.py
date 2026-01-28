@@ -10,6 +10,7 @@ from jztree.tools import cumsum_starting_with_zero, multi_to_dense
 from jztree.data import ParticleData, Link, Label
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_z
+from jztree.fof import distr_fof_order, fof_catalogue, fof_order
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
@@ -88,6 +89,44 @@ def test_distr_fof(seed):
     igroup2 = fof_z.jit(partz.pos, rlink=0.1)
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
+
+@jax.jit
+@jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
+def distr_fof_cata(seed):
+    rank, ndev, axis_name = get_rank_info()
+    partz, th = particles_and_tree(seed)
+    label = distr_fof_z_with_tree(partz.pos, th, rlink=0.1)
+    
+    part_fof, counts, npart = distr_fof_order(label, partz)
+    
+    return partz, fof_catalogue(part_fof, counts, npart)
+
+@jax.jit
+def fof_cata(part):
+    partz = pos_zorder_sort(part)[0]
+    igroup = fof_z(partz.pos, rlink=0.1)
+    part, counts = fof_order(igroup, partz)
+    return fof_catalogue(part, counts)
+
+@pytest.mark.shrink_in_quick
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+@pytest.mark.parametrize("seed", [0,17,23,99])
+def test_distr_catalogue(seed):
+    partz, cata1 = distr_fof_cata(seed)
+    cata2 = fof_cata(partz)
+    
+    # Sort by masses and equalize shapes
+    assert np.sum(cata1.ngroups) == np.sum(cata2.ngroups)
+    num = np.sum(cata1.ngroups)
+    isort1 = jnp.argsort(cata1.count, descending=True)
+    isort2 = jnp.argsort(cata2.count, descending=True)
+    cata1 = jax.tree.map(lambda x: x[isort1][:num], cata1)
+    cata2 = jax.tree.map(lambda x: x[isort2][:num], cata2)
+
+    assert jnp.all(cata1.count == cata2.count)
+    assert cata1.mass == pytest.approx(cata2.mass, abs=0.1)
+    assert cata1.com_pos == pytest.approx(cata2.com_pos, abs=0.01)
+    assert cata1.com_inertia_radius == pytest.approx(cata2.com_inertia_radius, abs=0.01)
 
 def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
     G = 43.007105731706317
