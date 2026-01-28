@@ -215,11 +215,14 @@ def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True,
     """Computes the center of mass of the nodes in the tree plane"""
     assert part.pos.dtype == jnp.float32
     assert ispl.dtype == jnp.int32
+    assert part.pos.ndim == 2
 
     out_xcent = jax.ShapeDtypeStruct((ispl.size-1, 4), part.pos.dtype)
 
+    mass = jnp.broadcast_to(part.mass, part.pos.shape[:-1])
+
     xm = jax.ffi.ffi_call("CenterOfMass", (out_xcent,))(
-        ispl, part.pos, part.mass,
+        ispl, part.pos, mass,
         kahan = kahan_summation,
         block_size=np.uint64(block_size)
     )[0]

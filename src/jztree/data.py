@@ -24,10 +24,11 @@ class Pos: # this class is mostly defined to declare an interface that particle 
 @dataclass
 class PosMass:
     pos: jax.Array  # (Nparticles, 3)
-    mass: jax.Array  # (Nparticles,)
+    mass: jax.Array  # (Nparticles,) or (1,)
 
     def posm(self):
-        return jnp.concatenate([self.pos, self.mass[:, None]], axis=-1)
+        mass = jnp.broadcast_to(self.mass, self.pos.shape[:-1])
+        return jnp.concatenate([self.pos, mass[..., None]], axis=-1)
 
 @jax.tree_util.register_dataclass
 @dataclass
@@ -46,9 +47,9 @@ class PosLvlId(PosLvl):
 @jax.jax.tree_util.register_dataclass
 @dataclass
 class ParticleData:
-    pos: jax.Array
-    mass: jax.Array | None = None 
-    vel: jax.Array | None = None
+    pos: jax.Array # (Nparticles, 3)
+    mass: jax.Array | None = None # (Nparticles,) or (1,)
+    vel: jax.Array | None = None # (Nparticles, 3)
 
     def __post_init__(self):
         assert self.pos.shape[1] == 3, "provide positions as an array of shape (N, 3)"

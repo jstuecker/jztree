@@ -644,7 +644,6 @@ def fof_catalogue_from_groups(
         npart: int | None = None,
         Nmin: int = 20,
         boxsize: float = 0.,
-        pmass: float | None = None,
         size_cata: int | None = None
     ) -> FofCatalogue:
     """Reduces particle data to determine a Friends-of-Friends group-catalogue
@@ -652,7 +651,6 @@ def fof_catalogue_from_groups(
     Some parts of the catalogue will be set to None if relevant particle attributes are missing.
     You may define your on data class that skips attributes that you are not interested in.
     Consider the "ParticleData" class to understand relevant attributes.
-    Particle masses may be specified through "part.mass" or "pmass" (only useful if constant)
     """
     rank, ndev, axis_name = get_rank_info()
 
@@ -714,30 +712,30 @@ def fof_catalogue_from_groups(
     
     cata = FofCatalogue(ngroups=ngroups.reshape(1), count=gr_counts, offsets=gr_start)
 
-    # Masses
     if getattr(part, "mass", None) is not None:
         part_mass = getattr(part, "mass")
-        if pmass is not None:
-            print("Warning: Ignoring provided pmass, since particles have mass attribute")
+        if part_mass.size == 1: # constant masses
+            gr_mass = cata.count * part_mass
+        else:
+            gr_mass = sum_particles(part_mass)
+        cata.mass = gr_mass
     else:
-        if pmass is None:
-            print("Warning, pmass not provided, assuming particle mass = 1.0")
-        part_mass = jnp.asarray(pmass if pmass is not None else 1.0)
-    cata.mass = sum_particles(part_mass)
+        part_mass = jnp.array(1., dtype=part.pos.dtype)
+        gr_mass = cata.count * part_mass
 
     if getattr(part, "pos", None) is not None:
         pos0 = get_gr_prop(part.pos[gr_start])
         m_x_pos = sum_particles(wrap_dx(part.pos - pos0[part_gr_idx]) * part_mass[...,None])
-        cata.com_pos = wrap_pos((m_x_pos / cata.mass[:,None]) + pos0)
+        cata.com_pos = wrap_pos((m_x_pos / gr_mass[:,None]) + pos0)
 
         dx = wrap_dx(part.pos - get_gr_prop(cata.com_pos)[part_gr_idx])
         m_x_r2 = sum_particles((dx[...,0]**2 + dx[...,1]**2 + dx[...,2]**2) * part_mass)
-        cata.com_inertia_radius = jnp.sqrt(m_x_r2 / cata.mass)
+        cata.com_inertia_radius = jnp.sqrt(m_x_r2 / gr_mass)
 
     if getattr(part, "vel", None) is not None:
         vel0 = get_gr_prop(part.vel[gr_start])
         m_x_vel = sum_particles((part.vel - vel0[part_gr_idx]) * part_mass[...,None])
-        cata.com_vel = (m_x_vel / cata.mass[:,None]) + vel0
+        cata.com_vel = (m_x_vel / gr_mass[:,None]) + vel0
 
     # remove the first "fake" group that we inserted:
     def remove_first(x):
