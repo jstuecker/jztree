@@ -358,7 +358,7 @@ class FofData:
 @jax.jax.tree_util.register_dataclass
 @dataclass
 class FofCatalogue:
-    ngroups: int
+    ngroups: jax.Array
     mass: jax.Array | None = None
     count: jax.Array | None = None
     offsets: jax.Array | None = None

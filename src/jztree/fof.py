@@ -629,8 +629,17 @@ def fof_is_superset(igroup_sup, igroup):
     
     return jnp.all(igroup_sup == label_map[igroup])
 
-from .comm import Pytree
-def distr_fof_order(label: Label, part: Pytree, npart: int | None = None):
+def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, size_out: int | None = None):
+    """Rearanges particles in group-order and determines group-count at root-particles
+
+    Group order means that each FoF-group contains group-count continguous particles, 
+    starting at its root particle. Group roots are in z-order.
+    Guarantees equal load balance if npart_tot % ndev == 0. Therefore, if positions were padded
+    previously (to allow for load-imbalance) it is now possible to undo the padding by providing 
+    size_out = npart_tot // ndev
+    The last group on each device may span across one or more consecutive devices. This needs to be
+    accounted for when e.g. summing group information
+    """
     # Labels point towards the root of a group, which may lie on another task
     # Groups may be split over several tasks. We call disjoint parts of the group
     # that may lie on other tasks "segments". To count particles we first count
@@ -692,12 +701,14 @@ def distr_fof_order(label: Label, part: Pytree, npart: int | None = None):
 
         isort = jnp.zeros_like(itarget).at[itarget].set(jnp.arange(size))
         
-        gcnt = gcnt[isort]
-        part = jax.tree.map(lambda x: x[isort], part)
+        part, gcnt = jax.tree.map(lambda x: x[isort], (part, gcnt))
+    
+    if size_out is not None: # Coding-note: might save some space if already done in comm. output:
+        part, gcnt = jax.tree.map(lambda x: x[:size_out], (part, gcnt))
 
     return part, gcnt, dev_spl[-1]
 
-def fof_order(igroup: jax.Array, part: Pytree, npart: int | None = None):
+def fof_order(igroup: jax.Array, part: ParticleData, npart: int | None = None):
     if npart is None:
         npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
     igr = jnp.where(jnp.arange(len(igroup)) < npart, igroup, len(igroup))
@@ -710,8 +721,7 @@ def fof_order(igroup: jax.Array, part: Pytree, npart: int | None = None):
 
 def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int = 20):
     """The last group of each rank may span accross ranks. Here, we identify for each
-    rank the rank and the local remaining count of the first group which may have started elsewhere
-    a count of zero indicates no cross-task group
+    rank the rank and the local remaining count of the first group which may have started elsewhere.
     """
     rank, ndev, axis_name = get_rank_info()
     if ndev == 1:
@@ -746,6 +756,13 @@ def fof_catalogue(
         pmass: float | None = None,
         size_cata: int | None = None
     ) -> FofCatalogue:
+    """Reduces particle data to determine a Friends-of-Friends group-catalogue
+
+    Some parts of the catalogue will be set to None if relevant particle attributes are missing.
+    You may define your on data class that skips attributes that you are not interested in.
+    Consider the "ParticleData" class to understand relevant attributes.
+    Particle masses may be specified through "part.mass" or "pmass" (only useful if constant)
+    """
     rank, ndev, axis_name = get_rank_info()
 
     if npart is None:
