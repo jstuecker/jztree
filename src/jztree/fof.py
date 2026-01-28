@@ -630,12 +630,15 @@ def fof_is_superset(igroup_sup, igroup):
     return jnp.all(igroup_sup == label_map[igroup])
 
 from .comm import Pytree
-def distr_fof_order(label: Label, part: Pytree, npart: int):
+def distr_fof_order(label: Label, part: Pytree, npart: int | None = None):
     # Labels point towards the root of a group, which may lie on another task
     # Groups may be split over several tasks. We call disjoint parts of the group
     # that may lie on other tasks "segments". To count particles we first count
     # in segments and then send the segments to the root task
     rank, ndev, axis_name = get_rank_info()
+
+    if npart is None:
+        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
 
     iseg = global_to_local_label(label)
 
@@ -695,7 +698,8 @@ def distr_fof_order(label: Label, part: Pytree, npart: int):
     return part, gcnt, dev_spl[-1]
 
 def fof_order(igroup: jax.Array, part: Pytree, npart: int | None = None):
-    npart = npart or len(igroup)
+    if npart is None:
+        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
     igr = jnp.where(jnp.arange(len(igroup)) < npart, igroup, len(igroup))
     counts = jnp.zeros(len(igroup), dtype=igroup.dtype).at[igr].add(1)
 
@@ -736,7 +740,7 @@ def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int =
 def fof_catalogue(
         part: ParticleData, # Particles must be in Group order! (See fof_order/distr_fof_order)
         group_counts: jax.Array,
-        npart: int,
+        npart: int | None = None,
         Nmin: int = 20,
         boxsize: float = 0.,
         pmass: float | None = None,
@@ -744,10 +748,13 @@ def fof_catalogue(
     ) -> FofCatalogue:
     rank, ndev, axis_name = get_rank_info()
 
+    if npart is None:
+        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
+
     size_part = len(group_counts)
 
     if size_cata is None:
-        size_cata = size_part // Nmin # Worst case estimate of catalogue size
+        size_cata = (size_part + Nmin - 1) // Nmin # Worst case estimate of catalogue size
     
     first_group_rank, first_group_count = distr_cross_task_group_info(
         group_counts, npart, Nmin=Nmin
