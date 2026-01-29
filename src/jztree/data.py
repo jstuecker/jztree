@@ -16,15 +16,18 @@ def static_field(*args, **kwargs):
 # ------------------------------------------------------------------------------------------------ #
 
 @jax.tree_util.register_dataclass
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class Pos: # this class is mostly defined to declare an interface that particle class should follow
     pos: jax.Array
 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
+    def __post_init__(self):
+        validate_and_normalize(self)
+
 @jax.tree_util.register_dataclass
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, slots=True)
 class PosMass:
     pos: jax.Array  # (Nparticles, 3)
     mass: jax.Array  # (Nparticles,) or (1,)
@@ -33,11 +36,10 @@ class PosMass:
     num_total: int | None = static_field(default=None)
 
     def __post_init__(self):
-        if self.num is not None:
-            assert jnp.ndim(self.num) == 1, "Please reshape num to shape (1,) (to allow shardmap return)"
+        validate_and_normalize(self)
 
 @jax.jax.tree_util.register_dataclass
-@dataclass
+@dataclass(kw_only=True, slots=True)
 class ParticleData:
     pos: jax.Array # (Nparticles, 3)
     mass: jax.Array | None = None # (Nparticles,) or (1,)
@@ -47,10 +49,22 @@ class ParticleData:
     num_total: int | None = static_field(default=None)
 
     def __post_init__(self):
-        assert self.pos.shape[1] == 3, "provide positions as an array of shape (N, 3)"
-        if self.vel != None:
-            assert self.vel.shape[1] == 3, "provide velocities as an array of shape (N, 3)"
-            assert self.vel.shape[0] == self.pos.shape[0], "provide as many velocities as positions"
+        validate_and_normalize(self)
+
+def validate_and_normalize(part):
+    if getattr(part, "num", None) is not None:
+        part.num = jnp.atleast_1d(part.num)
+
+    pos = getattr(part, "pos", None)
+    assert (pos is not None) and (pos.ndim == 2) and (pos.shape[-1] == 3), "pos must be (N,3)"
+
+    if getattr(part, "mass", None) is not None:
+        part.mass = jnp.atleast_1d(part.mass)
+        if jnp.size(part.mass) > 1:
+            assert part.mass.shape == pos.shape[:-1], "mass must be of shape (1,) or (N,)"
+
+    if getattr(part, "vel", None) is not None:
+        assert (part.vel.ndim == 2) and (part.vel.shape[-1] == 3) and (part.vel.shape == pos.shape)
 
 # ------------------------------------------------------------------------------------------------ #
 #                   Methods for accessing class data that allow some flexibility                   #

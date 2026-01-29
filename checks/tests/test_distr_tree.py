@@ -46,12 +46,12 @@ def test_mutli_zsort():
     assert jnp.all(posz0a == posz0b)
 
 @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
-def fcoarsen(posz: jnp.ndarray):
+def fcoarsen(partz: jnp.ndarray):
     # return jztree.tree.distributed_define_leaves(posz, leaf_size=256)
-    posz, lvl_bound = adjust_domain_for_nodesize(posz, 256)
-    ispl = detect_leaf_boundaries(posz, leaf_size=256, lvl_bound=lvl_bound)
+    partz, lvl_bound = adjust_domain_for_nodesize(partz, 256)
+    ispl = detect_leaf_boundaries(partz.pos, leaf_size=256, lvl_bound=lvl_bound)
 
-    return posz, ispl
+    return partz, ispl
 
 @jax.jit
 @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
@@ -69,17 +69,17 @@ def splits_to_global(ispl):
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_multi_leaves():
     part, partz = jax.jit(myzsort)()
-    posz_new, ispln = jax.jit(fcoarsen)(partz.pos)
+    partz_new, ispln = jax.jit(fcoarsen)(partz)
     
     # Check that position array was not messed up
     def remove_invalid(x):
         return x[jnp.where(~jnp.isnan(x[...,0]))]
     
-    assert jnp.all(remove_invalid(partz.pos) == remove_invalid(posz_new))
+    assert jnp.all(remove_invalid(partz.pos) == remove_invalid(partz_new.pos))
 
     # Check splits against locally calculated ones
-    posz0 = jax.device_put(partz.pos, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
-    ispl0 = detect_leaf_boundaries(remove_invalid(posz0), leaf_size=256)
+    partz = jax.device_put(partz, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
+    ispl0 = detect_leaf_boundaries(remove_invalid(partz.pos), leaf_size=256)
 
     def remove_duplicates(i):
         return i[jnp.where(i[1:] != i[:-1])]

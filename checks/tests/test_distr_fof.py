@@ -194,7 +194,7 @@ def test_discodj_fof():
         part = ParticleData(
             pos=jnp.pad(part.pos, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
             vel=jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
-            num_total=ndev*nper_dev
+            num=nper_dev, num_total=ndev*nper_dev
         )
 
         cfg = FofConfig()

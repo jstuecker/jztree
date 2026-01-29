@@ -503,8 +503,6 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     link_data = link_data.append(links.stacked(axis=-1), num_links)
     links = Link.from_stacked(link_data.data)
 
-    # jax.debug.log("rank {} nlinks: {}", rank, link_data.ispl)
-
     # Infer global labels
     labels = Label(jnp.full(igroup.shape, rank, dtype=jnp.int32), igroup)
     labels = link_distributed(igroup_new, labels, links, dev_spl, link_data.ispl[-1])
@@ -547,10 +545,9 @@ def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = Non
     rank, ndev, axis_name = get_rank_info()
 
     npart = get_num(part)
+    size = len(label.igroup)
 
     iseg = global_to_local_label(label)
-
-    size = len(iseg)
 
     # Count locally known roots
     is_segment_root = iseg == jnp.arange(len(iseg))
@@ -658,7 +655,7 @@ def fof_catalogue_from_groups(
     """
     rank, ndev, axis_name = get_rank_info()
 
-    npart = get_num(part)
+    npart = get_num(part, default_to_length=True)
     size_part = len(group_counts)
 
     if size_cata is None:

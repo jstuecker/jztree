@@ -302,7 +302,7 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
     npshift = ext_lr[ilvl_max]
 
     partz, npart = shift_particles_left(partz, npshift, max_send=max_node_size, npart=npart)
-    partz.npart = jnp.array((npart,))
+    partz.num = jnp.array((npart,))
 
     # Find the level of the new boundary
     posz = get_pos(partz)
