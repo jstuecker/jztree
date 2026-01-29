@@ -35,8 +35,7 @@ def def_run(ndev, self_prob=0., copy_self=True, Nperdev=256**3, pytree = False, 
             xsort, dev_spl, isort = arange_for_comm(irank, xpad, num=Nperdev, axis_name="gpus")
             x, dev_spl = all_to_all_with_permute(xsort, dev_spl, buffer_bytes=1024*1024*8)
         else:
-            pack_pytree_len = int(Nperdev*1.2) if pack_pytree else None
-            x, dev_spl = all_to_all_with_irank(irank, xpad, num=Nperdev, axis_name="gpus", copy_self=copy_self, pack_pytree_len=pack_pytree_len)
+            x, dev_spl = all_to_all_with_irank(irank, xpad, num=Nperdev, axis_name="gpus", copy_self=copy_self, pack_pytree=pack_pytree)
         return x
     return jax.jit(run)
 

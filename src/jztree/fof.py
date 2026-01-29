@@ -8,7 +8,7 @@ from .config import FofConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil, raise_if
-from .tools import bucket_prefix_sum
+from .tools import bucket_prefix_sum, tree_map_by_len
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
 from .comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
@@ -236,7 +236,7 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     send_rank = jnp.maximum(links.a.irank, links.b.irank)
     links, dev_spl = all_to_all_with_irank(
         send_rank, links, num=nlinks, axis_name=axis_name, copy_self=False,
-        pack_pytree_len=len(links.a.igroup)
+        pack_pytree=True
     )
     
     valid = jnp.arange(pytree_len(links), dtype=jnp.int32) < dev_spl[-1]
@@ -524,7 +524,7 @@ def fof_order(igroup: jax.Array, part: ParticleData, npart: int | None = None):
     counts = jnp.zeros(len(igroup), dtype=igroup.dtype).at[igr].add(1)
 
     isort = jnp.argsort(igr, stable=True)
-    part, counts = jax.tree.map(lambda x: x[isort], (part, counts))
+    part, counts = tree_map_by_len(lambda x: x[isort], (part, counts), len(counts))
 
     return part, counts
 
@@ -564,7 +564,7 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
     
     (seg_counts, seg_igroup), dev_spl, inv = all_to_all_with_irank(
         seg_label.irank, (seg_counts, seg_label.igroup), 
-        num=num_segs, get_inverse=True, axis_name=axis_name, pack_pytree_len=len(seg_counts)
+        num=num_segs, get_inverse=True, axis_name=axis_name, pack_pytree=True
     )
     group_counts = jnp.zeros(size, dtype=jnp.int32).at[seg_idx[seg_igroup]].add(seg_counts)
 
@@ -594,7 +594,7 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
 
         send_irank = jnp.searchsorted(target_global_dev_spl, part_gid, side="right") - 1
         (gid, part, gcnt), dev_spl = all_to_all_with_irank(
-            send_irank, (part_gid, part, root_group_counts), num=npart, pack_pytree_len=len(part_gid)
+            send_irank, (part_gid, part, root_group_counts), num=npart, pack_pytree=True
         )
 
         valid = jnp.arange(len(gid)) < dev_spl[-1]
@@ -602,10 +602,10 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
 
         isort = jnp.zeros_like(itarget).at[itarget].set(jnp.arange(size))
         
-        part, gcnt = jax.tree.map(lambda x: x[isort], (part, gcnt))
+        part, gcnt = tree_map_by_len(lambda x: x[isort], (part, gcnt), len(gcnt))
     
     if size_out is not None: # Coding-note: might save some space if already done in comm. output:
-        part, gcnt = jax.tree.map(lambda x: x[:size_out], (part, gcnt))
+        part, gcnt = tree_map_by_len(lambda x: x[:size_out], (part, gcnt), len(gcnt))
 
     return part, gcnt, dev_spl[-1]
 
@@ -743,7 +743,7 @@ def fof_catalogue_from_groups(
     # remove the first "fake" group that we inserted:
     def remove_first(x):
         return x[1:] if len(x) == size_cata+1 else x
-    cata = jax.tree.map(remove_first, cata)
+    cata = tree_map_by_len(remove_first, cata, len(cata.count))
 
     return cata
 

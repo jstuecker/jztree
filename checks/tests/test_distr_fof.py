@@ -11,6 +11,7 @@ from jztree.data import ParticleData, Link, Label
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
 from jztree.fof import distr_fof_order, fof_catalogue_from_groups, fof_order
+from jztree.tools import tree_map_by_len
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
@@ -120,8 +121,8 @@ def test_distr_catalogue(seed):
     num = np.sum(cata1.ngroups)
     isort1 = jnp.argsort(cata1.count, descending=True)
     isort2 = jnp.argsort(cata2.count, descending=True)
-    cata1 = jax.tree.map(lambda x: x[isort1][:num], cata1)
-    cata2 = jax.tree.map(lambda x: x[isort2][:num], cata2)
+    cata1 = tree_map_by_len(lambda x: x[isort1][:num], cata1, len(cata1.count))
+    cata2 = tree_map_by_len(lambda x: x[isort2][:num], cata2, len(cata1.count))
 
     assert jnp.all(cata1.count == cata2.count)
     assert cata1.mass == pytest.approx(cata2.mass, abs=0.1)

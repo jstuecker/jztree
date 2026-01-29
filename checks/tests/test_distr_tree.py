@@ -5,7 +5,7 @@ import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.comm import get_rank_info
 from jztree.config import TreeConfig
-from jztree.data import PosMass, TreeHierarchy
+from jztree.data import Pos, PosMass, TreeHierarchy
 from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
 from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, define_tree_level_node_sizes
 
@@ -16,29 +16,33 @@ ndev = len(jax.devices())
 
 @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
 def myzsort():
-    rank = jax.lax.axis_index(axis_name="gpus")
+    rank, ndev, axis_name = get_rank_info()
     pos = jax.random.uniform(jax.random.key(rank), (int(4096+1024),3))
     pos = pos.at[-1024:].set(jnp.nan)
 
-    posz = distributed_zsort(pos)
-    return pos, posz
+    part = Pos(pos=pos, num=jnp.array((4096,)), num_total=4096*ndev)
+
+    partz = distributed_zsort(part)
+    return part, partz
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_mutli_zsort():
-    pos, posz = jax.jit(myzsort)()
+    part, partz = jax.jit(myzsort)()
     
     shard0 = jax.sharding.SingleDeviceSharding(jax.devices()[0])
-    p0 = jax.device_put(pos, shard0)
+    p0 = jax.device_put(part, shard0)
     
-    posz0a = pos_zorder_sort(p0)[0] # single device sort
-    posz0b = jax.device_put(posz, shard0)      # multi device sort transferred to single device
+    partz0a = pos_zorder_sort(p0)[0] # single device sort
+    partz0b = jax.device_put(partz, shard0)      # multi device sort transferred to single device
 
-    posz0a = posz0a[~jnp.isnan(posz0a[:,0])]
-    posz0b = posz0b[~jnp.isnan(posz0b[:,0])]
+    posz0a = partz0a.pos[~jnp.isnan(partz0a.pos[:,0])]
+    posz0b = partz0b.pos[~jnp.isnan(partz0b.pos[:,0])]
 
     print(f"Testing sort with {len(jax.devices())} devices.")
 
     assert len(posz0a) == len(posz0b)
+    assert len(posz0a) == jnp.sum(partz0a.num)
+    assert len(posz0b) == jnp.sum(partz0b.num)
     assert jnp.all(posz0a == posz0b)
 
 @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)

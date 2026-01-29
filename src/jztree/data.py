@@ -20,6 +20,7 @@ def static_field(*args, **kwargs):
 class Pos: # this class is mostly defined to declare an interface that particle class should follow
     pos: jax.Array
 
+    num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
 @jax.tree_util.register_dataclass
@@ -28,6 +29,7 @@ class PosMass:
     pos: jax.Array  # (Nparticles, 3)
     mass: jax.Array  # (Nparticles,) or (1,)
 
+    num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
 @jax.jax.tree_util.register_dataclass
@@ -37,6 +39,7 @@ class ParticleData:
     mass: jax.Array | None = None # (Nparticles,) or (1,)
     vel: jax.Array | None = None # (Nparticles, 3)
 
+    num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
     def __post_init__(self):
@@ -62,6 +65,7 @@ def get_pos(part: Pos):
 def get_pos_mass(part: PosMass):
     mass = jnp.broadcast_to(part.mass, part.pos.shape[:-1])
     return jnp.concatenate([part.pos, mass[..., None]], axis=-1)
+
 
 def get_num_total(part: Pos, default_to_length=False):
     num = getattr(part, "num_total", None)

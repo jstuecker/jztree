@@ -6,7 +6,7 @@ from typing import Tuple
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .data import get_num_total, get_pos
 from .config import TreeConfig
-from .tools import cumsum_starting_with_zero, div_ceil, raise_if
+from .tools import cumsum_starting_with_zero, div_ceil, raise_if, tree_map_by_len
 from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits, pcast_like, pcast_vma
 
@@ -69,7 +69,7 @@ def pos_zorder_sort(x: jax.Array | Pos):
             posz, idz = _pos_zorder_sort_impl(x.pos)
             def apply_sort(val):
                 return val[idz]
-            out = jax.tree.map(apply_sort, x)
+            out = tree_map_by_len(apply_sort, x, len(posz))
             out.pos = posz # overwiting here allows jit to discard the unnecessary position gather
 
             return out, idz
@@ -83,7 +83,7 @@ def pos_zorder_sort(x: jax.Array | Pos):
         # Scatter the gradients back to the original ordering
         idinv = jnp.zeros_like(idz).at[idz].set(jnp.arange(len(idz), dtype=idz.dtype))
         
-        return (jax.tree.map(lambda x: x[idinv], gxout),)
+        return (tree_map_by_len(lambda x: x[idinv], gxout, len(idz)),)
     
     eval.defvjp(eval_fwd, eval_bwd)
 
@@ -249,47 +249,51 @@ def determine_npart(x):
     valid = ~jnp.isnan(get_pos(x))
     return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
 
-def distributed_zsort(x: jax.Array | Pos, nsamp: int = 1024):
+def get_num(part: Pos):
+    assert getattr(part, "num", None) is not None, "Need .num attribute in particle structure for distributed mode"
+    return jnp.squeeze(part.num)
+    
+def distributed_zsort(part: Pos, nsamp: int = 1024):
     rank, ndev, axis_name = get_rank_info()
 
     if ndev == 1:
-        return pos_zorder_sort(x)[0]
+        return pos_zorder_sort(part)[0]
 
-    pos = get_pos(x)
-
-    npart = determine_npart(x)
-    nparttot = jax.lax.psum(npart, axis_name=axis_name)
-
+    pos = get_pos(part)
+    
     # Sample based domain decomposition
     key = jax.random.key(0)
-    isamp = jax.random.randint(key, shape=(nsamp,), minval=0, maxval=npart)
+    isamp = jax.random.randint(key, shape=(nsamp,), minval=0, maxval=get_num(part))
     posall = jax.lax.all_gather(pos[isamp], axis_name=axis_name, tiled=True)
     xpivot = pos_zorder_sort(posall)[0][nsamp::nsamp]
     xpivot = jnp.pad(xpivot, ((1,1), (0,0)), constant_values=jnp.inf).at[0].set(-jnp.inf)
 
     # Now organize and determine which chunks need to be send to each rank
-    xz, idz = pos_zorder_sort(x)
-    spl = search_sorted_z(get_pos(xz), xpivot)
+    partz, idz = pos_zorder_sort(part)
+    spl = search_sorted_z(get_pos(partz), xpivot)
 
-    x = all_to_all_with_splits(
-        xz, spl, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
-        pack_pytree_len=len(pos)
-    )[0]
-    xz, idz = pos_zorder_sort(x)
+    part, dev_spl = all_to_all_with_splits(
+        partz, spl, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
+        pack_pytree=True
+    )
+    part.num = dev_spl[-1].reshape(1)
+
+    partz, idz = pos_zorder_sort(part)
 
     # We have posz globally and locally in z-order now
     # Let's do another communication step to improve the balance
-    npart = determine_npart(xz)
-    spl_have = global_splits(npart, axis_name=axis_name)
-    spl_target = (jnp.arange(0, ndev+1) * (nparttot // ndev)).at[-1].set(nparttot)
-    spl_send = jnp.clip(spl_target - spl_have[rank], 0, npart)
 
-    xz = all_to_all_with_splits(
-        xz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
-        pack_pytree_len=len(pos)
-    )[0]
+    spl_have = global_splits(partz.num, axis_name=axis_name)
+    spl_target = (jnp.arange(0, ndev+1) * (partz.num_total // ndev)).at[-1].set(partz.num_total)
+    spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num)
 
-    return xz
+    partz, dev_spl = all_to_all_with_splits(
+        partz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
+        pack_pytree=False
+    )
+    partz.num = dev_spl[-1].reshape(1)
+
+    return partz
 distributed_zsort.jit = jax.jit(distributed_zsort, static_argnames="nsamp")
 
 def adjust_domain_for_nodesize(xz: jax.Array | Pos, max_node_size: int, npart: int = None):
