@@ -272,7 +272,8 @@ def distributed_zsort(x: jax.Array | Pos, nsamp: int = 1024):
     spl = search_sorted_z(get_pos(xz), xpivot)
 
     x = all_to_all_with_splits(
-        xz, spl, axis_name=axis_name, err_hint="\nHint: Increase padding of positions"
+        xz, spl, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
+        pack_pytree_len=len(pos)
     )[0]
     xz, idz = pos_zorder_sort(x)
 
@@ -284,7 +285,8 @@ def distributed_zsort(x: jax.Array | Pos, nsamp: int = 1024):
     spl_send = jnp.clip(spl_target - spl_have[rank], 0, npart)
 
     xz = all_to_all_with_splits(
-        xz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions"
+        xz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
+        pack_pytree_len=len(pos)
     )[0]
 
     return xz

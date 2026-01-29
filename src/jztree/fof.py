@@ -235,7 +235,8 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     # Communicate the links to the larger rank in the link
     send_rank = jnp.maximum(links.a.irank, links.b.irank)
     links, dev_spl = all_to_all_with_irank(
-        send_rank, links, num=nlinks, axis_name=axis_name, copy_self=False
+        send_rank, links, num=nlinks, axis_name=axis_name, copy_self=False,
+        pack_pytree_len=len(links.a.igroup)
     )
     
     valid = jnp.arange(pytree_len(links), dtype=jnp.int32) < dev_spl[-1]
@@ -563,7 +564,7 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
     
     (seg_counts, seg_igroup), dev_spl, inv = all_to_all_with_irank(
         seg_label.irank, (seg_counts, seg_label.igroup), 
-        num=num_segs, get_inverse=True, axis_name=axis_name
+        num=num_segs, get_inverse=True, axis_name=axis_name, pack_pytree_len=len(seg_counts)
     )
     group_counts = jnp.zeros(size, dtype=jnp.int32).at[seg_idx[seg_igroup]].add(seg_counts)
 
@@ -592,7 +593,9 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
         target_global_dev_spl = jnp.pad(jnp.arange(ndev) * (nparttot // ndev), (0,1), constant_values=nparttot)
 
         send_irank = jnp.searchsorted(target_global_dev_spl, part_gid, side="right") - 1
-        (gid, part, gcnt), dev_spl = all_to_all_with_irank(send_irank, (part_gid, part, root_group_counts), num=npart)
+        (gid, part, gcnt), dev_spl = all_to_all_with_irank(
+            send_irank, (part_gid, part, root_group_counts), num=npart, pack_pytree_len=len(part_gid)
+        )
 
         valid = jnp.arange(len(gid)) < dev_spl[-1]
         itarget = jnp.where(valid, gid - target_global_dev_spl[rank], jnp.arange(len(gid)))
