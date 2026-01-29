@@ -7,6 +7,7 @@ from dataclasses import replace
 from .config import FofConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos
+from .data import get_num, get_pos
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil, raise_if
 from .tools import bucket_prefix_sum, tree_map_by_len
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
@@ -528,7 +529,7 @@ def fof_order(igroup: jax.Array, part: ParticleData, npart: int | None = None):
 
     return part, counts
 
-def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, size_out: int | None = None):
+def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = None):
     """Rearanges particles in group-order and determines group-count at root-particles
 
     Group order means that each FoF-group contains group-count continguous particles, 
@@ -545,8 +546,7 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
     # in segments and then send the segments to the root task
     rank, ndev, axis_name = get_rank_info()
 
-    if npart is None:
-        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
+    npart = get_num(part)
 
     iseg = global_to_local_label(label)
 
@@ -606,8 +606,10 @@ def distr_fof_order(label: Label, part: ParticleData, npart: int | None = None, 
     
     if size_out is not None: # Coding-note: might save some space if already done in comm. output:
         part, gcnt = tree_map_by_len(lambda x: x[:size_out], (part, gcnt), len(gcnt))
+    
+    part.num = dev_spl[-1]
 
-    return part, gcnt, dev_spl[-1]
+    return part, gcnt
 
 # ------------------------------------------------------------------------------------------------ #
 #                                      Fof Catalogue Reduction                                     #
@@ -644,7 +646,6 @@ def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int =
 def fof_catalogue_from_groups(
         part: ParticleData, # Particles must be in Group order! (See fof_order/distr_fof_order)
         group_counts: jax.Array,
-        npart: int | None = None,
         Nmin: int = 20,
         boxsize: float = 0.,
         size_cata: int | None = None
@@ -657,9 +658,7 @@ def fof_catalogue_from_groups(
     """
     rank, ndev, axis_name = get_rank_info()
 
-    if npart is None:
-        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
-
+    npart = get_num(part)
     size_part = len(group_counts)
 
     if size_cata is None:
@@ -847,8 +846,8 @@ def distr_fof_and_catalogue(
     else:
         partz, th = distr_zsort_and_tree(part, cfg.tree)
     labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, cfg=cfg)
-    partf, counts, npart = distr_fof_order(labels, partz)
-    catalogue = fof_catalogue_from_groups(partf, counts, npart, Nmin=20, boxsize=boxsize)
+    partf, counts = distr_fof_order(labels, partz)
+    catalogue = fof_catalogue_from_groups(partf, counts, Nmin=20, boxsize=boxsize)
 
     return partf, catalogue
 distr_fof_and_catalogue.jit = jax.jit(fof_and_catalogue,

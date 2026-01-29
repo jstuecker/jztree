@@ -98,9 +98,9 @@ def distr_fof_cata(seed):
     partz, th = particles_and_tree(seed)
     label = distr_fof_z_with_tree(partz.pos, th, rlink=0.1)
     
-    part_fof, counts, npart = distr_fof_order(label, partz)
+    part_fof, counts = distr_fof_order(label, partz)
     
-    return partz, fof_catalogue_from_groups(part_fof, counts, npart)
+    return partz, fof_catalogue_from_groups(part_fof, counts)
 
 @jax.jit
 def fof_cata(part):
@@ -122,7 +122,7 @@ def test_distr_catalogue(seed):
     isort1 = jnp.argsort(cata1.count, descending=True)
     isort2 = jnp.argsort(cata2.count, descending=True)
     cata1 = tree_map_by_len(lambda x: x[isort1][:num], cata1, len(cata1.count))
-    cata2 = tree_map_by_len(lambda x: x[isort2][:num], cata2, len(cata1.count))
+    cata2 = tree_map_by_len(lambda x: x[isort2][:num], cata2, len(cata2.count))
 
     assert jnp.all(cata1.count == cata2.count)
     assert cata1.mass == pytest.approx(cata2.mass, abs=0.1)

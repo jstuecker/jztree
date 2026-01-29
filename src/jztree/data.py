@@ -32,6 +32,10 @@ class PosMass:
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
+    def __post_init__(self):
+        if self.num is not None:
+            assert jnp.ndim(self.num) == 1, "Please reshape num to shape (1,) (to allow shardmap return)"
+
 @jax.jax.tree_util.register_dataclass
 @dataclass
 class ParticleData:
@@ -66,6 +70,12 @@ def get_pos_mass(part: PosMass):
     mass = jnp.broadcast_to(part.mass, part.pos.shape[:-1])
     return jnp.concatenate([part.pos, mass[..., None]], axis=-1)
 
+def get_num(part: Pos, default_to_length=False):
+    if getattr(part, "num", None) is None:
+        if default_to_length:
+            return len(part.pos)
+        raise ValueError("Need .num attribute in particle structure for distributed mode")
+    return jnp.sum(part.num) # Summing here, to be correct if sharding changed
 
 def get_num_total(part: Pos, default_to_length=False):
     num = getattr(part, "num_total", None)

@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from typing import Tuple, Any, TypeAlias
 
-from .tools import cumsum_starting_with_zero, inverse_of_splits, raise_if
+from .tools import cumsum_starting_with_zero, inverse_of_splits, raise_if, tree_map_by_len
 
 # Currently jax doesn't have a typehint for pytrees. We simply define one ourselves for clarity
 Pytree: TypeAlias = Any
@@ -84,10 +84,13 @@ def should_init_jax_distributed() -> bool:
 # ------------------------------------------------------------------------------------------------ #
 
 def pytree_len(x):
-    """Returns the leading axis of the first leaf of a pytree"""
+    """Returns the size of the largest first axis of any leaf of a pytree"""
     leaves = jax.tree_util.tree_leaves(x)
 
-    return max(len(x) for x in leaves)
+    def len_or_one(x):
+        return 1 if jnp.size(x) == 1 else len(x)
+
+    return max(len_or_one(x) for x in leaves)
 
 def value_for_dtype(dtype, float_val=jnp.nan, int_val=0):
     if dtype.kind == "f":
@@ -101,12 +104,12 @@ def empty_like(x, float_val=jnp.nan, int_val=0):
 
     return jax.tree.map(empty_el, x)
 
-def invalidate(x, mask, invalid_float=jnp.nan, invalid_int=0):
+def invalidate(arr, mask, invalid_float=jnp.nan, invalid_int=0):
     def inv(x):
         mask_rs = jnp.reshape(mask, mask.shape + (1,)*(x.ndim-1))
         return jnp.where(mask_rs, value_for_dtype(x.dtype, invalid_float, invalid_int), x)
     
-    return jax.tree.map(inv, x)
+    return tree_map_by_len(inv, arr, pytree_len(arr))
 
 # ------------------------------------------------------------------------------------------------ #
 #                              Packing Helpers for more efficient comm                             #
@@ -209,6 +212,7 @@ def get_pos(x):
         return x.pos
 
 def shift_particles_left(x, nsend, max_send, npart):
+    """Sends the first nsend elements of every leaf with size == largest leaf size"""
     rank, ndev, axis_name = get_rank_info()
     
     # Validate that send buffer is large enough
@@ -225,17 +229,24 @@ def shift_particles_left(x, nsend, max_send, npart):
     )
 
     # Send the particles
-    x_get = send_to_left(jax.tree.map(lambda v: v[0:max_send], x), axis_name, invalid_float=jnp.nan)
+    size = pytree_len(x)
+
+    x_get = send_to_left(tree_map_by_len(lambda v: v[0:max_send], x, size), axis_name, invalid_float=jnp.nan)
 
     # Delete the particles that were send
     iar = jnp.arange(pytree_len(x))
     x = invalidate(x, iar < nsend)
-    x = jax.tree.map(lambda v: jnp.roll(v, -nsend, axis=0), x)
+    x = tree_map_by_len(lambda v: jnp.roll(v, -nsend, axis=0), x, size)
 
     # Insert the received particles
     idx = jnp.arange(max_send)
     idx = jnp.where(idx < nget, npart - nsend + idx, pytree_len(x)) # discard indices beyond nadd
-    x = jax.tree.map(lambda u,v: u.at[idx].set(v), x, x_get)
+    def insert(u, v):
+        if len(u) != size:
+            return u
+        else: 
+            return u.at[idx].set(v)
+    x = jax.tree.map(insert, x, x_get)
 
     return x, npart + nget - nsend
 

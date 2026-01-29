@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from typing import Tuple
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
-from .data import get_num_total, get_pos
+from .data import get_num_total, get_pos, get_num
 from .config import TreeConfig
 from .tools import cumsum_starting_with_zero, div_ceil, raise_if, tree_map_by_len
 from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
@@ -205,7 +205,7 @@ def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig) -> Tuple[Pos, TreeHier
     partz = distributed_zsort(part, nsamp=cfg_tree.nsamp)
 
     top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
-    partz, npart, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
+    partz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
 
     th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
@@ -238,20 +238,12 @@ center_of_mass.jit = jax.jit(center_of_mass, static_argnames=['kahan_summation',
 #                                       Domain Decomposition                                       #
 # ------------------------------------------------------------------------------------------------ #
 
-def get_pos(x):
-    if isinstance(x, jax.Array):
-        return x
-    else: # assume x is a pytree with .pos attribute
-        return x.pos
 
 def determine_npart(x):
     """Determines the number of valid particles (that are not nan)"""
     valid = ~jnp.isnan(get_pos(x))
     return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
 
-def get_num(part: Pos):
-    assert getattr(part, "num", None) is not None, "Need .num attribute in particle structure for distributed mode"
-    return jnp.squeeze(part.num)
     
 def distributed_zsort(part: Pos, nsamp: int = 1024):
     rank, ndev, axis_name = get_rank_info()
@@ -296,24 +288,24 @@ def distributed_zsort(part: Pos, nsamp: int = 1024):
     return partz
 distributed_zsort.jit = jax.jit(distributed_zsort, static_argnames="nsamp")
 
-def adjust_domain_for_nodesize(xz: jax.Array | Pos, max_node_size: int, npart: int = None):
+def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
     """Shifts particles so that nodes with size <= max_node_size always lie on a single GPU"""
     rank, ndev, axis_name = get_rank_info()
 
-    if npart is None:
-        npart = determine_npart(xz)
+    npart = get_num(partz)
 
-    ext_ll, ext_lr, ext_rl, ext_rr = distr_boundary_extend(get_pos(xz), npart=npart)
+    ext_ll, ext_lr, ext_rl, ext_rr = distr_boundary_extend(get_pos(partz), npart=npart)
     npart_l = ext_lr - ext_ll
     
     ilvl_max = jnp.max(jnp.where(npart_l <= max_node_size, jnp.arange(len(npart_l)), -1))
 
     npshift = ext_lr[ilvl_max]
 
-    xz, npart = shift_particles_left(xz, npshift, max_send=max_node_size, npart=npart)
+    partz, npart = shift_particles_left(partz, npshift, max_send=max_node_size, npart=npart)
+    partz.npart = jnp.array((npart,))
 
     # Find the level of the new boundary
-    posz = get_pos(xz)
+    posz = get_pos(partz)
 
     xr = send_to_left(posz[0], axis_name)
     xl = send_to_right(posz[npart-1], axis_name)
@@ -323,7 +315,7 @@ def adjust_domain_for_nodesize(xz: jax.Array | Pos, max_node_size: int, npart: i
         lbound=jnp.array([0,2]), rbound=jnp.array([2,4]), num=2
     )[0]
 
-    return xz, npart, lvl_bound
+    return partz, lvl_bound
 adjust_domain_for_nodesize.jit = jax.jit(adjust_domain_for_nodesize, static_argnames="max_node_size")
 
 # ------------------------------------------------------------------------------------------------ #

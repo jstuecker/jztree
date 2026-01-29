@@ -48,7 +48,7 @@ def test_mutli_zsort():
 @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
 def fcoarsen(posz: jnp.ndarray):
     # return jztree.tree.distributed_define_leaves(posz, leaf_size=256)
-    posz, npart, lvl_bound = adjust_domain_for_nodesize(posz, 256)
+    posz, lvl_bound = adjust_domain_for_nodesize(posz, 256)
     ispl = detect_leaf_boundaries(posz, leaf_size=256, lvl_bound=lvl_bound)
 
     return posz, ispl
@@ -68,17 +68,17 @@ def splits_to_global(ispl):
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_multi_leaves():
-    pos, posz = jax.jit(myzsort)()
-    posz_new, ispln = jax.jit(fcoarsen)(posz)
+    part, partz = jax.jit(myzsort)()
+    posz_new, ispln = jax.jit(fcoarsen)(partz.pos)
     
     # Check that position array was not messed up
     def remove_invalid(x):
         return x[jnp.where(~jnp.isnan(x[...,0]))]
     
-    assert jnp.all(remove_invalid(posz) == remove_invalid(posz_new))
+    assert jnp.all(remove_invalid(partz.pos) == remove_invalid(posz_new))
 
     # Check splits against locally calculated ones
-    posz0 = jax.device_put(posz, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
+    posz0 = jax.device_put(partz.pos, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
     ispl0 = detect_leaf_boundaries(remove_invalid(posz0), leaf_size=256)
 
     def remove_duplicates(i):
@@ -89,7 +89,7 @@ def test_multi_leaves():
 
     assert jnp.all(remove_duplicates(ispln2) == remove_duplicates(ispl0))
 
-def get_pos():
+def get_part():
     rank, ndev, axis_name = get_rank_info()
 
     npart, nextra = 1024*128, 1024*32
@@ -97,7 +97,9 @@ def get_pos():
     pos = jax.random.uniform(jax.random.key(rank), (npart+nextra,3))
     pos = pos.at[-nextra:].set(jnp.nan)
 
-    return pos, npart*ndev
+    part = PosMass(pos=pos, mass=jnp.ones_like(pos[...,0]), num=jnp.array((npart,)), num_total=npart*ndev)
+
+    return part
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_tree_properties():
@@ -109,11 +111,10 @@ def test_tree_properties():
     cfg_tree.alloc_fac_nodes = 2.0
 
     # Build a reference structure
-    posref, nparttot = jax.shard_map(get_pos, out_specs=(P("gpus"), P()), in_specs=(), mesh=mesh)()
-    posrefz = pos_zorder_sort(posref)[0]
-    pmref = PosMass(pos=posrefz, mass=jnp.ones(posrefz.shape[0]), num_total=nparttot)
+    partref = jax.shard_map(get_part, out_specs=P("gpus"), in_specs=(), mesh=mesh)()
+    partrefz = pos_zorder_sort(partref)[0]
 
-    thref = build_tree_hierarchy(pmref, cfg_tree)
+    thref = build_tree_hierarchy(partrefz, cfg_tree)
 
     def reductions(th: TreeHierarchy, axis_name=None):
         # Do a couple of reductions on node-properties to check identity of tree structures
@@ -140,14 +141,13 @@ def test_tree_properties():
     def distributed_tree_hierarchy_reductions():
         rank, ndev, axis_name = get_rank_info()
 
-        pos, nparttot = get_pos()
-        part = PosMass(pos=pos, mass=jnp.ones(pos.shape[0]), num_total=nparttot)
+        part = get_part()
         partz = distributed_zsort(part)
 
         npart = jnp.sum(~jnp.isnan(partz.pos[...,0]))
 
-        top_node_size = define_tree_level_node_sizes(nparttot, cfg_tree)[-1]
-        partz, npart, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, npart=npart)
+        top_node_size = define_tree_level_node_sizes(part.num_total, cfg_tree)[-1]
+        partz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
 
         th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
