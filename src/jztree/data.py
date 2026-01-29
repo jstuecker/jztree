@@ -12,16 +12,16 @@ def static_field(*args, **kwargs):
     return field(*args, metadata=dict(static=True), **kwargs)
 
 # ------------------------------------------------------------------------------------------------ #
-#                                       Particle Data Classes                                      #
+#                                    User Interface data classes                                   #
 # ------------------------------------------------------------------------------------------------ #
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(kw_only=True)
 class Pos: # this class is mostly defined to declare an interface that particle class should follow
     pos: jax.Array
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(kw_only=True)
 class PosMass:
     pos: jax.Array  # (Nparticles, 3)
     mass: jax.Array  # (Nparticles,) or (1,)
@@ -29,20 +29,6 @@ class PosMass:
     def posm(self):
         mass = jnp.broadcast_to(self.mass, self.pos.shape[:-1])
         return jnp.concatenate([self.pos, mass[..., None]], axis=-1)
-
-@jax.tree_util.register_dataclass
-@dataclass
-class PosLvl():
-    pos: jax.Array
-    lvl: jax.Array
-
-    def pos_lvl(self):
-        return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
-    
-@jax.tree_util.register_dataclass
-@dataclass
-class PosLvlId(PosLvl):
-    id: jax.Array
 
 @jax.jax.tree_util.register_dataclass
 @dataclass
@@ -56,6 +42,24 @@ class ParticleData:
         if self.vel != None:
             assert self.vel.shape[1] == 3, "provide velocities as an array of shape (N, 3)"
             assert self.vel.shape[0] == self.pos.shape[0], "provide as many velocities as positions"
+
+# ------------------------------------------------------------------------------------------------ #
+#                                  Internal Particle Data classes                                  #
+# ------------------------------------------------------------------------------------------------ #
+
+@jax.tree_util.register_dataclass
+@dataclass(kw_only=True)
+class PosLvl():
+    pos: jax.Array
+    lvl: jax.Array
+
+    def pos_lvl(self):
+        return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
+    
+@jax.tree_util.register_dataclass
+@dataclass
+class PosLvlId(PosLvl):
+    id: jax.Array
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -221,7 +225,7 @@ class TreeHierarchy():
 
         ispl_n2p = self.ispl_n2n.get(0)[self.ispl_n2l.get(level, size)]
         if self.mass_cent is not None:
-            mass_cent = PosMass(self.mass_cent.get(level, size), self.mass.get(level, size))
+            mass_cent = PosMass(pos=self.mass_cent.get(level, size), mass=self.mass.get(level, size))
         else:
             mass_cent = None
         return TreePlane(

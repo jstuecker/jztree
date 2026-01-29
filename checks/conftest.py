@@ -118,7 +118,7 @@ def pos_z(pos):
 def pos_mass_z(npart):
     pos0 = jax.random.normal(jax.random.PRNGKey(0), (npart,3))
     posz, isort = pos_zorder_sort(pos0)
-    return PosMass(posz, jnp.ones(posz.shape[0]))
+    return PosMass(pos=posz, mass=jnp.ones(posz.shape[0]))
 
 @pytest.fixture
 def tree_hierarchy(pos_mass_z):

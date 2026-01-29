@@ -115,7 +115,7 @@ def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_
     for level in reversed(range(nplanes)):
         size = th.plane_sizes[level]
         igroup = node_to_child_label(igroup, node_lvl, spl, size, rlink=rlink)
-        child_data = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
+        child_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
 
         igroup, ilist = node_fof_and_ilist(
             ilist, spl, child_data, igroup,
@@ -425,7 +425,7 @@ def distr_node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
         igroup = node_to_child_label(node_data.label, node_data.lvl, node_data.spl, size, rlink=rlink) 
 
-        poslvl = PosLvl(th.geom_cent.get(level, size), th.lvl.get(level, size))
+        poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
         
         # Request the remote node children that we need to interact with

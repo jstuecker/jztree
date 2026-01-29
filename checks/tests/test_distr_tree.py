@@ -107,7 +107,7 @@ def test_tree_properties():
     # Build a reference structure
     posref, nparttot = jax.shard_map(get_pos, out_specs=(P("gpus"), P()), in_specs=(), mesh=mesh)()
     posrefz = pos_zorder_sort(posref)[0]
-    pmref = PosMass(posrefz, jnp.ones(posrefz.shape[0]))
+    pmref = PosMass(pos=posrefz, mass=jnp.ones(posrefz.shape[0]))
 
     thref = build_tree_hierarchy(pmref, cfg_tree, npart_tot=nparttot)
 
@@ -137,7 +137,7 @@ def test_tree_properties():
         rank, ndev, axis_name = get_rank_info()
 
         pos, nparttot = get_pos()
-        part = PosMass(pos, jnp.ones(pos.shape[0]))
+        part = PosMass(pos=pos, mass=jnp.ones(pos.shape[0]))
         partz = distributed_zsort(part)
 
         npart = jnp.sum(~jnp.isnan(partz.pos[...,0]))
