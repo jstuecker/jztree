@@ -63,7 +63,7 @@ def particles_and_tree(seed=0):
 
     part = gaussian_blob(1024*1024, npad=1024*128*3, seed=rank+seed)
 
-    return distr_zsort_and_tree(part, npart_tot, cfg.tree)
+    return distr_zsort_and_tree(part, cfg.tree)
 
 @jax.jit
 @jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
@@ -188,16 +188,18 @@ def test_discodj_fof():
     @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
     def distr_fof(part):
         rank = jax.lax.axis_index("gpus")
+        ndev = jax.lax.axis_size("gpus")
 
         part = ParticleData(
             pos=jnp.pad(part.pos, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
-            vel=jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan)
+            vel=jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
+            num_total=ndev*nper_dev
         )
 
         cfg = FofConfig()
         cfg.tree.alloc_fac_nodes = 1.2
 
-        partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
+        partz, th = distr_zsort_and_tree(part, cfg.tree)
         labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink)
 
         # Warning!

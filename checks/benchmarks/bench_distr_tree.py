@@ -66,8 +66,8 @@ def bench_multi_tree(jax_bench, ndev):
     @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=get_mesh(ndev))
     def get_tree(pos):
         cfg_tree = TreeConfig()
-        part = PosMass(pos=pos, mass=jnp.ones_like(pos[...,0]))
-        partz, th = distr_zsort_and_tree(part, Ntot, cfg_tree)
+        part = PosMass(pos=pos, mass=jnp.ones_like(pos[...,0]), num_total=Ntot)
+        partz, th = distr_zsort_and_tree(part, cfg_tree)
         return partz, th
     get_tree.jit = jax.jit(get_tree)
 

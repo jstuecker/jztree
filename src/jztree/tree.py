@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from typing import Tuple
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
+from .data import get_num_total, get_pos
 from .config import TreeConfig
 from .tools import cumsum_starting_with_zero, div_ceil, raise_if
 from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
@@ -199,14 +200,14 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
 
     return ext_ll, ext_lr, ext_rl, ext_rr
 
-def distr_zsort_and_tree(part: Pos, npart_tot: int, cfg_tree: TreeConfig
-                         ) -> Tuple[Pos, TreeHierarchy]:
+def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig) -> Tuple[Pos, TreeHierarchy]:
+    npart_tot = get_num_total(part)
     partz = distributed_zsort(part, nsamp=cfg_tree.nsamp)
 
     top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
     partz, npart, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
 
-    th = build_tree_hierarchy(partz, cfg_tree, npart_tot=npart_tot, lvl_bound=lvl_bound)
+    th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
     return partz, th
 
@@ -417,8 +418,8 @@ def get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedA
 
     return node_mcent, node_mass
 
-def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig,
-                         npart_tot: int | None = None, lvl_bound=(388, 388)) -> TreeHierarchy:
+def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bound=(388, 388)
+                         ) -> TreeHierarchy:
     """Builds a tree hierarchy from z-order positions
 
     The zeroth level of the tree corresponds to leaves, which contain multiple particles.
@@ -438,16 +439,9 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig,
     """
     rank, ndev, axis_name = get_rank_info()
 
-    if isinstance(part, jax.Array):
-        assert part.shape[-1] == 3
-        posz = part
-    elif hasattr(part, "pos"):
-        posz = part.pos
-    else:
-        raise ValueError("Invalid input particles")
-    
-    if npart_tot is None:
-        npart_tot = len(posz)
+    posz = get_pos(part)
+    npart_tot = get_num_total(part, default_to_length=(ndev==1))
+
     npart_loc = npart_tot // ndev # static estimate of number of unpadded-particles
 
     node_sizes = define_tree_level_node_sizes(npart_tot, cfg_tree)
@@ -494,7 +488,7 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig,
     )
     
     return th
-build_tree_hierarchy.jit = jax.jit(build_tree_hierarchy, static_argnames=['cfg_tree', 'npart_tot'])
+build_tree_hierarchy.jit = jax.jit(build_tree_hierarchy, static_argnames=['cfg_tree'])
 
 # ------------------------------------------------------------------------------------------------ #
 #                                     Interaction List Helpers                                     #

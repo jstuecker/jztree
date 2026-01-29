@@ -20,11 +20,15 @@ def static_field(*args, **kwargs):
 class Pos: # this class is mostly defined to declare an interface that particle class should follow
     pos: jax.Array
 
+    num_total: int | None = static_field(default=None)
+
 @jax.tree_util.register_dataclass
 @dataclass(kw_only=True)
 class PosMass:
     pos: jax.Array  # (Nparticles, 3)
     mass: jax.Array  # (Nparticles,) or (1,)
+
+    num_total: int | None = static_field(default=None)
 
     def posm(self):
         mass = jnp.broadcast_to(self.mass, self.pos.shape[:-1])
@@ -37,11 +41,32 @@ class ParticleData:
     mass: jax.Array | None = None # (Nparticles,) or (1,)
     vel: jax.Array | None = None # (Nparticles, 3)
 
+    num_total: int | None = static_field(default=None)
+
     def __post_init__(self):
         assert self.pos.shape[1] == 3, "provide positions as an array of shape (N, 3)"
         if self.vel != None:
             assert self.vel.shape[1] == 3, "provide velocities as an array of shape (N, 3)"
             assert self.vel.shape[0] == self.pos.shape[0], "provide as many velocities as positions"
+
+def get_pos(part: Pos):
+    if isinstance(part, jax.Array):
+        assert (part.shape[-1] == 3) and (part.ndim == 2)
+        return part
+    elif hasattr(part, "pos"):
+        assert (part.pos.shape[-1] == 3) and (part.pos.ndim == 2)
+        return part.pos
+    else:
+        raise ValueError("Invalid input particles")
+
+def get_num_total(part: Pos, default_to_length=False):
+    num = getattr(part, "num_total", None)
+    if num is not None:
+        return num
+    elif default_to_length:
+        return len(get_pos(part))
+    else:
+        raise ValueError("Need num_total attribute on particle data structure (for distributed mode)")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                  Internal Particle Data classes                                  #

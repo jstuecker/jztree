@@ -111,11 +111,12 @@ def test_tree_nans(pos_mass_z: PosMass):
 
     pos_mass_z2 = PosMass(
         pos = jnp.pad(pos_mass_z.pos, ((0,nextra),(0,0)), constant_values=jnp.nan),
-        mass = jnp.pad(pos_mass_z.mass, (0, nextra), constant_values=jnp.nan)
+        mass = jnp.pad(pos_mass_z.mass, (0, nextra), constant_values=jnp.nan),
+        num_total=npart
     )
 
-    th1 = build_tree_hierarchy(pos_mass_z, cfg_tree, npart_tot=npart)
-    th2 = build_tree_hierarchy(pos_mass_z2, cfg_tree, npart_tot=npart)
+    th1 = build_tree_hierarchy(pos_mass_z, cfg_tree)
+    th2 = build_tree_hierarchy(pos_mass_z2, cfg_tree)
 
     assert th1.ispl_n2l.all_equal(th2.ispl_n2l)
     assert th1.ispl_n2n.all_equal(th2.ispl_n2n)

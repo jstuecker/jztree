@@ -796,9 +796,9 @@ distr_fof_z_with_tree.jit = jax.jit(
     distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
 )
 
-def distr_fof(part: Pos, npart_tot: int, rlink: float, boxsize: float = 0., 
+def distr_fof(part: Pos, rlink: float, boxsize: float = 0., 
               cfg: FofConfig = FofConfig):
-    partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
+    partz, th = distr_zsort_and_tree(part, cfg.tree)
 
     labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
 
@@ -832,7 +832,6 @@ fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
 def distr_fof_and_catalogue(
         part: ParticleData,
         rlink: float,
-        npart_tot: int,
         boxsize: float=0.,
         cfg: FofConfig = FofConfig(),
         input_z_ordered: bool = False,
@@ -843,7 +842,7 @@ def distr_fof_and_catalogue(
         partz = part
         assert th is not None, "To skip sort, provide tree (jztree.tree.distr_zsort_and_tree)"
     else:
-        partz, th = distr_zsort_and_tree(part, npart_tot, cfg.tree)
+        partz, th = distr_zsort_and_tree(part, cfg.tree)
     labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, cfg=cfg)
     partf, counts, npart = distr_fof_order(labels, partz)
     catalogue = fof_catalogue_from_groups(partf, counts, npart, Nmin=20, boxsize=boxsize)

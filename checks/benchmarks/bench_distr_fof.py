@@ -15,11 +15,10 @@ mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 def particles_and_tree(N=int(1e6), seed=0):
     cfg = FofConfig()
     rank, ndev, axis_name = get_rank_info()
-    npart_tot = N*ndev
 
     part = gaussian_blob(N, npad=N//2, seed=rank+seed)
 
-    return distr_zsort_and_tree(part, npart_tot, cfg.tree)
+    return distr_zsort_and_tree(part, cfg.tree)
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.shrink_in_quick(keep_index=1)

@@ -107,9 +107,9 @@ def test_tree_properties():
     # Build a reference structure
     posref, nparttot = jax.shard_map(get_pos, out_specs=(P("gpus"), P()), in_specs=(), mesh=mesh)()
     posrefz = pos_zorder_sort(posref)[0]
-    pmref = PosMass(pos=posrefz, mass=jnp.ones(posrefz.shape[0]))
+    pmref = PosMass(pos=posrefz, mass=jnp.ones(posrefz.shape[0]), num_total=nparttot)
 
-    thref = build_tree_hierarchy(pmref, cfg_tree, npart_tot=nparttot)
+    thref = build_tree_hierarchy(pmref, cfg_tree)
 
     def reductions(th: TreeHierarchy, axis_name=None):
         # Do a couple of reductions on node-properties to check identity of tree structures
@@ -137,7 +137,7 @@ def test_tree_properties():
         rank, ndev, axis_name = get_rank_info()
 
         pos, nparttot = get_pos()
-        part = PosMass(pos=pos, mass=jnp.ones(pos.shape[0]))
+        part = PosMass(pos=pos, mass=jnp.ones(pos.shape[0]), num_total=nparttot)
         partz = distributed_zsort(part)
 
         npart = jnp.sum(~jnp.isnan(partz.pos[...,0]))
@@ -145,7 +145,7 @@ def test_tree_properties():
         top_node_size = define_tree_level_node_sizes(nparttot, cfg_tree)[-1]
         partz, npart, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, npart=npart)
 
-        th = build_tree_hierarchy(partz, cfg_tree, npart_tot=nparttot, lvl_bound=lvl_bound)
+        th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
         return reductions(th, axis_name)
     
