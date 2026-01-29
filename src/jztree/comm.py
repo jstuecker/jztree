@@ -113,45 +113,71 @@ def invalidate(x, mask, invalid_float=jnp.nan, invalid_int=0):
 # ------------------------------------------------------------------------------------------------ #
 
 @dataclass
-class PackingSpec():
+class PackingSpec:
     treedef: Any
-    shapes: Tuple[int, ...]
+    shapes: Tuple[Tuple[int, ...], ...]
     dtypes: Tuple[jnp.dtype, ...]
-    offsets: np.array
+    offsets: np.ndarray
+    keep_mask: Tuple[bool, ...]   # True if leaf was packed (shape[0] == N)
 
-def _pack_pytree(x: Pytree, ndim_keep: int = 1) -> Tuple[jax.Array, PackingSpec]:
-    """Packs a pytree into a single byte-array and meta-data needed for reconstructing it
-
-    Leaves must align in the first ndim_keep dimensions
-    """
+def _pack_pytree(x: Pytree, N: int) -> Tuple[jax.Array, PackingSpec]:
+    """Packs only leaves with leading size N (shape[0] == N). Other leaves are skipped."""
     leaves, treedef = jax.tree_util.tree_flatten(x)
 
-    base_shape = leaves[0].shape[:ndim_keep]
-    for l in leaves:
-        assert l.shape[:ndim_keep] == base_shape, "leaves must align in leading dimensions"
+    def keep(l):
+        return (
+            hasattr(l, "shape") and hasattr(l, "dtype")
+            and l.shape is not None and len(l.shape) >= 1
+            and int(l.shape[0]) == int(N)
+        )
 
-    dtypes = [l.dtype for l in leaves]
-    shapes = [l.shape for l in leaves]
-    
-    arrs = [l.reshape((base_shape + (-1,))).view(jnp.uint8) for l in leaves]
+    keep_mask = tuple(keep(l) for l in leaves)
+    data_leaves = [l for l, m in zip(leaves, keep_mask) if m]
 
+    assert len(data_leaves) > 0
+    # payload = jnp.zeros((0,), dtype=jnp.uint8)
+    # spec = PackingSpec(treedef, tuple(), tuple(), np.array([0], np.int64), keep_mask)
+    # return payload, spec
+
+    base_shape = (int(N),)
+    for l in data_leaves:
+        assert l.shape[:1] == base_shape, "packed leaves must align in leading dimension"
+
+    dtypes = tuple(l.dtype for l in data_leaves)
+    shapes = tuple(l.shape for l in data_leaves)
+
+    arrs = [l.reshape((N, -1)).view(jnp.uint8) for l in data_leaves]
     num = [a.shape[-1] for a in arrs]
-    offsets = np.pad(np.cumsum(num), (1,0))
+    offsets = np.pad(np.cumsum(num), (1, 0)).astype(np.int64)
 
-    spec = PackingSpec(treedef, shapes, dtypes, offsets)
-
+    spec = PackingSpec(treedef, shapes, dtypes, offsets, keep_mask)
     return jnp.concatenate(arrs, axis=-1), spec
 
-def _unpack_pytree(x: jax.Array, p: PackingSpec) -> Pytree:
-    if p is None:
-        return x
+def _unpack_pytree(x: jax.Array, p: PackingSpec, template: Pytree) -> Pytree:
+    """
+    Unpacks packed leaves and merges into `template`.
+    Leaves that were skipped during packing are taken from `template` unchanged.
+    """
+    # Rebuild packed leaves
+    packed_leaves = []
+    for i in range(len(p.shapes)):
+        sl = x[..., p.offsets[i]:p.offsets[i+1]]
+        packed_leaves.append(sl.view(p.dtypes[i]).reshape(p.shapes[i]))
 
-    leaves = []
-    for i in range(0, len(p.shapes)):
-        new = x[...,p.offsets[i]:p.offsets[i+1]].view(p.dtypes[i]).reshape(p.shapes[i])
-        leaves.append(new)
-    return jax.tree_util.tree_unflatten(p.treedef, leaves)
+    tmpl_leaves, tmpl_def = jax.tree_util.tree_flatten(template)
+    if tmpl_def != p.treedef:
+        raise ValueError("Template treedef mismatch.")
 
+    # Merge packed leaves into template leaves
+    out_leaves = []
+    pi = 0
+    for m, tleaf in zip(p.keep_mask, tmpl_leaves):
+        if m:
+            out_leaves.append(packed_leaves[pi]); pi += 1
+        else:
+            out_leaves.append(tleaf)
+
+    return jax.tree_util.tree_unflatten(p.treedef, out_leaves)
 # ------------------------------------------------------------------------------------------------ #
 #                                  Simple Communication Directives                                 #
 # ------------------------------------------------------------------------------------------------ #
@@ -247,7 +273,7 @@ def ragged_all_to_all_through_buf(operand, output, input_offsets, send_sizes, ou
     op = jax.lax.fori_loop(0, ncomm, comm, op)
     return _unpack_pytree(op, ospec)
 
-def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, err_hint="", copy_self=True, pack_pytree=True):
+def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, err_hint="", copy_self=True, pack_pytree_len=None):
     """all_to_all communication with data-dependent communication volume
     
     We send to rank i: x[ispl[i]:ispl[i+1]] 
@@ -309,11 +335,11 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
         #     xi, outi, input_offsets, send_sizes, output_offsets, recv_sizes, axis_name=axis_name
         # )
 
-    if pack_pytree:
-        xp, xspec = _pack_pytree(x)
-        op, ospec = _pack_pytree(output)
+    if pack_pytree_len is not None:
+        xp, xspec = _pack_pytree(x, pack_pytree_len)
+        op, ospec = _pack_pytree(output, pack_pytree_len)
         op = comm(xp, op)
-        return _unpack_pytree(op, ospec), dev_spl
+        return _unpack_pytree(op, ospec, output), dev_spl
     else:
         return jax.tree.map(comm, x, output), dev_spl
 
@@ -372,7 +398,7 @@ def all_to_all_with_irank(
         verify: bool = True,
         err_hint: str = "",
         copy_self: bool = True,
-        pack_pytree: bool = True,
+        pack_pytree_len: int | None = None,
         get_inverse: bool = False
     ):
     """Communicate by indicating the rank of the receiving device
@@ -380,7 +406,7 @@ def all_to_all_with_irank(
     To understand most arguments, see documentation of all_to_all_with_splits
     """
     xsort, dev_spl, isort = arange_for_comm(irank, x, num=num, axis_name=axis_name)
-    x, dev_spl = all_to_all_with_splits(xsort, dev_spl, output, axis_name, verify=verify, err_hint=err_hint, copy_self=copy_self, pack_pytree=pack_pytree)
+    x, dev_spl = all_to_all_with_splits(xsort, dev_spl, output, axis_name, verify=verify, err_hint=err_hint, copy_self=copy_self, pack_pytree_len=pack_pytree_len)
     if get_inverse:
         invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort), dtype=isort.dtype))
         return x, dev_spl, invsort
@@ -397,18 +423,18 @@ def all_to_all_request(
     verify: bool = True,
     err_hint: str = "",
     copy_self: bool = True,
-    pack_pytree: bool = True
+    pack_pytree_len: int | None = None
 ) -> jax.Array:
     # First inform the task with the data which indices we need
     indices_sort, dev_spl, isort = arange_for_comm(irank, indices, num=num, axis_name=axis_name)
     indices, dev_spl = all_to_all_with_splits(
         indices_sort, dev_spl, output=None, axis_name=axis_name, verify=verify, err_hint=err_hint,
-        copy_self=copy_self, pack_pytree=pack_pytree
+        copy_self=copy_self, pack_pytree_len=pack_pytree_len
     )
     # Then send back the data at those locations
     xsort, dev_spl = all_to_all_with_splits(
         x[indices], dev_spl, output, axis_name=axis_name, verify=verify, err_hint=err_hint,
-        copy_self=copy_self, pack_pytree=pack_pytree
+        copy_self=copy_self, pack_pytree_len=pack_pytree_len
     )
     # rearange to the original order
     invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort), dtype=isort.dtype))
@@ -424,7 +450,7 @@ def all_to_all_request_children(
     verify: bool = True,
     err_hint: str = "",
     copy_self: bool = True,
-    pack_pytree: bool = True
+    pack_pytree_len: int | None = None
 ):
     if output is None:
         output = empty_like(data)
@@ -434,7 +460,7 @@ def all_to_all_request_children(
     # First inform the task with the data which indices we need
     indices, dev_spl = all_to_all_with_splits(
         indices, dev_spl, output=None, axis_name=axis_name, verify=verify, err_hint=err_hint,
-        copy_self=copy_self, pack_pytree=pack_pytree
+        copy_self=copy_self, pack_pytree_len=pack_pytree_len
     )
         
     # fill a continous buffer with the requested data
@@ -449,14 +475,14 @@ def all_to_all_request_children(
     # send back the node_sizes so the receiver knows where each node starts
     node_sizes, node_dev_spl = all_to_all_with_splits(
         node_sizes, dev_spl, axis_name=axis_name, verify=verify, err_hint=err_hint, 
-        pack_pytree=pack_pytree,
+        pack_pytree_len=pack_pytree_len,
     )
     node_spl = cumsum_starting_with_zero(node_sizes)
     
     # Now send the child data
     xchild, child_dev_spl = all_to_all_with_splits(
         child_data, child_dev_spl, output, axis_name=axis_name, verify=verify, err_hint=err_hint,
-        copy_self=copy_self, pack_pytree=pack_pytree
+        copy_self=copy_self, pack_pytree_len=pack_pytree_len
     )
     
     return xchild, node_spl, child_dev_spl
@@ -478,7 +504,7 @@ def permute_offset(offset, num):
 def all_to_all_with_permute(x, ispl, buffer_bytes=8*1024**2, axis_name=None, verify=True):
     rank, ndev, axis_name = get_rank_info(axis_name)
 
-    x, spec = _pack_pytree(x)
+    x, spec = _pack_pytree(x, pytree_len(x))
     bsize = max(buffer_bytes // (x[0].size*x.itemsize), 1)
 
     output = jnp.copy(x)
@@ -512,4 +538,4 @@ def all_to_all_with_permute(x, ispl, buffer_bytes=8*1024**2, axis_name=None, ver
     for offset in range(1, ndev):
         output = handle_offset(output, offset, nsteps[offset])
     
-    return _unpack_pytree(output, spec), ispl_recv
+    return _unpack_pytree(output, spec, x), ispl_recv

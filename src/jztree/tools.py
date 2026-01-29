@@ -3,8 +3,34 @@ import os
 import jax
 from jax.experimental import io_callback
 import jax.numpy as jnp
+from typing import TypeAlias, Any
 
 from .config import LoggingConfig
+
+Pytree: TypeAlias = Any
+
+# ------------------------------------------------------------------------------------------------ #
+#                                       Tree mapping helpers                                       #
+# ------------------------------------------------------------------------------------------------ #
+
+def tree_map_by_len(fn, tree: Pytree, N: int, axis: int = 0) -> Pytree:
+    """
+    Like jax.tree_map, but only applies fn to array-like leaves with shape[axis] == N.
+    Everything else is copied unchanged.
+    """
+    def should_map(x):
+        return (
+            hasattr(x, "shape")
+            and x.shape is not None
+            and len(x.shape) > axis
+            and int(x.shape[axis]) == int(N)
+        )
+
+    return jax.tree_util.tree_map(lambda x: fn(x) if should_map(x) else x, tree)
+
+# ------------------------------------------------------------------------------------------------ #
+#                                          Errors and Logs                                         #
+# ------------------------------------------------------------------------------------------------ #
 
 def conditional_callback(flag, f, *args, **kwargs):
     """Calls a device function f, only if the flag is True. Useful for raising exceptions that 
