@@ -1,8 +1,5 @@
-# CustomJax
-Some c++ cuda kernels that expose new functionality to jax via the foreign function interface (FFI)
-
-# Todo:
-* Check that the level of domain boundary nodes is always defined correctly
+# JZ-Tree
+Super efficient dual tree walks with Jax and CUDA. Includes Friends of Friends and k-Nearest Neighbor search.
 
 # Installation
 Installation from source can be a bit tricky, because the CUDA compiler nvcc and a couple of libraries are required. These may be accessible in three different ways (1) installed with pip (only available for CUDA>=13), (2) installed in a conda environment or (3) system installed
