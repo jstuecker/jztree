@@ -69,7 +69,6 @@ def particles_and_tree(seed=0):
     return distr_zsort_and_tree(particles(seed), cfg.tree)
 
 @jax.jit
-@jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
 def distr_fof(seed):
     rank, ndev, axis_name = get_rank_info()
     partz, th = particles_and_tree(seed)
@@ -79,12 +78,13 @@ def distr_fof(seed):
     dspl = cumsum_starting_with_zero(num)
 
     return partz, igroup.reshape(1,-1), dspl.reshape(1,-1)
+distr_fof.smapped = expanding_shard_map(distr_fof, in_specs=P(), input_tiled=True, mesh=mesh, jit=True)
 
 @pytest.mark.shrink_in_quick
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
 def test_distr_fof(seed):
-    partz, igroup1, dev_spl = distr_fof(seed)
+    partz, igroup1, dev_spl = distr_fof.smapped(seed)
     # combine arrays into one:
     igroup1 = multi_to_dense.jit(igroup1, dev_spl[0])
 

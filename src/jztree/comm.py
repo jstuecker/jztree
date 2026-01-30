@@ -50,7 +50,8 @@ def get_rank_info(axis_name = None) -> Tuple[int, int, str]:
 # ------------------------------------------------------------------------------------------------ #
 
 def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None, 
-                       axis_names=None, check_vma=True, input_tiled=False, output_tiled=False):
+                       axis_names=None, check_vma=True, input_tiled=False, output_tiled=False,
+                       jit=False):
     """Like jax.shard_map, but allows to choose whether inputs/outputs well be tiled or not
     
     input_tiled: e.g. input (Ndev*N) -> (N) inside mapped function
@@ -85,6 +86,9 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
         else:
             return res
     
+    if jit:
+        f_smapped = jax.jit(f_smapped)
+
     return f_smapped
 
 # ------------------------------------------------------------------------------------------------ #

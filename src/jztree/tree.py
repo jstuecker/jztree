@@ -61,6 +61,8 @@ def pos_zorder_sort(x: jax.Array | Pos):
     All remaining leaves of the pytree will be sorted accordingly along the leading axis (which 
     should have consistent length)
     """
+    assert get_pos(x).ndim == 2, "positions must have shape (N,3)"
+
     @jax.custom_vjp
     def eval(x):
         if isinstance(x, jax.Array):
@@ -245,7 +247,7 @@ def determine_npart(x):
     return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
 
     
-def distributed_zsort(part: Pos, nsamp: int = 1024):
+def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
     rank, ndev, axis_name = get_rank_info()
 
     if ndev == 1:
@@ -272,18 +274,19 @@ def distributed_zsort(part: Pos, nsamp: int = 1024):
 
     partz, idz = pos_zorder_sort(part)
 
-    # We have posz globally and locally in z-order now
-    # Let's do another communication step to improve the balance
+    if equalize:
+        # We have posz globally and locally in z-order now
+        # Let's do another communication step to improve the balance
 
-    spl_have = global_splits(partz.num, axis_name=axis_name)
-    spl_target = (jnp.arange(0, ndev+1) * (partz.num_total // ndev)).at[-1].set(partz.num_total)
-    spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num)
+        spl_have = global_splits(partz.num, axis_name=axis_name)
+        spl_target = (jnp.arange(0, ndev+1) * (get_num_total(partz) // ndev)).at[-1].set(get_num_total(partz))
+        spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num)
 
-    partz, dev_spl = all_to_all_with_splits(
-        partz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
-        pack_pytree=False
-    )
-    partz.num = dev_spl[-1]
+        partz, dev_spl = all_to_all_with_splits(
+            partz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
+            pack_pytree=False
+        )
+        partz.num = dev_spl[-1]
 
     return partz
 distributed_zsort.jit = jax.jit(distributed_zsort, static_argnames="nsamp")

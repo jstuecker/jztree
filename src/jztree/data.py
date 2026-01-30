@@ -6,7 +6,7 @@ import jax.numpy as jnp
 
 from .config import TreeConfig
 from .comm import pcast_like, pcast_vma
-from .tools import set_range, inverse_of_splits, cumsum_starting_with_zero
+from .tools import set_range, inverse_of_splits, cumsum_starting_with_zero, tree_map_by_len
 
 def static_field(*args, **kwargs):
     return field(*args, metadata=dict(static=True), **kwargs)
@@ -23,35 +23,26 @@ class Pos: # this class is mostly defined to declare an interface that particle 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
-    # def __post_init__(self):
-    #     validate_and_normalize(self)
-
 @jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
 class PosMass:
     pos: jax.Array  # (Nparticles, 3)
-    mass: jax.Array  # (Nparticles,) or (1,)
+    mass: jax.Array  # (Nparticles,) or scalar
 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
-
-    # def __post_init__(self):
-    #     validate_and_normalize(self)
 
 @jax.jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
 class ParticleData:
     pos: jax.Array # (Nparticles, 3)
-    mass: jax.Array | None = None # (Nparticles,) or (1,)
+    mass: jax.Array | None = None # (Nparticles,) or scalar
     vel: jax.Array | None = None # (Nparticles, 3)
 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
-    # def __post_init__(self):
-    #     validate_and_normalize(self)
-
-def validate_and_normalize(part):
+def validate_particles(part):
     if getattr(part, "num", None) is not None:
         assert jnp.ndim(part.num) == 0
 
@@ -59,7 +50,6 @@ def validate_and_normalize(part):
     assert (pos is not None) and (pos.shape[-1] == 3), "pos must be (N,3)"
 
     if getattr(part, "mass", None) is not None:
-        part.mass = jnp.atleast_1d(part.mass)
         if jnp.size(part.mass) > 1:
             assert part.mass.shape == pos.shape[:-1], "mass must be of shape (1,) or (N,)"
 
@@ -67,7 +57,7 @@ def validate_and_normalize(part):
         assert (part.vel.shape[-1] == 3) and (part.vel.shape == pos.shape)
 
 # ------------------------------------------------------------------------------------------------ #
-#                   Methods for accessing class data that allow some flexibility                   #
+#                     Helpful methods for accessing and manipulating particles                     #
 # ------------------------------------------------------------------------------------------------ #
 
 def get_pos(part: Pos):
@@ -102,12 +92,53 @@ def get_num_total(part: Pos, default_to_length=False):
 
 def flatten_particles(part: Pos):
     """Flattens particles from shape (Ndev,N) -> (Ndev*N)."""
+    assert part.pos.ndim == 3, "Can only flatten from (Ndev,N) to (Ndev*N)"
+
     part_flat = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), part)
     part_flat.num = jnp.sum(part_flat.num)
     if jnp.shape(part.mass) != jnp.shape(part.pos)[:-1]: # Have scalar mass, but shardmap reshaped it
         part_flat.mass = jnp.reshape(part_flat.mass, (-1,))[0]
 
     return part_flat
+
+def pad_particles(part: Pos, num: int,  float_val:float = jnp.nan, int_val: int = 0):
+    assert part.pos.ndim == 2, "Positions should have shape (N,3)"
+
+    def pad(xi):
+        if xi.dtype.kind == "f":
+            val = float_val
+        else:
+            val = int_val
+        
+        return jnp.pad(xi, [(0, num)] + [(0,0)]*(xi.ndim - 1), constant_values=val)
+
+    return tree_map_by_len(pad, part, len(part.pos))
+
+def squeeze_particles(part: Pos):
+    """Squeezes multi-gpu output particles (Ndev,N) into a dense form (Ntot)"""
+    assert part.pos.ndim == 3, "Require input particles of form (Ndev,N,...)"
+    assert len(part.num) == len(part.pos), "Should have particle number from each device"
+
+    ntot = get_num_total(part)
+
+    size_part = part.pos.shape[1]
+    
+    with jax.enable_x64():
+        spl = cumsum_starting_with_zero(part.num)
+        idx = jnp.arange(ntot, dtype=jnp.int64)
+        irank = jnp.cumsum(jnp.zeros_like(idx).at[spl].set(1)) - 1
+        ipart = idx - spl[irank]
+
+        part_sq = tree_map_by_len(lambda x: x[irank, ipart], part, size_part, axis=1)
+        part_sq.num = ntot
+        
+        return part_sq
+
+def all_particles_equal(p1: ParticleData, p2: ParticleData):
+    flag_tree = jax.tree.map(lambda a, b: jnp.all(a==b), p1, p2)
+    all_leaves_equal = jax.tree.reduce(lambda a, b: a and b, flag_tree)
+
+    return all_leaves_equal and (p1.num_total == p2.num_total)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                  Internal Particle Data classes                                  #
