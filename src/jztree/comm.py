@@ -40,6 +40,47 @@ def get_rank_info(axis_name = None) -> Tuple[int, int, str]:
     return rank, ndev, axis_name
 
 # ------------------------------------------------------------------------------------------------ #
+#                                            Shard Maps                                            #
+# ------------------------------------------------------------------------------------------------ #
+
+def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None, 
+                       axis_names=None, check_vma=True, input_tiled=False, output_tiled=False):
+    """Like jax.shard_map, but allows to choose whether inputs/outputs well be tiled or not
+    
+    input_tiled: e.g. input (Ndev*N) -> (N) inside mapped function
+    not input_tiled:        (Ndev,N) -> (N)
+    output_tiled:      (N) inside mapped function -> (Ndev*N) outside
+    not output_tiled:  (N) -> (Ndev,N)
+    (or no N and (,N) if partition spec is empty)
+    """
+    if mesh is None:
+        mesh = jax.sharding.get_abstract_mesh()
+    if axis_names is None:
+        axis_names = mesh.axis_names
+    if in_specs is None:
+        in_specs = P(axis_names)
+    if out_specs is None:
+        out_specs = P(axis_names)
+
+    def squeeze_first_dim(x: jax.Array):
+        return jnp.reshape(x, jnp.shape(x)[1:])
+    
+    def expand_first_dim(x: jax.Array):
+        return jnp.reshape(x, (1,) + jnp.shape(x))
+
+    @jax.shard_map(out_specs=out_specs, in_specs=in_specs, mesh=mesh, axis_names=set(axis_names), check_vma=check_vma)
+    def f_smapped(*args, **kwargs):
+        if not input_tiled:
+            args, kwargs = jax.tree.map(squeeze_first_dim, (args, kwargs))
+        res = f(*args, **kwargs)
+        if not output_tiled:
+            return jax.tree.map(expand_first_dim, res)
+        else:
+            return res
+    
+    return f_smapped
+
+# ------------------------------------------------------------------------------------------------ #
 #                                Distributed Initialization Helpers                                #
 # ------------------------------------------------------------------------------------------------ #
 

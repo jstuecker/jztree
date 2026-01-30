@@ -56,7 +56,7 @@ def validate_and_normalize(part):
         part.num = jnp.atleast_1d(part.num)
 
     pos = getattr(part, "pos", None)
-    assert (pos is not None) and (jnp.ndim(pos) == 2) and (pos.shape[-1] == 3), "pos must be (N,3)"
+    assert (pos is not None) and (pos.shape[-1] == 3), "pos must be (N,3)"
 
     if getattr(part, "mass", None) is not None:
         part.mass = jnp.atleast_1d(part.mass)
@@ -64,7 +64,7 @@ def validate_and_normalize(part):
             assert part.mass.shape == pos.shape[:-1], "mass must be of shape (1,) or (N,)"
 
     if getattr(part, "vel", None) is not None:
-        assert (part.vel.ndim == 2) and (part.vel.shape[-1] == 3) and (part.vel.shape == pos.shape)
+        assert (part.vel.shape[-1] == 3) and (part.vel.shape == pos.shape)
 
 # ------------------------------------------------------------------------------------------------ #
 #                   Methods for accessing class data that allow some flexibility                   #
