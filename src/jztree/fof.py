@@ -710,7 +710,7 @@ def fof_catalogue_from_groups(
     def wrap_pos(x):
         return x % boxsize if boxsize else x
     
-    cata = FofCatalogue(ngroups=ngroups.reshape(1), count=gr_counts, offsets=gr_start)
+    cata = FofCatalogue(ngroups=ngroups.reshape(1), count=gr_counts, offset=gr_start)
 
     if getattr(part, "mass", None) is not None:
         part_mass = getattr(part, "mass")
@@ -816,6 +816,9 @@ def fof_and_catalogue(
         input_z_ordered: bool = False
     ) -> Tuple[ParticleData, FofCatalogue]:
     """Returns particles in FoF-order and the FoFCatalogue"""
+    rank, ndev, axis_name = get_rank_info()
+    assert ndev == 1, "For distributed mode, please use distr_fof_and_catalogue"
+
     if input_z_ordered:
         partz = part
     else:

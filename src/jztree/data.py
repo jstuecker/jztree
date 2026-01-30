@@ -101,6 +101,26 @@ def flatten_particles(part: Pos):
 
     return part_flat
 
+def expand_particles(part: Pos, ndev: int):
+    """Expands particles from shape (Ndev*N) -> (Ndev,N)"""
+    assert part.pos.ndim == 2, "Can only expand from (Ndev*N) to (Ndev,N)"
+    assert len(part.pos) % ndev == 0
+    assert part.num_total == len(part.pos), "So far this function cannot handle padded particles"
+
+    Ntot = len(part.pos)
+    N = len(part.pos) // ndev
+
+    def expand(x):
+        if jnp.ndim(x) > 0 and len(x) == Ntot:
+            return jnp.reshape(x, (ndev, N) + jnp.shape(x)[1:])
+        else:
+            return jnp.broadcast_to(x, (ndev,) + jnp.shape(x)) # replicate dynamic meta-data per device
+
+    part_exp = jax.tree.map(expand, part)
+    part_exp.num = jnp.full(ndev, N)
+
+    return part_exp
+
 def pad_particles(part: Pos, num: int,  float_val:float = jnp.nan, int_val: int = 0):
     assert part.pos.ndim == 2, "Positions should have shape (N,3)"
 
@@ -463,15 +483,60 @@ class FofCatalogue:
     ngroups: jax.Array
     mass: jax.Array | None = None
     count: jax.Array | None = None
-    offsets: jax.Array | None = None
+    offset: jax.Array | None = None
     com_pos: jax.Array | None = None
     com_vel: jax.Array | None = None
     com_inertia_radius: jax.Array | None = None
+    offset_rank: jax.Array | None = None # Only provided for squeezed catalogues
 
     def flatten(self):
         flat_cata = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), self)
         flat_cata.ngroups = jnp.sum(flat_cata.ngroups)
         return flat_cata
+    
+def squeeze_catalogue(
+        cata: FofCatalogue,
+        size_out: int | None = None,
+        offset_mode: str = "rank",
+        nparts: jax.Array | None = None
+    ) -> FofCatalogue:
+    """Squeezes multi-gpu output catalogue (Ndev,ngroup*) into a dense form (Ntot)
+    and replicates it on every device
+
+    offset_mode: Can be "rank" or "flat". Before squeezing offsets indicate locations in the
+                particle array of the same device. Since squeezing looses the device info, we need
+                to indicate either the rank or we need to convert offsets to global offsets
+                that index a squeezed particle array (converts to int64).
+                "global" needs "nparts" as an input, i.e. how many particles were on each device
+    
+    To jit this function size_out must be provided
+    """
+    assert offset_mode in ("rank", "global")
+    assert cata.count.ndim == 2, "Can only squeeze catalouges that have shape (Ndev,ngroup*)"
+
+    if size_out is None:
+        size_out = jnp.sum(cata.ngroups)
+
+    size_groups = cata.count.shape[1]
+    
+    with jax.enable_x64():
+        spl = cumsum_starting_with_zero(cata.ngroups)
+        idx = jnp.arange(size_out, dtype=jnp.int64)
+        irank = jnp.cumsum(jnp.zeros_like(idx).at[spl].set(1)) - 1
+        igroup = idx - spl[irank]
+
+        cata_sq = tree_map_by_len(lambda x: x[irank, igroup], cata, size_groups, axis=1)
+        cata_sq.ngroups = jnp.sum(cata.ngroups)
+
+        if offset_mode == "rank":
+            cata_sq.offset_rank = irank
+        elif offset_mode == "global":
+            assert nparts is not None, "Require particle numbers for 'global' offset mode"
+            assert jnp.size(nparts) == cata.count.shape[0], "please provide npart for each device"
+            spl = jnp.astype(cumsum_starting_with_zero(nparts), jnp.int64)
+            cata_sq.offset = jnp.astype(cata_sq.offset, jnp.int64) + spl[irank]
+        
+        return cata_sq
 
 # ------------------------------------------------------------------------------------------------ #
 #                                     KNN Specific Data Classes                                    #

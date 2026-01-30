@@ -7,7 +7,7 @@ from jztree.comm import get_rank_info, expanding_shard_map
 from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
-from jztree.data import ParticleData, Link, Label, flatten_particles
+from jztree.data import ParticleData, Link, Label, flatten_particles, pad_particles, squeeze_particles, expand_particles
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
 from jztree.fof import distr_fof_order, fof_catalogue_from_groups, fof_order, fof_and_catalogue, distr_fof_and_catalogue
@@ -130,7 +130,7 @@ def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
     Hubble = 100.0
     return 1e10 * omega_m * 3 * Hubble * Hubble / (8 * np.pi * G) * boxsize ** 3 / npart
 
-def fistr_dj_sim():
+def fistr_dj_sim() -> ParticleData:
     from discodj import DiscoDJ
     from discodj.core.scatter_and_gather import ScatterGatherProperties
 
@@ -163,7 +163,14 @@ def fistr_dj_sim():
         scatter_gather_props=scat
     )
 
-    return X, P, a
+    part = ParticleData(
+        pos=X.reshape(-1,3),
+        mass=_particle_mass(0.3, boxsize, nres**3),
+        vel=P.reshape(-1,3),
+        num_total=nres**3
+    )
+
+    return part
 
 @pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
@@ -172,45 +179,24 @@ def test_discodj_fof():
     ndev = jax.device_count()
     boxsize = 1000.
 
-    pos, vel, a = jax.jit(fistr_dj_sim)()
-    pos, vel = pos.reshape(-1,3), vel.reshape(-1,3)
-    npart_tot = len(pos)
-    nper_dev = npart_tot // ndev
+    part = jax.jit(fistr_dj_sim)()
+    part = expand_particles(part, ndev)
 
-    part = ParticleData(pos=pos, vel=vel)
-    
-    rlink = 0.2 * boxsize / np.cbrt(npart_tot)
+    rlink = 0.2 * boxsize / np.cbrt(part.num_total)
 
-    @jax.jit
-    @jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
-    def distr_fof(part):
+    def distr_fof(part: ParticleData):
         rank = jax.lax.axis_index("gpus")
         ndev = jax.lax.axis_size("gpus")
 
-        part = ParticleData(
-            pos=jnp.pad(part.pos, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
-            vel=jnp.pad(part.vel, ((0,np.int32(nper_dev * 0.5)), (0,0)), constant_values=jnp.nan),
-            num=nper_dev, num_total=ndev*nper_dev
-        )
-
-        cfg = FofConfig()
-        cfg.tree.alloc_fac_nodes = 1.2
-
-        partz, th = distr_zsort_and_tree(part, cfg.tree)
-        labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink)
-
-        # Warning!
-        # This Reduction looses particles lying on other tasks
-        # Fix this later!
-        idx = jnp.where(labels.irank == rank, labels.igroup, len(labels.igroup))
-        counts = jnp.zeros(len(labels.igroup)).at[idx].add(1)
-        counts = jnp.sort(counts, descending=True)
+        part = pad_particles(part, int(part.num_total // ndev * 0.5))
         
-        return partz, labels, counts
+        part_fof, cata = distr_fof_and_catalogue(part, rlink=rlink, boxsize=1000.)
+        return part_fof, cata
+    distr_fof = expanding_shard_map(distr_fof, jit=True, mesh=mesh)
        
-    partz, labels, counts = distr_fof(part)
+    part_fof, cata = distr_fof(part)
 
-    masses = counts.reshape(ndev,-1) * _particle_mass(0.3, 1000., npart_tot)
+    masses = cata.mass
 
     print("Masses:")
     masses = jax.device_put(masses[:,0:20].flatten(), jax.NamedSharding(mesh, P()))

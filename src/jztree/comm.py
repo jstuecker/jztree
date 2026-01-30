@@ -39,6 +39,7 @@ def leading_len(x):
 # ------------------------------------------------------------------------------------------------ #
 
 def get_rank_info(axis_name = None) -> Tuple[int, int, str]:
+    """Returns rank, ndev and axis_names of the abstract mesh"""
     axis_name = axis_name or jax.sharding.get_abstract_mesh().axis_names
     rank = jax.lax.axis_index(axis_name)
     ndev = jax.lax.axis_size(axis_name)
