@@ -56,7 +56,7 @@ def validate_and_normalize(part):
         part.num = jnp.atleast_1d(part.num)
 
     pos = getattr(part, "pos", None)
-    assert (pos is not None) and (pos.ndim == 2) and (pos.shape[-1] == 3), "pos must be (N,3)"
+    assert (pos is not None) and (jnp.ndim(pos) == 2) and (pos.shape[-1] == 3), "pos must be (N,3)"
 
     if getattr(part, "mass", None) is not None:
         part.mass = jnp.atleast_1d(part.mass)
