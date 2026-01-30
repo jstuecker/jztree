@@ -3,11 +3,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-from jztree.comm import get_rank_info
+from jztree.comm import get_rank_info, expanding_shard_map
 from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
-from jztree.data import ParticleData, Link, Label
+from jztree.data import ParticleData, Link, Label, flatten_particles
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
 from jztree.fof import distr_fof_order, fof_catalogue_from_groups, fof_order
@@ -91,8 +91,8 @@ def test_distr_fof(seed):
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
 
-@jax.jit
-@jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
+# @jax.jit
+# @jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
 def distr_fof_cata(seed):
     rank, ndev, axis_name = get_rank_info()
     partz, th = particles_and_tree(seed)
@@ -101,9 +101,11 @@ def distr_fof_cata(seed):
     part_fof, counts = distr_fof_order(label, partz)
     
     return partz, fof_catalogue_from_groups(part_fof, counts)
+distr_fof_cata.smapped = expanding_shard_map(distr_fof_cata, input_tiled=True, mesh=mesh, in_specs=P())
 
 @jax.jit
 def fof_cata(part):
+    
     partz = pos_zorder_sort(part)[0]
     igroup = fof_labels_z(partz.pos, rlink=0.1)
     part, counts = fof_order(igroup, partz)
@@ -113,8 +115,9 @@ def fof_cata(part):
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
 def test_distr_catalogue(seed):
-    partz, cata1 = distr_fof_cata(seed)
-    cata2 = fof_cata(partz)
+    partz, cata1 = jax.jit(distr_fof_cata.smapped)(seed)
+    cata1 = cata1.flatten()
+    cata2 = fof_cata(flatten_particles(partz))
     
     # Sort by masses and equalize shapes
     assert np.sum(cata1.ngroups) == np.sum(cata2.ngroups)

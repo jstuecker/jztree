@@ -28,6 +28,12 @@ def pcast_like(x, like):
     else:
         return jax.lax.pvary(x, tuple(jax.typeof(like).vma))
 
+def leading_len(x):
+    if jnp.size(x) == 1:
+        return 1
+    else:
+        return len(x)
+
 # ------------------------------------------------------------------------------------------------ #
 #                                        General Device Info                                       #
 # ------------------------------------------------------------------------------------------------ #
@@ -63,6 +69,7 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
         out_specs = P(axis_names)
 
     def squeeze_first_dim(x: jax.Array):
+        assert x.shape[0] == 1
         return jnp.reshape(x, jnp.shape(x)[1:])
     
     def expand_first_dim(x: jax.Array):
@@ -128,10 +135,7 @@ def pytree_len(x):
     """Returns the size of the largest first axis of any leaf of a pytree"""
     leaves = jax.tree_util.tree_leaves(x)
 
-    def len_or_one(x):
-        return 1 if jnp.size(x) == 1 else len(x)
-
-    return max(len_or_one(x) for x in leaves)
+    return max(leading_len(x) for x in leaves)
 
 def value_for_dtype(dtype, float_val=jnp.nan, int_val=0):
     if dtype.kind == "f":
@@ -283,7 +287,7 @@ def shift_particles_left(x, nsend, max_send, npart):
     idx = jnp.arange(max_send)
     idx = jnp.where(idx < nget, npart - nsend + idx, pytree_len(x)) # discard indices beyond nadd
     def insert(u, v):
-        if len(u) != size:
+        if leading_len(u) != size:
             return u
         else: 
             return u.at[idx].set(v)
@@ -370,7 +374,7 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
         recv_sizes = recv_sizes.at[rank].set(0)
 
         def copy(xi, outi):
-            if len(xi) != len(mask):
+            if leading_len(xi) != leading_len(mask):
                 return outi
             mask_rs = jnp.reshape(mask, (len(mask),) + (1,)*(xi.ndim -1))
             return jnp.where(mask_rs, xi[iin], outi)
@@ -382,7 +386,7 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
     output_offsets = jax.lax.all_to_all(output_offsets, axis_name, 0, 0, tiled=True)
 
     def comm(xi, outi):
-        if len(outi) != out_size:
+        if leading_len(outi) != out_size:
             return outi
         return jax.lax.ragged_all_to_all(
             xi, outi, input_offsets, send_sizes, output_offsets, recv_sizes, axis_name=axis_name
@@ -442,7 +446,7 @@ def arange_for_comm(irank: jax.Array, x: jax.Array,
     isort = jnp.argsort(irank)
     dev_spl = jnp.searchsorted(irank[isort], jnp.arange(ndev+1, dtype=irank.dtype), side="left")
 
-    xsort = jax.tree.map(lambda d: d[isort], x)
+    xsort = tree_map_by_len(lambda d: d[isort], x, pytree_len(x))
 
     return xsort, dev_spl, isort
 

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-from jztree.comm import get_rank_info
+from jztree.comm import get_rank_info, expanding_shard_map
 from jztree.config import TreeConfig
 from jztree.data import Pos, PosMass, TreeHierarchy
 from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
@@ -20,7 +20,7 @@ def myzsort():
     pos = jax.random.uniform(jax.random.key(rank), (int(4096+1024),3))
     pos = pos.at[-1024:].set(jnp.nan)
 
-    part = Pos(pos=pos, num=jnp.array((4096,)), num_total=4096*ndev)
+    part = Pos(pos=pos, num=4096, num_total=4096*ndev)
 
     partz = distributed_zsort(part)
     return part, partz
@@ -97,7 +97,7 @@ def get_part():
     pos = jax.random.uniform(jax.random.key(rank), (npart+nextra,3))
     pos = pos.at[-nextra:].set(jnp.nan)
 
-    part = PosMass(pos=pos, mass=jnp.ones_like(pos[...,0]), num=jnp.array((npart,)), num_total=npart*ndev)
+    part = PosMass(pos=pos, mass=jnp.ones_like(pos[...,0]), num=npart, num_total=npart*ndev)
 
     return part
 

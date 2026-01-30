@@ -23,8 +23,8 @@ class Pos: # this class is mostly defined to declare an interface that particle 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
-    def __post_init__(self):
-        validate_and_normalize(self)
+    # def __post_init__(self):
+    #     validate_and_normalize(self)
 
 @jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
@@ -35,8 +35,8 @@ class PosMass:
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
-    def __post_init__(self):
-        validate_and_normalize(self)
+    # def __post_init__(self):
+    #     validate_and_normalize(self)
 
 @jax.jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
@@ -48,12 +48,12 @@ class ParticleData:
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
-    def __post_init__(self):
-        validate_and_normalize(self)
+    # def __post_init__(self):
+    #     validate_and_normalize(self)
 
 def validate_and_normalize(part):
     if getattr(part, "num", None) is not None:
-        part.num = jnp.atleast_1d(part.num)
+        assert jnp.ndim(part.num) == 0
 
     pos = getattr(part, "pos", None)
     assert (pos is not None) and (pos.shape[-1] == 3), "pos must be (N,3)"
@@ -99,6 +99,12 @@ def get_num_total(part: Pos, default_to_length=False):
         return len(get_pos(part))
     else:
         raise ValueError("Need num_total attribute on particle data structure (for distributed mode)")
+
+def flatten_particles(part: Pos):
+    """Flattens particles from shape (Ndev,N) -> (Ndev*N)."""
+    part_flat = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), part)
+    part_flat.num = jnp.sum(part_flat.num)
+    return part_flat
 
 # ------------------------------------------------------------------------------------------------ #
 #                                  Internal Particle Data classes                                  #
@@ -427,6 +433,11 @@ class FofCatalogue:
     com_pos: jax.Array | None = None
     com_vel: jax.Array | None = None
     com_inertia_radius: jax.Array | None = None
+
+    def flatten(self):
+        flat_cata = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), self)
+        flat_cata.ngroups = jnp.sum(flat_cata.ngroups)
+        return flat_cata
 
 # ------------------------------------------------------------------------------------------------ #
 #                                     KNN Specific Data Classes                                    #

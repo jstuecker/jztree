@@ -268,7 +268,7 @@ def distributed_zsort(part: Pos, nsamp: int = 1024):
         partz, spl, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
         pack_pytree=True
     )
-    part.num = dev_spl[-1].reshape(1)
+    part.num = dev_spl[-1]
 
     partz, idz = pos_zorder_sort(part)
 
@@ -283,7 +283,7 @@ def distributed_zsort(part: Pos, nsamp: int = 1024):
         partz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
         pack_pytree=False
     )
-    partz.num = dev_spl[-1].reshape(1)
+    partz.num = dev_spl[-1]
 
     return partz
 distributed_zsort.jit = jax.jit(distributed_zsort, static_argnames="nsamp")
@@ -302,7 +302,7 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
     npshift = ext_lr[ilvl_max]
 
     partz, npart = shift_particles_left(partz, npshift, max_send=max_node_size, npart=npart)
-    partz.num = jnp.array((npart,))
+    partz.num = npart
 
     # Find the level of the new boundary
     posz = get_pos(partz)
