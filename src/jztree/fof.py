@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from dataclasses import replace
 
-from .config import FofConfig
+from .config import FofConfig, FofCatalogueConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos
 from .data import get_num, get_pos
@@ -612,7 +612,7 @@ def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = Non
 #                                      Fof Catalogue Reduction                                     #
 # ------------------------------------------------------------------------------------------------ #
 
-def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int = 20):
+def distr_cross_task_group_info(group_counts: jax.Array, npart: int, npart_min: int = 20):
     """The last group of each rank may span accross ranks. Here, we identify for each
     rank the rank and the local remaining count of the first group which may have started elsewhere.
     """
@@ -630,7 +630,7 @@ def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int =
 
         gl_last_group_end = dev_spl[rank] + last_group_start + last_group_count
         dev_add_count = gl_last_group_end - dev_spl[:-1]
-        dev_add_count = jnp.where((last_group_count < Nmin) | (jnp.arange(ndev) <= rank), 0, dev_add_count)
+        dev_add_count = jnp.where((last_group_count < npart_min) | (jnp.arange(ndev) <= rank), 0, dev_add_count)
         dev_add_count = jnp.minimum(dev_add_count, dev_npart)
 
         dev_recv_count = jax.lax.all_to_all(dev_add_count, axis_name, 0, 0, tiled=True)
@@ -643,7 +643,7 @@ def distr_cross_task_group_info(group_counts: jax.Array, npart: int, Nmin: int =
 def fof_catalogue_from_groups(
         part: ParticleData, # Particles must be in Group order! (See fof_order/distr_fof_order)
         group_counts: jax.Array,
-        Nmin: int = 20,
+        cfg_cata: FofCatalogueConfig = FofCatalogueConfig(),
         boxsize: float = 0.,
         size_cata: int | None = None
     ) -> FofCatalogue:
@@ -657,17 +657,18 @@ def fof_catalogue_from_groups(
 
     npart = get_num(part, default_to_length=True)
     size_part = len(group_counts)
+    npart_min = cfg_cata.npart_min
 
     if size_cata is None:
-        size_cata = (size_part + Nmin - 1) // Nmin # Worst case estimate of catalogue size
+        size_cata = (size_part + npart_min - 1) // npart_min # Worst case estimate of catalogue size
     
     first_group_rank, first_group_count = distr_cross_task_group_info(
-        group_counts, npart, Nmin=Nmin
+        group_counts, npart, npart_min=npart_min
     )
     
     # To simplify reductions we add an extra group at the beginning that carries everything
     # that belongs to the previous task
-    keep_as_group = group_counts >= Nmin
+    keep_as_group = group_counts >= npart_min
 
     # Create dense information
     csum = jnp.cumsum(keep_as_group.astype(jnp.int32))
@@ -821,7 +822,7 @@ def fof_and_catalogue(
         partz = pos_zorder_sort(part)[0]
     igroup = fof_labels_z(partz.pos, rlink=rlink, boxsize=boxsize, cfg=cfg)
     partf, counts = fof_order(igroup, partz)
-    catalogue = fof_catalogue_from_groups(partf, counts, Nmin=20, boxsize=boxsize)
+    catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
     return partf, catalogue
 fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
@@ -844,7 +845,7 @@ def distr_fof_and_catalogue(
         partz, th = distr_zsort_and_tree(part, cfg.tree)
     labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, cfg=cfg)
     partf, counts = distr_fof_order(labels, partz)
-    catalogue = fof_catalogue_from_groups(partf, counts, Nmin=20, boxsize=boxsize)
+    catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
     return partf, catalogue
 distr_fof_and_catalogue.jit = jax.jit(fof_and_catalogue,

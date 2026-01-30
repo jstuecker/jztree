@@ -104,6 +104,9 @@ def flatten_particles(part: Pos):
     """Flattens particles from shape (Ndev,N) -> (Ndev*N)."""
     part_flat = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), part)
     part_flat.num = jnp.sum(part_flat.num)
+    if jnp.shape(part.mass) != jnp.shape(part.pos)[:-1]: # Have scalar mass, but shardmap reshaped it
+        part_flat.mass = jnp.reshape(part_flat.mass, (-1,))[0]
+
     return part_flat
 
 # ------------------------------------------------------------------------------------------------ #

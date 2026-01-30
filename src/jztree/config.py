@@ -37,9 +37,13 @@ class TreeConfig():
     # other:
     mass_centered: bool = True
 
+@dataclass(unsafe_hash=True)
+class FofCatalogueConfig():
+    npart_min: int = 20
+
 @dataclass(frozen=True)
 class FofConfig:
-    alloc_fac_ilist: float = 64.   
+    alloc_fac_ilist: float = 64.
 
     tree: TreeConfig = TreeConfig(
         max_leaf_size = 48,
@@ -48,6 +52,7 @@ class FofConfig:
         stop_coarsen = 2048,
         mass_centered = False
     )
+    catalogue: FofCatalogueConfig = FofCatalogueConfig()
 
 @dataclass(frozen=True)
 class KNNConfig:
