@@ -10,43 +10,8 @@ from .config import LoggingConfig
 Pytree: TypeAlias = Any
 
 # ------------------------------------------------------------------------------------------------ #
-#                                       Tree mapping helpers                                       #
-# ------------------------------------------------------------------------------------------------ #
-
-def tree_map_by_len(fn, tree: Pytree, N: int, axis: int = 0) -> Pytree:
-    """
-    Like jax.tree_map, but only applies fn to array-like leaves with shape[axis] == N.
-    Everything else is copied unchanged.
-    """
-    def should_map(x):
-        return (
-            hasattr(x, "shape")
-            and x.shape is not None
-            and len(x.shape) > axis
-            and int(x.shape[axis]) == int(N)
-        )
-
-    return jax.tree_util.tree_map(lambda x: fn(x) if should_map(x) else x, tree)
-
-# ------------------------------------------------------------------------------------------------ #
 #                                          Errors and Logs                                         #
 # ------------------------------------------------------------------------------------------------ #
-
-def conditional_callback(flag, f, *args, **kwargs):
-    """Calls a device function f, only if the flag is True. Useful for raising exceptions that 
-    truly stop the execution of a jitted program
-
-    returns an integer that is set to 0 if the callback is not triggered. This can be used to force
-    the jax graph to resolve the condition before continuing the graph, e.g. as in
-    """
-
-    res = jax.lax.cond(
-        flag, 
-        lambda : io_callback(f, jax.ShapeDtypeStruct((), jnp.int32), *args, **kwargs),
-        lambda : jnp.int32(0)
-    )
-
-    return res
 
 def _callsite(depth=2, *, shorten=True):
     """
@@ -83,7 +48,6 @@ def log(txt,
             txt = f"[{_callsite()}] {txt}"
 
     jax.debug.print(txt, *args, ordered=ordered, partitioned=partitioned, **kwargs)
-
 
 # ------------------------------------------------------------------------------------------------ #
 #                               Some frequently used helper functions                              #
@@ -220,68 +184,3 @@ def fori_dynamic_over_static(lower, upper, body_fun, init_val, *, unroll=None, n
 
     ndynamic = div_ceil(upper - lower, nstatic)
     return jax.lax.fori_loop(0, ndynamic, outer_body, init_val)
-
-# ------------------------------------------------------------------------------------------------ #
-#                                          Error handling                                          #
-# ------------------------------------------------------------------------------------------------ #
-
-def _capture_frames_above_raise_if(*, depth_from_here=2, max_depth=12):
-    """
-    Return a list[FrameInfo] starting at the user callsite (where raise_if is used),
-    then its callers, etc., up to max_depth.
-    """
-    frame = inspect.currentframe()
-    for _ in range(depth_from_here):
-        frame = frame.f_back if frame is not None else None
-    if frame is None:
-        return []
-
-    out = []
-    for _ in range(max_depth):
-        if frame is None:
-            break
-        out.append(inspect.getframeinfo(frame))
-        frame = frame.f_back
-    return out
-
-def _format_trace(frames):
-    """
-    Python-traceback-like ordering: most recent call last (outermost first).
-    We collected from inner->outer, so reverse.
-    """
-    lines = []
-    for fi in reversed(frames):
-        lines.append(f'  File "{fi.filename}", line {fi.lineno}, in {fi.function}')
-    return lines
-
-def raise_if( pred, msg, *fmt_args, exc=RuntimeError, max_trace_depth=12, **fmt_kwargs, ):
-    pred = jnp.asarray(pred)
-
-    # Capture trace-time call chain starting at the *callsite* of raise_if
-    frames = _capture_frames_above_raise_if(depth_from_here=2, max_depth=max_trace_depth)
-
-    # The callsite frame is the first element we captured (innermost)
-    if frames:
-        callsite = f"{frames[0].filename}:{frames[0].lineno}"
-    else:
-        callsite = "<unknown>:0"
-
-    trace_lines = _format_trace(frames)
-
-    def _raise(*args, **kwargs):
-        main = msg.format(*args, **kwargs)
-
-        txt = "\n======== Relevant Error Message =========\n"
-        txt += f"{exc.__name__} at {callsite}:\n{main}\n"
-
-        txt = txt + f" Trace (last {max_trace_depth}, tracing time, most recent call last):\n"
-        txt = txt + "-----------------------------------------\n"
-        txt = txt + "\n".join(trace_lines) + "\n"
-        txt = txt + "=========================================\n"
-
-        raise exc(txt)
-
-    def do_raise(_):
-        return io_callback( _raise, jax.ShapeDtypeStruct((), jnp.int32), *fmt_args, **fmt_kwargs, )
-
-    return jax.lax.cond(pred, do_raise, lambda _: jnp.int32(0), operand=None)

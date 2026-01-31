@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-from jztree.comm import get_rank_info, expanding_shard_map
+from jztree.jax_ext import get_rank_info, expanding_shard_map
 from jztree.config import TreeConfig
 from jztree.data import Pos, PosMass, TreeHierarchy, squeeze_particles
 from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize

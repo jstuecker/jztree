@@ -5,7 +5,8 @@ import jax.numpy as jnp
 from .config import KNNConfig
 from .data import KNNData
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
-from .tools import raise_if, inverse_indices
+from .tools import inverse_indices
+from .jax_ext import raise_if
 
 from jztree_cuda import ffi_knn
 jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")

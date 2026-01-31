@@ -1,7 +1,7 @@
 import pytest
 import jax
 import jax.numpy as jnp
-from jztree.tools import conditional_callback
+from jztree.jax_ext import conditional_callback
 from jax.experimental import io_callback
 from jztree.fof import masked_min_scatter
 

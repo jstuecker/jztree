@@ -5,8 +5,8 @@ import jax
 import jax.numpy as jnp
 
 from .config import TreeConfig
-from .comm import pcast_like, pcast_vma
-from .tools import set_range, inverse_of_splits, cumsum_starting_with_zero, tree_map_by_len
+from .jax_ext import pcast_like, pcast_vma, tree_map_by_len
+from .tools import set_range, inverse_of_splits, cumsum_starting_with_zero
 
 def static_field(*args, **kwargs):
     return field(*args, metadata=dict(static=True), **kwargs)

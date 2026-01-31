@@ -6,9 +6,10 @@ from typing import Tuple
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .data import get_num_total, get_pos, get_num
 from .config import TreeConfig
-from .tools import cumsum_starting_with_zero, div_ceil, raise_if, tree_map_by_len
-from .comm import get_rank_info, send_to_left, send_to_right, shift_particles_left
-from .comm import all_to_all_with_splits, global_splits, pcast_like, pcast_vma
+from .tools import cumsum_starting_with_zero, div_ceil
+from .comm import send_to_left, send_to_right, shift_particles_left
+from .comm import all_to_all_with_splits, global_splits
+from .jax_ext import pcast_like, pcast_vma, get_rank_info, tree_map_by_len, raise_if
 
 from jztree_cuda import ffi_tree, ffi_sort
 jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")

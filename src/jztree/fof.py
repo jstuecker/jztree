@@ -6,15 +6,15 @@ from dataclasses import replace
 
 from .config import FofConfig, FofCatalogueConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
-from .data import InteractionList, PackedArray, TreeHierarchy, Pos
-from .data import get_num, get_pos
-from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil, raise_if
-from .tools import bucket_prefix_sum, tree_map_by_len
+from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num
+from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
+from .tools import bucket_prefix_sum
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
-from .comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
-from .comm import all_to_all_request_children, pcast_vma, pcast_like, all_to_all_with_splits
-from .comm import shard_map_constr
+from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
+from .comm import all_to_all_request_children, all_to_all_with_splits
+from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constr, tree_map_by_len
+from .jax_ext import raise_if
 
 from jztree_cuda import ffi_fof
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")

@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-from jztree.comm import get_rank_info, expanding_shard_map, shard_map_constr
+from jztree.jax_ext import get_rank_info, expanding_shard_map, shard_map_constr
 from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
@@ -12,7 +12,6 @@ from jztree.data import squeeze_particles, expand_particles, squeeze_catalogue, 
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
 from jztree.fof import fof_and_catalogue, distr_fof_and_catalogue
-from jztree.tools import tree_map_by_len
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
