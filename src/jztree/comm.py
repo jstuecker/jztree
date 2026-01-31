@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import numpy as np
 import os
+import inspect
+from functools import wraps
 
 import jax
 import jax.numpy as jnp
@@ -99,6 +101,81 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
         f_smapped = jax.jit(f_smapped)
 
     return f_smapped
+
+def _mesh_cache_key(mesh):
+    # Key that’s stable for “same device set + same axis layout” within a process.
+    devs = tuple(getattr(d, "id", repr(d)) for d in mesh.devices.flat)
+    return (tuple(mesh.axis_names), mesh.devices.shape, devs)
+
+def flatten_kwargs(f, *args, **kwargs):
+    sig = inspect.signature(f)
+
+    # Reject unsupported signatures
+    for p in sig.parameters.values():
+        if p.kind is inspect.Parameter.KEYWORD_ONLY:
+            raise TypeError(f"{f.__name__} has keyword-only parameter '{p.name}', cannot flatten.")
+        if p.kind is inspect.Parameter.VAR_KEYWORD:
+            raise TypeError(f"{f.__name__} has **kwargs parameter '{p.name}', cannot flatten.")
+
+    # Validate/resolve the call (also checks missing/duplicate/unexpected)
+    bound = sig.bind(*args, **kwargs)
+    bound.apply_defaults()
+
+    # Track which positional-or-kw params were explicitly provided
+    provided = set(sig.bind_partial(*args, **kwargs).arguments.keys())
+
+    params = list(sig.parameters.values())
+    pos_params = [p for p in params
+                  if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
+                               inspect.Parameter.POSITIONAL_OR_KEYWORD)]
+    var_pos = next((p for p in params if p.kind is inspect.Parameter.VAR_POSITIONAL), None)
+
+    fixed = [bound.arguments[p.name] for p in pos_params]
+    rest = list(bound.arguments.get(var_pos.name, ())) if var_pos else []
+
+    # Trim trailing defaults that were not explicitly provided
+    i = len(pos_params) - 1
+    while i >= 0:
+        p = pos_params[i]
+        if p.default is inspect._empty: break
+        if p.name in provided: break
+        if fixed[i] != p.default: break
+        i -= 1
+
+    return fixed[:i + 1] + rest
+
+def shard_map_constr(f, *jit_args, out_specs=None, in_specs=None, default_mesh=None,
+                     axis_names=None, check_vma=True, input_tiled=False,
+                     output_tiled=False, **jit_kwargs):
+    # cache functions, to avoid recompiled if invoking with the same mesh twice
+    cache = {}
+
+    def fconstr(mesh=None, jit=False):
+        mesh = mesh or default_mesh
+
+        key = (_mesh_cache_key(mesh), jit)
+
+        if key in cache:
+            return cache[key]
+
+        fsm = expanding_shard_map(
+            f, out_specs=out_specs, in_specs=in_specs, mesh=mesh, axis_names=axis_names,
+            check_vma=check_vma, input_tiled=input_tiled, output_tiled=output_tiled
+        )
+
+        # Currently shard_map doesn't support keyword arguments. Fix this through a wrapper
+        @wraps(f)
+        def fkw(*args, **kwargs):
+            return fsm(*flatten_kwargs(f, *args, **kwargs))
+        fkw.__signature__ = inspect.signature(f)
+
+        if jit:
+            fkw = jax.jit(fkw, *jit_args, **jit_kwargs)
+        
+        cache[key] = fkw
+
+        return fkw
+    return fconstr
 
 # ------------------------------------------------------------------------------------------------ #
 #                                Distributed Initialization Helpers                                #
