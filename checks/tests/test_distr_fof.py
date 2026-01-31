@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-from jztree.comm import get_rank_info, expanding_shard_map
+from jztree.comm import get_rank_info, expanding_shard_map, shard_map_constr
 from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
@@ -63,6 +63,7 @@ def particles(seed=0):
     part = gaussian_blob(1024*1024, npad=1024*128*3, seed=rank+seed)
     part.mass = 1.
     return part
+particles.smap = shard_map_constr(particles, in_specs=P(), out_specs=P(-1))
 
 def distr_fof_labels(seed):
     partz, th = distr_zsort_and_tree(particles(seed), FofConfig().tree)
@@ -88,21 +89,14 @@ def test_labels_vs_single(seed):
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
 
-def distr_fof_cata(seed):
-    part = particles(seed)
-    return distr_fof_and_catalogue(part, rlink=0.05, cfg=FofConfig())
-distr_fof_cata.smapped = expanding_shard_map(distr_fof_cata, input_tiled=True, mesh=mesh, in_specs=P())
-
-@jax.jit
-def fof_cata(part):
-    return fof_and_catalogue(part, rlink=0.05, cfg=FofConfig())
-
 @pytest.mark.shrink_in_quick
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
 def test_catalogue_vs_single(seed):
-    partf, cata1 = jax.jit(distr_fof_cata.smapped)(seed)
-    p2, cata2 = fof_cata(squeeze_particles(partf))
+    part = particles.smap(mesh, jit=True)(seed)
+    partf, cata1 = distr_fof_and_catalogue.smap(mesh, jit=True)(part, rlink=0.05)
+
+    p2, cata2 = fof_and_catalogue.jit(squeeze_particles(partf), rlink=0.05)
     
     # Sort by masses and equalize shapes
     assert np.sum(cata1.ngroups) == np.sum(cata2.ngroups)

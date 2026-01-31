@@ -63,6 +63,8 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
     not output_tiled:  (N) -> (Ndev,N)
     (or no N and (,N) if partition spec is empty)
 
+    Additionally, P(-1) may be used to define a sharding over all axes of the mesh
+
     These rules will only be applied to arguments with a varying partition spec
     Inputs and outputs with partition spec P() will be kept unchanged
     """
@@ -74,25 +76,39 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
         in_specs = P(axis_names)
     if out_specs is None:
         out_specs = P(axis_names)
-    
 
+    def insert_all(spec): # We use -1 to map over all mesh axes
+        if spec == P(-1):
+            return P(axis_names)
+        else:
+            return spec
+    
+    in_specs = jax.tree.map(insert_all, in_specs)
+    out_specs = jax.tree.map(insert_all, out_specs)
+    
     def squeeze_first_dim(x: jax.Array, flag_keep):
-        if flag_keep: return x
+        if flag_keep is None or flag_keep: return x
         assert x.shape[0] == 1
         return jnp.reshape(x, jnp.shape(x)[1:])
     
     def expand_first_dim(x: jax.Array, flag_keep):
-        if flag_keep: return x
+        if flag_keep is None or flag_keep: return x
         return jnp.reshape(x, (1,) + jnp.shape(x))
+    
+    def is_constant(spec):
+        if spec is None: return True
+        return spec == P()
 
     @jax.shard_map(out_specs=out_specs, in_specs=in_specs, mesh=mesh, axis_names=set(axis_names), check_vma=check_vma)
     def f_smapped(*args):
         if not input_tiled:
-            flag_const = jax.tree.map(lambda spec: spec == P(), jax.tree.broadcast(in_specs, args))
+            in_specs_broad = jax.tree.broadcast(in_specs, args, is_leaf=lambda x: x is None)
+            flag_const = jax.tree.map(is_constant, in_specs_broad)
             args = jax.tree.map(squeeze_first_dim, args, flag_const)
         res = f(*args)
         if not output_tiled:
-            flag_const = jax.tree.map(lambda spec: spec == P(), jax.tree.broadcast(out_specs, res))
+            out_specs_broad = jax.tree.broadcast(out_specs, res, is_leaf=lambda x: x is None)
+            flag_const = jax.tree.map(is_constant, out_specs_broad)
             return jax.tree.map(expand_first_dim, res, flag_const)
         else:
             return res
@@ -104,8 +120,8 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
 
 def _mesh_cache_key(mesh):
     # Key that’s stable for “same device set + same axis layout” within a process.
-    devs = tuple(getattr(d, "id", repr(d)) for d in mesh.devices.flat)
-    return (tuple(mesh.axis_names), mesh.devices.shape, devs)
+    #devs = tuple(getattr(d, "id", repr(d)) for d in mesh.devices.flat)
+    return (tuple(mesh.axis_names), mesh.devices.shape)
 
 def flatten_kwargs(f, *args, **kwargs):
     sig = inspect.signature(f)
@@ -117,12 +133,9 @@ def flatten_kwargs(f, *args, **kwargs):
         if p.kind is inspect.Parameter.VAR_KEYWORD:
             raise TypeError(f"{f.__name__} has **kwargs parameter '{p.name}', cannot flatten.")
 
-    # Validate/resolve the call (also checks missing/duplicate/unexpected)
+    # Validate/resolve the call (missing/duplicate/unexpected are raised here)
     bound = sig.bind(*args, **kwargs)
     bound.apply_defaults()
-
-    # Track which positional-or-kw params were explicitly provided
-    provided = set(sig.bind_partial(*args, **kwargs).arguments.keys())
 
     params = list(sig.parameters.values())
     pos_params = [p for p in params
@@ -133,18 +146,9 @@ def flatten_kwargs(f, *args, **kwargs):
     fixed = [bound.arguments[p.name] for p in pos_params]
     rest = list(bound.arguments.get(var_pos.name, ())) if var_pos else []
 
-    # Trim trailing defaults that were not explicitly provided
-    i = len(pos_params) - 1
-    while i >= 0:
-        p = pos_params[i]
-        if p.default is inspect._empty: break
-        if p.name in provided: break
-        if fixed[i] != p.default: break
-        i -= 1
+    return fixed + rest
 
-    return fixed[:i + 1] + rest
-
-def shard_map_constr(f, *jit_args, out_specs=None, in_specs=None, default_mesh=None,
+def shard_map_constr(f, out_specs=None, in_specs=None, default_mesh=None,
                      axis_names=None, check_vma=True, input_tiled=False,
                      output_tiled=False, **jit_kwargs):
     # cache functions, to avoid recompiled if invoking with the same mesh twice
@@ -152,6 +156,7 @@ def shard_map_constr(f, *jit_args, out_specs=None, in_specs=None, default_mesh=N
 
     def fconstr(mesh=None, jit=False):
         mesh = mesh or default_mesh
+        assert mesh is not None, "Please specify a mesh"
 
         key = (_mesh_cache_key(mesh), jit)
 
@@ -170,7 +175,7 @@ def shard_map_constr(f, *jit_args, out_specs=None, in_specs=None, default_mesh=N
         fkw.__signature__ = inspect.signature(f)
 
         if jit:
-            fkw = jax.jit(fkw, *jit_args, **jit_kwargs)
+            fkw = jax.jit(fkw, **jit_kwargs)
         
         cache[key] = fkw
 

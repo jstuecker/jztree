@@ -14,6 +14,7 @@ from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hi
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
 from .comm import get_rank_info, pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, pcast_vma, pcast_like, all_to_all_with_splits
+from .comm import shard_map_constr
 
 from jztree_cuda import ffi_fof
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
@@ -832,6 +833,7 @@ fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
     static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
 )
 
+from jax.sharding import PartitionSpec as P
 def distr_fof_and_catalogue(
         part: ParticleData,
         rlink: float,
@@ -851,6 +853,7 @@ def distr_fof_and_catalogue(
     catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
     return partf, catalogue
-distr_fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
+distr_fof_and_catalogue.smap = shard_map_constr(distr_fof_and_catalogue,
+    in_specs=(P(-1), None, None, None, None, P(-1)),
     static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
 )
