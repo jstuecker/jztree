@@ -710,7 +710,7 @@ def fof_catalogue_from_groups(
     def wrap_pos(x):
         return x % boxsize if boxsize else x
     
-    cata = FofCatalogue(ngroups=ngroups.reshape(1), count=gr_counts, offset=gr_start)
+    cata = FofCatalogue(ngroups=ngroups, count=gr_counts, offset=gr_start)
 
     if getattr(part, "mass", None) is not None:
         part_mass = getattr(part, "mass")
@@ -846,7 +846,7 @@ def distr_fof_and_catalogue(
         assert th is not None, "To skip sort, provide tree (jztree.tree.distr_zsort_and_tree)"
     else:
         partz, th = distr_zsort_and_tree(part, cfg.tree)
-    labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, cfg=cfg)
+    labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, boxsize=boxsize, cfg=cfg)
     partf, counts = distr_fof_order(labels, partz)
     catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 

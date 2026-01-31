@@ -151,6 +151,11 @@ def squeeze_particles(part: Pos):
 
         part_sq = tree_map_by_len(lambda x: x[irank, ipart], part, size_part, axis=1)
         part_sq.num = ntot
+
+        if getattr(part, "mass", None) is not None:
+            ndev = len(spl) - 1
+            if (part.mass.ndim == 1) and (len(part.mass) == ndev): # scalar mass per device
+                part_sq.mass = part.mass[0]
         
         return part_sq
 
@@ -552,6 +557,12 @@ def sort_catalogue(cata: FofCatalogue, by: str = "count", descending: bool = Tru
 
     return tree_map_by_len(lambda x: x[isort], cata, len(isort))
 sort_catalogue.jit = jax.jit(sort_catalogue, static_argnames=("descending", "by"))
+
+def catalogues_equal(c1: FofCatalogue, c2: FofCatalogue):
+    flag_tree = jax.tree.map(lambda a, b: jnp.all(a==b), c1, c2)
+    all_leaves_equal = jax.tree.reduce(lambda a, b: a and b, flag_tree)
+
+    return all_leaves_equal and (c1.ngroups == c2.ngroups)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                     KNN Specific Data Classes                                    #
