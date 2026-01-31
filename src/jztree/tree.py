@@ -1,6 +1,7 @@
 import numpy as np
 import jax
 import jax.numpy as jnp
+from jax.sharding import PartitionSpec as P
 from typing import Tuple
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
@@ -9,7 +10,7 @@ from .config import TreeConfig
 from .tools import cumsum_starting_with_zero, div_ceil
 from .comm import send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits
-from .jax_ext import pcast_like, pcast_vma, get_rank_info, tree_map_by_len, raise_if
+from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
 
 from jztree_cuda import ffi_tree, ffi_sort
 jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")
@@ -213,6 +214,9 @@ def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig) -> Tuple[Pos, TreeHier
     th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
     return partz, th
+distr_zsort_and_tree.smap = shard_map_constructor(
+    distr_zsort_and_tree, in_specs=(P(-1), None), static_argnames="cfg_tree"
+)
 
 def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True, block_size=32
                    ) -> PosMass:
@@ -294,7 +298,9 @@ def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
         partz.num = dev_spl[-1]
 
     return partz
-distributed_zsort.jit = jax.jit(distributed_zsort, static_argnames="nsamp")
+distributed_zsort.smap = shard_map_constructor(
+    distributed_zsort, in_specs=(P(-1), None, None), static_argnames=("nsamp", "equalize")
+)
 
 def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
     """Shifts particles so that nodes with size <= max_node_size always lie on a single GPU"""

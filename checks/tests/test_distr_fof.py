@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.jax_ext import get_rank_info, expanding_shard_map, shard_map_constructor
-from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
 from jztree.data import ParticleData, Link, Label, flatten_particles, pad_particles
@@ -12,6 +11,7 @@ from jztree.data import squeeze_particles, expand_particles, squeeze_catalogue, 
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
 from jztree.fof import fof_and_catalogue, distr_fof_and_catalogue
+from jztree_utils import ics
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
@@ -57,17 +57,9 @@ def test_distributed_links(nperdev):
 
     assert jnp.all(igroup_a == igroup_b)
 
-def particles(seed=0, pad_frac=0.):
-    rank, ndev, axis_name = get_rank_info()
-    part = gaussian_blob(1024*1024, npad=int(1024*1024*pad_frac), seed=rank+seed)
-    part.mass = 1.
-    return part
-particles.smap = shard_map_constructor(
-    particles, in_specs=(None, None), out_specs=P(-1), static_argnames="pad_frac"
-)
-
 def distr_fof_labels(seed):
-    partz, th = distr_zsort_and_tree(particles(seed, pad_frac=0.3), FofConfig().tree)
+    part = ics.gaussian_particles(1024*1024, npad=1024*256, seed=seed)
+    partz, th = distr_zsort_and_tree(part, FofConfig().tree)
     igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True)
 
     return partz, igroup
@@ -94,7 +86,7 @@ def test_labels_vs_single(seed):
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
 def test_catalogue_vs_single(seed):
-    part = particles.smap(mesh, jit=True)(seed, pad_frac=0.2)
+    part = ics.gaussian_particles.smap(mesh, jit=True)(1024*1024, npad=1024*256, seed=seed)
     partf, cata1 = distr_fof_and_catalogue.smap(mesh, jit=True)(part, rlink=0.05)
 
     p2, cata2 = fof_and_catalogue.jit(squeeze_particles(partf), rlink=0.05)
