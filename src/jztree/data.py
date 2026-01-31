@@ -512,10 +512,14 @@ def squeeze_catalogue(
     To jit this function size_out must be provided
     """
     assert offset_mode in ("rank", "global")
-    assert cata.count.ndim == 2, "Can only squeeze catalouges that have shape (Ndev,ngroup*)"
 
     if size_out is None:
         size_out = jnp.sum(cata.ngroups)
+
+    if cata.count.ndim == 1:
+        # for ndim==1 the only point of calling this function is to remove
+        # trailing invalid groups
+        return tree_map_by_len(lambda x: x[:size_out], cata, cata.count.shape[0])
 
     size_groups = cata.count.shape[1]
     
@@ -537,6 +541,17 @@ def squeeze_catalogue(
             cata_sq.offset = jnp.astype(cata_sq.offset, jnp.int64) + spl[irank]
         
         return cata_sq
+squeeze_catalogue.jit = jax.jit(squeeze_catalogue, static_argnames=("size_out", "offset_mode"))
+
+def sort_catalogue(cata: FofCatalogue, by: str = "count", descending: bool = True):
+    key = getattr(cata, by, None)
+    assert key is not None, f"catalogue doesn't have {by}"
+    assert cata.count.ndim == 1, "Please squeeze catalogue before sorting"
+        
+    isort = jnp.argsort(key, descending=descending)
+
+    return tree_map_by_len(lambda x: x[isort], cata, len(isort))
+sort_catalogue.jit = jax.jit(sort_catalogue, static_argnames=("descending", "by"))
 
 # ------------------------------------------------------------------------------------------------ #
 #                                     KNN Specific Data Classes                                    #
