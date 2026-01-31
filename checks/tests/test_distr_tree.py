@@ -3,11 +3,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
-from jztree.jax_ext import get_rank_info, expanding_shard_map
+from jztree.jax_ext import get_rank_info, expanding_shard_map, shard_map_constructor
 from jztree.config import TreeConfig
 from jztree.data import Pos, PosMass, TreeHierarchy, squeeze_particles
 from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
-from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, define_tree_level_node_sizes
+from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, distr_zsort_and_tree
 
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 sharding = NamedSharding(mesh, P('gpus'))
@@ -63,17 +63,22 @@ def test_multi_leaves():
 
     assert jnp.all(remove_duplicates(ispl_multi.flatten()) == remove_duplicates(ispl0))
 
-def get_part():
+def particles(seed=0, pad_frac=0.):
     rank, ndev, axis_name = get_rank_info()
 
-    npart, nextra = 1024*128, 1024*32
+    npart = 1024*128
+    nextra = int(npart*pad_frac)
 
     pos = jax.random.uniform(jax.random.key(rank), (npart+nextra,3))
-    pos = pos.at[-nextra:].set(jnp.nan)
+    if nextra > 0:
+        pos = pos.at[-nextra:].set(jnp.nan)
 
     part = PosMass(pos=pos, mass=jnp.ones_like(pos[...,0]), num=npart, num_total=npart*ndev)
 
     return part
+particles.smap = shard_map_constructor(
+    particles, in_specs=(None, None), out_specs=P(-1), static_argnames="pad_frac"
+)
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_tree_properties():
@@ -85,8 +90,8 @@ def test_tree_properties():
     cfg_tree.alloc_fac_nodes = 2.0
 
     # Build a reference structure
-    partref = jax.shard_map(get_part, out_specs=P("gpus"), in_specs=(), mesh=mesh)()
-    partrefz = pos_zorder_sort(partref)[0]
+    partref = particles.smap(mesh, jit=True)()
+    partrefz = pos_zorder_sort(squeeze_particles(partref))[0]
 
     thref = build_tree_hierarchy(partrefz, cfg_tree)
 
@@ -115,15 +120,8 @@ def test_tree_properties():
     def distributed_tree_hierarchy_reductions():
         rank, ndev, axis_name = get_rank_info()
 
-        part = get_part()
-        partz = distributed_zsort(part)
-
-        npart = jnp.sum(~jnp.isnan(partz.pos[...,0]))
-
-        top_node_size = define_tree_level_node_sizes(part.num_total, cfg_tree)[-1]
-        partz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
-
-        th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
+        part = particles(pad_frac=0.2)
+        partz, th = distr_zsort_and_tree(part, cfg_tree)
 
         return reductions(th, axis_name)
     

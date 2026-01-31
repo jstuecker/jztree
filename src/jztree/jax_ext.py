@@ -236,7 +236,7 @@ def _flatten_kwargs(f, *args, **kwargs):
 
     return fixed + rest
 
-def shard_map_constr(f, out_specs=None, in_specs=None, default_mesh=None,
+def shard_map_constructor(f, out_specs=None, in_specs=None, default_mesh=None,
                      axis_names=None, check_vma=True, input_tiled=False,
                      output_tiled=False, **jit_kwargs):
     # cache functions, to avoid recompiled if invoking with the same mesh twice

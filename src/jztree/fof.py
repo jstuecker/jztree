@@ -13,7 +13,7 @@ from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hi
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
-from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constr, tree_map_by_len
+from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constructor, tree_map_by_len
 from .jax_ext import raise_if
 
 from jztree_cuda import ffi_fof
@@ -853,7 +853,7 @@ def distr_fof_and_catalogue(
     catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
     return partf, catalogue
-distr_fof_and_catalogue.smap = shard_map_constr(distr_fof_and_catalogue,
+distr_fof_and_catalogue.smap = shard_map_constructor(distr_fof_and_catalogue,
     in_specs=(P(-1), None, None, None, None, P(-1)),
     static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
 )
