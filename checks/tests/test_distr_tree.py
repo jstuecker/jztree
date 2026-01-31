@@ -5,7 +5,7 @@ import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.comm import get_rank_info, expanding_shard_map
 from jztree.config import TreeConfig
-from jztree.data import Pos, PosMass, TreeHierarchy
+from jztree.data import Pos, PosMass, TreeHierarchy, squeeze_particles
 from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
 from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, define_tree_level_node_sizes
 
@@ -14,8 +14,7 @@ sharding = NamedSharding(mesh, P('gpus'))
 
 ndev = len(jax.devices())
 
-@jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
-def myzsort():
+def _distr_zsort():
     rank, ndev, axis_name = get_rank_info()
     pos = jax.random.uniform(jax.random.key(rank), (int(4096+1024),3))
     pos = pos.at[-1024:].set(jnp.nan)
@@ -24,70 +23,45 @@ def myzsort():
 
     partz = distributed_zsort(part)
     return part, partz
+_distr_zsort.smapped = expanding_shard_map(_distr_zsort, jit=True, mesh=mesh)
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_mutli_zsort():
-    part, partz = jax.jit(myzsort)()
-    
-    shard0 = jax.sharding.SingleDeviceSharding(jax.devices()[0])
-    p0 = jax.device_put(part, shard0)
-    
-    partz0a = pos_zorder_sort(p0)[0] # single device sort
-    partz0b = jax.device_put(partz, shard0)      # multi device sort transferred to single device
+    part, partz = _distr_zsort.smapped()
 
-    posz0a = partz0a.pos[~jnp.isnan(partz0a.pos[:,0])]
-    posz0b = partz0b.pos[~jnp.isnan(partz0b.pos[:,0])]
+    partz_mult = squeeze_particles(partz)
+    partz_sing = pos_zorder_sort(squeeze_particles(part))[0]
 
-    print(f"Testing sort with {len(jax.devices())} devices.")
+    assert len(partz_sing.pos) == len(partz_mult.pos) == partz_sing.num == partz_mult.num
+    assert jnp.all(partz_sing.pos == partz_mult.pos)
 
-    assert len(posz0a) == len(posz0b)
-    assert len(posz0a) == jnp.sum(partz0a.num)
-    assert len(posz0b) == jnp.sum(partz0b.num)
-    assert jnp.all(posz0a == posz0b)
-
-@jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
-def fcoarsen(partz: jnp.ndarray):
-    # return jztree.tree.distributed_define_leaves(posz, leaf_size=256)
+def _distr_coarsen(partz: jnp.ndarray):
     partz, lvl_bound = adjust_domain_for_nodesize(partz, 256)
     ispl = detect_leaf_boundaries(partz.pos, leaf_size=256, lvl_bound=lvl_bound)
 
-    return partz, ispl
-
-@jax.jit
-@jax.shard_map(out_specs=P("gpus"), in_specs=P("gpus"), mesh=mesh)
-def splits_to_global(ispl):
-    """Adds offsets to locally calculated splits so they correspond to global array splits"""
-    from jztree.comm import get_rank_info
+    # Convert splits to global splits
     rank, ndev, axis_name = get_rank_info()
-
     neach = jax.lax.all_gather(ispl[-1], axis_name)
     offset = jnp.cumsum(neach)[rank] - ispl[-1]
     ispl = ispl + offset
 
-    return ispl
+    return partz, ispl
+_distr_coarsen.smapped = expanding_shard_map(_distr_coarsen, mesh=mesh, jit=True)
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_multi_leaves():
-    part, partz = jax.jit(myzsort)()
-    partz_new, ispln = jax.jit(fcoarsen)(partz)
+    part, partz = _distr_zsort.smapped()
+    partz_new, ispl_multi = _distr_coarsen.smapped(partz)
     
-    # Check that position array was not messed up
-    def remove_invalid(x):
-        return x[jnp.where(~jnp.isnan(x[...,0]))]
-    
-    assert jnp.all(remove_invalid(partz.pos) == remove_invalid(partz_new.pos))
+    assert jnp.all(squeeze_particles(partz).pos == squeeze_particles(partz_new).pos)
 
-    # Check splits against locally calculated ones
-    partz = jax.device_put(partz, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
-    ispl0 = detect_leaf_boundaries(remove_invalid(partz.pos), leaf_size=256)
+    ispl0 = detect_leaf_boundaries(squeeze_particles(partz).pos, leaf_size=256)
 
+    # Have to remove duplicates, since splits at device boundaries appear twice
     def remove_duplicates(i):
         return i[jnp.where(i[1:] != i[:-1])]
-    
-    ispln2 = splits_to_global(ispln)
-    ispln2 = jax.device_put(ispln2, jax.sharding.SingleDeviceSharding(jax.devices()[0]))
 
-    assert jnp.all(remove_duplicates(ispln2) == remove_duplicates(ispl0))
+    assert jnp.all(remove_duplicates(ispl_multi.flatten()) == remove_duplicates(ispl0))
 
 def get_part():
     rank, ndev, axis_name = get_rank_info()
