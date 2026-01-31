@@ -158,7 +158,7 @@ def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
     return arr.at[indices].set(values)
 
-def multi_to_dense(x: jax.Array, spl: jax.Array) -> jax.Array:
+def multi_to_dense(x: jax.Array, spl: jax.Array, out_size: int | None = None) -> jax.Array:
     """x[ndev,n], spl[ndev+1] -> x[ndev*n]"""
     ndev = len(x)
     xout = jnp.zeros(((ndev*x.shape[1],) + x.shape[2:]), x.dtype)
@@ -167,6 +167,9 @@ def multi_to_dense(x: jax.Array, spl: jax.Array) -> jax.Array:
     
     indices = spl[idev,None] + iarange[None,:]
     xout = masked_scatter(indices < spl[idev+1,None], xout, indices, x)
+
+    if out_size is not None:
+        return xout[:out_size]
 
     return xout
 multi_to_dense.jit = jax.jit(multi_to_dense)

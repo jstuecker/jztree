@@ -64,38 +64,30 @@ def particles(seed=0):
     part.mass = 1.
     return part
 
-def particles_and_tree(seed=0):
-    cfg = FofConfig()
+def distr_fof_labels(seed):
+    partz, th = distr_zsort_and_tree(particles(seed), FofConfig().tree)
+    igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True)
 
-    return distr_zsort_and_tree(particles(seed), cfg.tree)
-
-@jax.jit
-def distr_fof(seed):
-    rank, ndev, axis_name = get_rank_info()
-    partz, th = particles_and_tree(seed)
-    igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.1, linearize_labels=True)
-
-    num = jax.lax.all_gather(jnp.sum(~jnp.isnan(partz.pos[...,0]), axis=0), axis_name)
-    dspl = cumsum_starting_with_zero(num)
-
-    return partz, igroup.reshape(1,-1), dspl.reshape(1,-1)
-distr_fof.smapped = expanding_shard_map(distr_fof, in_specs=P(), input_tiled=True, mesh=mesh, jit=True)
+    return partz, igroup
+distr_fof_labels.smapped = expanding_shard_map(distr_fof_labels, 
+    in_specs=P(), input_tiled=True, mesh=mesh, jit=True
+)
 
 @pytest.mark.shrink_in_quick
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
-@pytest.mark.parametrize("seed", [0,17,23,99])
-def test_distr_fof(seed):
-    partz, igroup1, dev_spl = distr_fof.smapped(seed)
+@pytest.mark.parametrize("seed", [3,17,23,99])
+def test_labels_vs_single(seed):
+    partz, igroup1 = distr_fof_labels.smapped(seed)
+    dev_spl = cumsum_starting_with_zero(partz.num)
     # combine arrays into one:
-    igroup1 = multi_to_dense.jit(igroup1, dev_spl[0])
+    igroup1 = multi_to_dense(igroup1, dev_spl, out_size=dev_spl[-1])
+    partz = squeeze_particles(partz)
 
     partz = pos_zorder_sort.jit(partz)[0]
-    igroup2 = fof_labels_z.jit(partz.pos, rlink=0.1)
+    igroup2 = fof_labels_z.jit(partz.pos, rlink=0.03)
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
 
-# @jax.jit
-# @jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
 def distr_fof_cata(seed):
     part = particles(seed)
     return distr_fof_and_catalogue(part, rlink=0.05, cfg=FofConfig())
@@ -129,7 +121,7 @@ def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
     Hubble = 100.0
     return 1e10 * omega_m * 3 * Hubble * Hubble / (8 * np.pi * G) * boxsize ** 3 / npart
 
-def fistr_dj_sim() -> ParticleData:
+def distr_dj_sim() -> ParticleData:
     from discodj import DiscoDJ
     from discodj.core.scatter_and_gather import ScatterGatherProperties
 
@@ -178,27 +170,23 @@ def test_discodj_fof():
     ndev = jax.device_count()
     boxsize = 1000.
 
-    part = jax.jit(fistr_dj_sim)()
+    part = jax.jit(distr_dj_sim)()
     part = expand_particles(part, ndev)
 
     rlink = 0.2 * boxsize / np.cbrt(part.num_total)
 
     def distr_fof(part: ParticleData):
-        rank = jax.lax.axis_index("gpus")
         ndev = jax.lax.axis_size("gpus")
 
         part = pad_particles(part, int(part.num_total // ndev * 0.5))
         
         part_fof, cata = distr_fof_and_catalogue(part, rlink=rlink, boxsize=1000.)
         return part_fof, cata
-    distr_fof = expanding_shard_map(distr_fof, jit=True, mesh=mesh)
-       
+    distr_fof = expanding_shard_map(distr_fof, mesh=mesh, jit=True)
+    
     part_fof, cata = distr_fof(part)
+    cata = sort_catalogue(squeeze_catalogue(cata))
 
-    masses = cata.mass
+    print(cata.mass[0:20])
 
-    print("Masses:")
-    masses = jax.device_put(masses[:,0:20].flatten(), jax.NamedSharding(mesh, P()))
-    print(masses)
-
-    assert (jnp.max(masses) >= 1e15) & (jnp.max(masses) <= 1e17)
+    assert (jnp.max(cata.mass) >= 1e15) & (jnp.max(cata.mass) <= 1e17)
