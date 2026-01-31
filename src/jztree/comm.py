@@ -60,6 +60,9 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
     output_tiled:      (N) inside mapped function -> (Ndev*N) outside
     not output_tiled:  (N) -> (Ndev,N)
     (or no N and (,N) if partition spec is empty)
+
+    These rules will only be applied to arguments with a varying partition spec
+    Inputs and outputs with partition spec P() will be kept unchanged
     """
     if mesh is None:
         mesh = jax.sharding.get_abstract_mesh()
@@ -69,21 +72,26 @@ def expanding_shard_map(f, *, out_specs=None, in_specs=None, mesh=None,
         in_specs = P(axis_names)
     if out_specs is None:
         out_specs = P(axis_names)
+    
 
-    def squeeze_first_dim(x: jax.Array):
+    def squeeze_first_dim(x: jax.Array, flag_keep):
+        if flag_keep: return x
         assert x.shape[0] == 1
         return jnp.reshape(x, jnp.shape(x)[1:])
     
-    def expand_first_dim(x: jax.Array):
+    def expand_first_dim(x: jax.Array, flag_keep):
+        if flag_keep: return x
         return jnp.reshape(x, (1,) + jnp.shape(x))
 
     @jax.shard_map(out_specs=out_specs, in_specs=in_specs, mesh=mesh, axis_names=set(axis_names), check_vma=check_vma)
-    def f_smapped(*args, **kwargs):
+    def f_smapped(*args):
         if not input_tiled:
-            args, kwargs = jax.tree.map(squeeze_first_dim, (args, kwargs))
-        res = f(*args, **kwargs)
+            flag_const = jax.tree.map(lambda spec: spec == P(), jax.tree.broadcast(in_specs, args))
+            args = jax.tree.map(squeeze_first_dim, args, flag_const)
+        res = f(*args)
         if not output_tiled:
-            return jax.tree.map(expand_first_dim, res)
+            flag_const = jax.tree.map(lambda spec: spec == P(), jax.tree.broadcast(out_specs, res))
+            return jax.tree.map(expand_first_dim, res, flag_const)
         else:
             return res
     
