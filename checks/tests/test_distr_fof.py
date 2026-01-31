@@ -7,10 +7,11 @@ from jztree.comm import get_rank_info, expanding_shard_map
 from fmdj_utils.ics import gaussian_blob
 from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
-from jztree.data import ParticleData, Link, Label, flatten_particles, pad_particles, squeeze_particles, expand_particles
+from jztree.data import ParticleData, Link, Label, flatten_particles, pad_particles
+from jztree.data import squeeze_particles, expand_particles, squeeze_catalogue, sort_catalogue
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
 from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
-from jztree.fof import distr_fof_order, fof_catalogue_from_groups, fof_order, fof_and_catalogue, distr_fof_and_catalogue
+from jztree.fof import fof_and_catalogue, distr_fof_and_catalogue
 from jztree.tools import tree_map_by_len
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
@@ -97,30 +98,28 @@ def test_distr_fof(seed):
 # @jax.shard_map(out_specs=P("gpus"), in_specs=P(), mesh=mesh)
 def distr_fof_cata(seed):
     part = particles(seed)
-    return distr_fof_and_catalogue(part, rlink=0.1, cfg=FofConfig())
+    return distr_fof_and_catalogue(part, rlink=0.05, cfg=FofConfig())
 distr_fof_cata.smapped = expanding_shard_map(distr_fof_cata, input_tiled=True, mesh=mesh, in_specs=P())
 
 @jax.jit
 def fof_cata(part):
-    return fof_and_catalogue(part, rlink=0.1, cfg=FofConfig())
+    return fof_and_catalogue(part, rlink=0.05, cfg=FofConfig())
 
 @pytest.mark.shrink_in_quick
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
-def test_distr_catalogue(seed):
-    partz, cata1 = jax.jit(distr_fof_cata.smapped)(seed)
-    cata1 = cata1.flatten()
-    p2, cata2 = fof_cata(flatten_particles(partz))
+def test_catalogue_vs_single(seed):
+    partf, cata1 = jax.jit(distr_fof_cata.smapped)(seed)
+    p2, cata2 = fof_cata(squeeze_particles(partf))
     
     # Sort by masses and equalize shapes
     assert np.sum(cata1.ngroups) == np.sum(cata2.ngroups)
-    num = np.sum(cata1.ngroups)
-    isort1 = jnp.argsort(cata1.count, descending=True)
-    isort2 = jnp.argsort(cata2.count, descending=True)
-    cata1 = tree_map_by_len(lambda x: x[isort1][:num], cata1, len(cata1.count))
-    cata2 = tree_map_by_len(lambda x: x[isort2][:num], cata2, len(cata2.count))
+
+    cata1 = sort_catalogue(squeeze_catalogue(cata1, offset_mode="global", nparts=partf.num))
+    cata2 = sort_catalogue(squeeze_catalogue(cata2))
 
     assert jnp.all(cata1.count == cata2.count)
+    assert jnp.all(cata1.offset == cata2.offset)
     assert cata1.mass == pytest.approx(cata2.mass, abs=0.1)
     assert cata1.com_pos == pytest.approx(cata2.com_pos, abs=0.01)
     assert cata1.com_inertia_radius == pytest.approx(cata2.com_inertia_radius, abs=0.01)

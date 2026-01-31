@@ -531,7 +531,7 @@ def squeeze_catalogue(
     with jax.enable_x64():
         spl = cumsum_starting_with_zero(cata.ngroups)
         idx = jnp.arange(size_out, dtype=jnp.int64)
-        irank = jnp.cumsum(jnp.zeros_like(idx).at[spl].set(1)) - 1
+        irank = jnp.cumsum(jnp.zeros_like(idx).at[spl].add(1)) - 1
         igroup = idx - spl[irank]
 
         cata_sq = tree_map_by_len(lambda x: x[irank, igroup], cata, size_groups, axis=1)
