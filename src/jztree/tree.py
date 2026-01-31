@@ -255,6 +255,10 @@ def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
         return pos_zorder_sort(part)[0]
 
     pos = get_pos(part)
+    numtot = get_num_total(part)
+    if numtot >= ndev*len(pos):
+        raise ValueError(f"Particles ({numtot}/{ndev*len(pos)}) appear to be not padded... Please"
+                         " use jztree.data.pad_particles to leave some space for communication!")
     
     # Sample based domain decomposition
     key = jax.random.key(0)
@@ -280,7 +284,7 @@ def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
         # Let's do another communication step to improve the balance
 
         spl_have = global_splits(partz.num, axis_name=axis_name)
-        spl_target = (jnp.arange(0, ndev+1) * (get_num_total(partz) // ndev)).at[-1].set(get_num_total(partz))
+        spl_target = (jnp.arange(0, ndev+1) * (numtot // ndev)).at[-1].set(numtot)
         spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num)
 
         partz, dev_spl = all_to_all_with_splits(

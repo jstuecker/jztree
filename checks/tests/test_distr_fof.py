@@ -57,15 +57,17 @@ def test_distributed_links(nperdev):
 
     assert jnp.all(igroup_a == igroup_b)
 
-def particles(seed=0):
+def particles(seed=0, pad_frac=0.):
     rank, ndev, axis_name = get_rank_info()
-    part = gaussian_blob(1024*1024, npad=1024*128*3, seed=rank+seed)
+    part = gaussian_blob(1024*1024, npad=int(1024*1024*pad_frac), seed=rank+seed)
     part.mass = 1.
     return part
-particles.smap = shard_map_constr(particles, in_specs=P(), out_specs=P(-1))
+particles.smap = shard_map_constr(
+    particles, in_specs=(None, P()), out_specs=P(-1), static_argnames="frac_pad"
+)
 
 def distr_fof_labels(seed):
-    partz, th = distr_zsort_and_tree(particles(seed), FofConfig().tree)
+    partz, th = distr_zsort_and_tree(particles(seed, pad_frac=0.3), FofConfig().tree)
     igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True)
 
     return partz, igroup
@@ -92,7 +94,7 @@ def test_labels_vs_single(seed):
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
 def test_catalogue_vs_single(seed):
-    part = particles.smap(mesh, jit=True)(seed)
+    part = particles.smap(mesh, jit=False)(seed, pad_frac=0.2)
     partf, cata1 = distr_fof_and_catalogue.smap(mesh, jit=True)(part, rlink=0.05)
 
     p2, cata2 = fof_and_catalogue.jit(squeeze_particles(partf), rlink=0.05)
