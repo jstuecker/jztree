@@ -122,6 +122,8 @@ def expand_particles(part: Pos, ndev: int):
     return part_exp
 
 def pad_particles(part: Pos, num: int,  float_val:float = jnp.nan, int_val: int = 0):
+    if num == 0: return part
+    
     assert part.pos.ndim == 2, "Positions should have shape (N,3)"
 
     def pad(xi):

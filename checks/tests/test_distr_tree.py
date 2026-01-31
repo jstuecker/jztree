@@ -8,6 +8,7 @@ from jztree.config import TreeConfig
 from jztree.data import Pos, PosMass, TreeHierarchy, squeeze_particles
 from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
 from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, distr_zsort_and_tree
+from jztree_utils import ics
 
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 sharding = NamedSharding(mesh, P('gpus'))
@@ -63,23 +64,6 @@ def test_multi_leaves():
 
     assert jnp.all(remove_duplicates(ispl_multi.flatten()) == remove_duplicates(ispl0))
 
-def particles(seed=0, pad_frac=0.):
-    rank, ndev, axis_name = get_rank_info()
-
-    npart = 1024*128
-    nextra = int(npart*pad_frac)
-
-    pos = jax.random.uniform(jax.random.key(rank), (npart+nextra,3))
-    if nextra > 0:
-        pos = pos.at[-nextra:].set(jnp.nan)
-
-    part = PosMass(pos=pos, mass=jnp.ones_like(pos[...,0]), num=npart, num_total=npart*ndev)
-
-    return part
-particles.smap = shard_map_constructor(
-    particles, in_specs=(None, None), out_specs=P(-1), static_argnames="pad_frac"
-)
-
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_tree_properties():
     # Builds a tree hierarchy once on a single device and once accross multiple devices
@@ -90,7 +74,7 @@ def test_tree_properties():
     cfg_tree.alloc_fac_nodes = 2.0
 
     # Build a reference structure
-    partref = particles.smap(mesh, jit=True)()
+    partref = ics.uniform_particles.smap(mesh, jit=True)(1024*128, npad=1024*32)
     partrefz = pos_zorder_sort(squeeze_particles(partref))[0]
 
     thref = build_tree_hierarchy(partrefz, cfg_tree)
@@ -115,18 +99,15 @@ def test_tree_properties():
         else:
             return jnp.array([jax.lax.psum(x, axis_name) for x in res])
 
-    @jax.jit
-    @jax.shard_map(out_specs=(P()), in_specs=(), mesh=mesh)
-    def distributed_tree_hierarchy_reductions():
+    def distr_reductions(part):
         rank, ndev, axis_name = get_rank_info()
-
-        part = particles(pad_frac=0.2)
         partz, th = distr_zsort_and_tree(part, cfg_tree)
 
         return reductions(th, axis_name)
+    distr_reductions.smap = shard_map_constructor(distr_reductions, out_specs=P())
     
     results1 = reductions(thref)
-    results2 = distributed_tree_hierarchy_reductions()
+    results2 = distr_reductions.smap(mesh, jit=True)(partref)
 
     assert results1[:-3] == pytest.approx(results2[:-3], rel=1e-7) # integer sums, be very strict
     assert results1[-3:] == pytest.approx(results2[-3:], rel=1e-6) # floating point sums
