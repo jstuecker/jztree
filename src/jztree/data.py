@@ -419,6 +419,12 @@ class InteractionList:
     def dtype(self):
         return self.iother.dtype
 
+def verify_ilist(ilist: InteractionList):
+    if len(ilist.iother >= 2**31):
+        raise ValueError("Intercation list allocation too large and may produce integer overflows",
+                         "Hint: Use more GPUs or decrease alloc_fac_ilist (if possible)")
+    return ilist
+
 # ------------------------------------------------------------------------------------------------ #
 #                                      Fof Specific Data Class                                     #
 # ------------------------------------------------------------------------------------------------ #

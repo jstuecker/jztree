@@ -6,7 +6,7 @@ from dataclasses import replace
 
 from .config import FofConfig, FofCatalogueConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
-from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num
+from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num, verify_ilist
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from .tools import bucket_prefix_sum
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
@@ -49,7 +49,7 @@ def node_fof_and_ilist(
     )
 
     child_igroup_out, child_ilist_ispl, child_ilist = pcast_like(res, like=node_ilist.iother)
-    child_ilist = InteractionList(child_ilist_ispl, child_ilist)
+    child_ilist = verify_ilist(InteractionList(child_ilist_ispl, child_ilist))
 
     n1, n2 = child_ilist.nfilled(), child_ilist.iother.shape[0]
     child_igroup_out = child_igroup_out + raise_if(n1 > n2,
@@ -847,6 +847,8 @@ def distr_fof_and_catalogue(
         th: TreeHierarchy | None = None
     ) -> Tuple[ParticleData, FofCatalogue]:
     """Returns particles in FoF-order and the FoFCatalogue"""
+    assert len(part.pos) < 2**31, "Allocation too large... may lead to int32 overflows"
+
     if input_z_ordered:
         partz = part
         assert th is not None, "To skip sort, provide tree (jztree.tree.distr_zsort_and_tree)"

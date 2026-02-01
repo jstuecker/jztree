@@ -5,7 +5,7 @@ from jax.sharding import PartitionSpec as P
 from typing import Tuple
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
-from .data import get_num_total, get_pos, get_num
+from .data import get_num_total, get_pos, get_num, verify_ilist
 from .config import TreeConfig
 from .tools import cumsum_starting_with_zero, div_ceil
 from .comm import send_to_left, send_to_right, shift_particles_left
@@ -286,10 +286,10 @@ def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
     if equalize:
         # We have posz globally and locally in z-order now
         # Let's do another communication step to improve the balance
-
-        spl_have = global_splits(partz.num, axis_name=axis_name)
-        spl_target = (jnp.arange(0, ndev+1) * (numtot // ndev)).at[-1].set(numtot)
-        spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num)
+        with jax.enable_x64():
+            spl_have = global_splits(jnp.astype(partz.num, jnp.int64), axis_name=axis_name)
+            spl_target = (jnp.arange(0, ndev+1, dtype=jnp.int64) * (numtot // ndev)).at[-1].set(numtot)
+            spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num).astype(jnp.int32)
 
         partz, dev_spl = all_to_all_with_splits(
             partz, spl_send, axis_name=axis_name, err_hint="\nHint: Increase padding of positions",
@@ -306,7 +306,12 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
     """Shifts particles so that nodes with size <= max_node_size always lie on a single GPU"""
     rank, ndev, axis_name = get_rank_info()
 
-    npart = get_num(partz)
+    npart, ntot = get_num(partz), get_num_total(partz)
+    
+    if max_node_size >= ntot*0.5/ndev:
+        raise ValueError(f"Topnodes are dangerously large: size={max_node_size} npart={ntot/ndev}\n"
+                          "Hint: increase stop_coarsen for more/smaller topnodes.")
+    assert ntot/ndev <= 2**30, "Might get integer overflows..."
 
     ext_ll, ext_lr, ext_rl, ext_rr = distr_boundary_extend(get_pos(partz), npart=npart)
     npart_l = ext_lr - ext_ll
@@ -534,7 +539,7 @@ def dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
         nnodes=nnodes, size_nodes=size_nodes, nint=nint, size_ilist=size_ilist
     )
     
-    return InteractionList(ispl=ispl, iother=ilist)
+    return verify_ilist(InteractionList(ispl=ispl, iother=ilist))
 dense_interaction_list.jit = jax.jit(dense_interaction_list, static_argnames=['size_ilist', 'size_nodes'])
 
 def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
@@ -581,7 +586,7 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
     idx = jnp.arange(size_ilist)
     ilist = jnp.where(idx < ninteractions, idx % nsuper_nodes, 0)
 
-    ilist = InteractionList(ispl=ispl, iother=ilist)
+    ilist = verify_ilist(InteractionList(ispl=ispl, iother=ilist))
 
     return spl_super, ilist, nsuper_nodes
 grouped_dense_interaction_list.jit = jax.jit(
@@ -618,4 +623,4 @@ def simplify_interaction_list(ilist: InteractionList, num_always_keep: jax.Array
     ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
     ilist = InteractionList(ispl, prefix[ilist.iother], reduced_ids, reduced_dev_spl)
     
-    return ilist
+    return verify_ilist(ilist)
