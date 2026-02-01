@@ -45,3 +45,49 @@ def discodj_particles(res):
     mass = jnp.ones(len(pos), dtype=pos.dtype) / res**3
     return PosMass(pos=pos, mass=mass)
 discodj_particles.jit = jax.jit(discodj_particles, static_argnames=("res"))
+
+def multi_gpu_dj_sim(boxsize = 1000., num_per_device=512**3) -> ParticleData:
+    from discodj import DiscoDJ
+    from discodj.core.scatter_and_gather import ScatterGatherProperties
+
+    def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
+        G = 43.007105731706317
+        Hubble = 100.0
+        return 1e10 * omega_m * 3 * Hubble * Hubble / (8 * np.pi * G) * boxsize ** 3 / npart
+
+    ndev = jax.device_count()
+
+    nres = np.int64(((np.cbrt(num_per_device * ndev))//ndev)*ndev)
+
+    print(f"total grid dim {nres}, particles per GPU {np.cbrt(nres**3/ndev):.2f}**3")
+    
+    scat = ScatterGatherProperties(
+        res=nres,
+        res_pm=nres,
+        num_devices=ndev,
+        use_distributed_scatter_gather=True,
+        use_vjp_gather=False,
+        use_vjp_scatter=False,
+        scatter_gather_check=False
+    )
+
+    dj = DiscoDJ(dim=3, res=scat.res, boxsize=boxsize)
+    dj = dj.with_timetables()
+    pkstate = dj.with_linear_ps()
+    ics = dj.with_ics(pkstate, seed=0)
+    lpt_state = dj.with_lpt(ics, n_order=1)
+    sim_ini = dj.with_lpt_ics(lpt_state, n_order=1, a_ini=0.02)
+    X, P, a = dj.run_nbody(
+        sim_ini, a_end=1.0, n_steps=16, res_pm=scat.res_pm, stepper="bullfrog",
+        scatter_gather_props=scat
+    )
+
+    part = ParticleData(
+        pos=X.reshape(-1,3),
+        mass=_particle_mass(0.3, boxsize, nres**3),
+        vel=P.reshape(-1,3),
+        num_total=nres**3
+    )
+
+    return part
+multi_gpu_dj_sim.jit = jax.jit(multi_gpu_dj_sim)

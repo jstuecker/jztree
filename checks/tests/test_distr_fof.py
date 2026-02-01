@@ -103,53 +103,6 @@ def test_catalogue_vs_single(seed):
     assert cata1.com_pos == pytest.approx(cata2.com_pos, abs=0.01)
     assert cata1.com_inertia_radius == pytest.approx(cata2.com_inertia_radius, abs=0.01)
 
-def _particle_mass(omega_m: float, boxsize: float, npart: int) -> float:
-    G = 43.007105731706317
-    Hubble = 100.0
-    return 1e10 * omega_m * 3 * Hubble * Hubble / (8 * np.pi * G) * boxsize ** 3 / npart
-
-def distr_dj_sim() -> ParticleData:
-    from discodj import DiscoDJ
-    from discodj.core.scatter_and_gather import ScatterGatherProperties
-
-    ndev = jax.device_count()
-
-    nres = np.int64(((np.cbrt(512**3 * ndev))//ndev)*ndev)
-
-    print(f"total grid dim {nres}, particles per GPU {np.cbrt(nres**3/ndev):.2f}**3")
-    
-    scat = ScatterGatherProperties(
-        res=nres,
-        res_pm=nres,
-        num_devices=ndev,
-        use_distributed_scatter_gather=True,
-        use_vjp_gather=False,
-        use_vjp_scatter=False,
-        scatter_gather_check=False
-    )
-
-    boxsize = 1000.
-
-    dj = DiscoDJ(dim=3, res=scat.res, boxsize=boxsize)
-    dj = dj.with_timetables()
-    pkstate = dj.with_linear_ps()
-    ics = dj.with_ics(pkstate, seed=0)
-    lpt_state = dj.with_lpt(ics, n_order=1)
-    sim_ini = dj.with_lpt_ics(lpt_state, n_order=1, a_ini=0.02)
-    X, P, a = dj.run_nbody(
-        sim_ini, a_end=1.0, n_steps=16, res_pm=scat.res_pm, stepper="bullfrog",
-        scatter_gather_props=scat
-    )
-
-    part = ParticleData(
-        pos=X.reshape(-1,3),
-        mass=_particle_mass(0.3, boxsize, nres**3),
-        vel=P.reshape(-1,3),
-        num_total=nres**3
-    )
-
-    return part
-
 @pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_discodj_fof():
@@ -157,7 +110,7 @@ def test_discodj_fof():
     ndev = jax.device_count()
     boxsize = 1000.
 
-    part = jax.jit(distr_dj_sim)()
+    part = ics.multi_gpu_dj_sim.jit()
     part = expand_particles(part, ndev)
 
     rlink = 0.2 * boxsize / np.cbrt(part.num_total)
