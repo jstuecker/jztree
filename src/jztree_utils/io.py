@@ -120,21 +120,36 @@ def squeeze_any(data: Any | ParticleData | FofCatalogue):
     else:
         return data
 
+def write_h5file(file_name, squeeze=True, **data_sets):
+    base_dir = Path(file_name).parent
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    with h5py.File(file_name, "w") as file:
+        for name, data in data_sets.items():
+            if squeeze:
+                data = squeeze_any(data)
+
+            write_to_hdf5(file.require_group(name), data)
+
+def read_h5file(file_name, **data_classes):
+    base_dir = Path(file_name).parent
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    res = []
+
+    with h5py.File(file_name, "r") as file:
+        for name, cls in data_classes.items():
+            res.append(read_from_hdf5(file[name], cls))
+    return res
+
 def distr_write_hdf5(base_name, squeeze=True, **kwargs):
     axis_name = jax.sharding.get_abstract_mesh().axis_names
     rank = jax.lax.axis_index(axis_name)
     def write(rank, **kwargs):
         file_name = f"{base_name}_{rank}.hdf5"
-        base_dir = Path(file_name).parent
-        base_dir.mkdir(parents=True, exist_ok=True)
         
         print(f"Writing {file_name} on rank {rank}")
-        with h5py.File(file_name, "w") as file:
-            for name, data in kwargs.items():
-                if squeeze:
-                    data = squeeze_any(data)
-
-                write_to_hdf5(file.require_group(name), data)
+        write_h5file(file_name, squeeze=squeeze, **kwargs)
         print(f"Done writing on rank {rank}")
 
         return 0
