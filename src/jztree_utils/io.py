@@ -7,7 +7,8 @@ from jax.experimental import io_callback
 
 import jax
 import jax.numpy as jnp
-from .jax_ext import get_rank_info
+
+from jztree.data import ParticleData, FofCatalogue, squeeze_particles, squeeze_catalogue
 
 T = TypeVar("T")
 
@@ -111,15 +112,31 @@ def read_from_hdf5(group: h5py.Group, cls: type[T]) -> T:
 
     return cls(**kwargs)
 
-def distr_write_hdf5(base_name, **kwargs):
-    rank, ndev, axis_name = get_rank_info()
-    def write(rank, **kwargs):
-        base_dir = Path(base_name).parent
-        base_dir.mkdir(parents=True, exist_ok=True)
+def squeeze_any(data: Any | ParticleData | FofCatalogue):
+    if isinstance(data, ParticleData):
+        return squeeze_particles(data)
+    elif isinstance(data, FofCatalogue):
+        return squeeze_catalogue(data)
+    else:
+        return data
 
-        with h5py.File(f"{base_name}_{rank}.hdf5", "w") as file:
+def distr_write_hdf5(base_name, squeeze=True, **kwargs):
+    axis_name = jax.sharding.get_abstract_mesh().axis_names
+    rank = jax.lax.axis_index(axis_name)
+    def write(rank, **kwargs):
+        file_name = f"{base_name}_{rank}.hdf5"
+        base_dir = Path(file_name).parent
+        base_dir.mkdir(parents=True, exist_ok=True)
+        
+        print(f"Writing {file_name} on rank {rank}")
+        with h5py.File(file_name, "w") as file:
             for name, data in kwargs.items():
+                if squeeze:
+                    data = squeeze_any(data)
+
                 write_to_hdf5(file.require_group(name), data)
+        print(f"Done writing on rank {rank}")
+
         return 0
     
     token = io_callback(write, jax.ShapeDtypeStruct((), jnp.int32), rank, **kwargs)

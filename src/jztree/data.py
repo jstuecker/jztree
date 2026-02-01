@@ -139,6 +139,11 @@ def pad_particles(part: Pos, num: int,  float_val:float = jnp.nan, int_val: int 
 
 def squeeze_particles(part: Pos):
     """Squeezes multi-gpu output particles (Ndev,N) into a dense form (Ntot)"""
+    if part.pos.ndim == 2:
+        # We are already flat or inside of a shard_map
+        # in this case the only use case is to remove a possible padding
+        return tree_map_by_len(lambda x: x[:part.num], part, len(part.pos))
+
     assert part.pos.ndim == 3, "Require input particles of form (Ndev,N,...)"
     assert len(part.num) == len(part.pos), "Should have particle number from each device"
 
