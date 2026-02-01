@@ -492,7 +492,7 @@ class FofData:
     spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
 
 @jax.jax.tree_util.register_dataclass
-@dataclass
+@dataclass(slots=True)
 class FofCatalogue:
     ngroups: jax.Array
     mass: jax.Array | None = None
@@ -507,7 +507,7 @@ class FofCatalogue:
         flat_cata = jax.tree.map(lambda x: x.reshape((-1,) + x.shape[2:]), self)
         flat_cata.ngroups = jnp.sum(flat_cata.ngroups)
         return flat_cata
-    
+
 def squeeze_catalogue(
         cata: FofCatalogue,
         size_out: int | None = None,
