@@ -205,7 +205,7 @@ def get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
     igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup, label.igroup)
     return Label(irankmin[igroup], igroupmin[igroup])
 
-def fof_is_superset(igroup_sup, igroup):
+def fof_is_superset(igroup_sup, igroup, mask = None):
     """Checks whether every FoF group in igroup_up is a superset of sets in igroup_low"""
     # For this we need to check that if we link groups together as indicated by the super-grouping
     # that they are identical to the super groups
@@ -213,7 +213,10 @@ def fof_is_superset(igroup_sup, igroup):
     # indicates the super group of each label in igroup
     label_map = jnp.zeros(len(igroup), dtype=jnp.int32).at[igroup].set(igroup_sup)
     
-    return jnp.all(igroup_sup == label_map[igroup])
+    if mask is None:
+        return jnp.all(igroup_sup == label_map[igroup])
+    else:
+        return jnp.all((igroup_sup == label_map[igroup]) | ~mask)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                        Distributed Linking                                       #
@@ -764,7 +767,8 @@ def fof_labels(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig
     
     igroupz = fof_labels_z(posz, rlink, boxsize=boxsize, cfg=cfg)
 
-    igroup = igroupz.at[idz].set(igroupz)
+    inv_sort = jnp.zeros(len(idz)).at[idz].set(jnp.arange(len(idz)))
+    igroup = igroupz.at[idz].set(idz[igroupz])
 
     return igroup
 fof_labels.jit = jax.jit(fof_labels, static_argnames=["rlink", "boxsize", "cfg"])

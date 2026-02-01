@@ -18,7 +18,7 @@ has_discodj = importlib.util.find_spec("discodj") is not None
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 sharding = NamedSharding(mesh, P('gpus'))
 
-@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+@pytest.mark.skipif((jax.device_count() <= 1) or (jax.device_count() > 4), reason="Only single node")
 @pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("nperdev", (16, 256, 5012))
 def test_distributed_links(nperdev):
@@ -166,8 +166,9 @@ def test_discodj_fof():
         ndev = jax.lax.axis_size("gpus")
 
         part = pad_particles(part, int(part.num_total // ndev * 0.5))
-        
-        part_fof, cata = distr_fof_and_catalogue(part, rlink=rlink, boxsize=1000.)
+        cfg = FofConfig()
+        cfg.tree.alloc_fac_nodes = 1.2
+        part_fof, cata = distr_fof_and_catalogue(part, rlink=rlink, boxsize=1000., cfg=cfg)
         return part_fof, cata
     distr_fof = expanding_shard_map(distr_fof, mesh=mesh, jit=True)
     

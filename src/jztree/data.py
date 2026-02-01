@@ -38,6 +38,7 @@ class ParticleData:
     pos: jax.Array # (Nparticles, 3)
     mass: jax.Array | None = None # (Nparticles,) or scalar
     vel: jax.Array | None = None # (Nparticles, 3)
+    id: jax.Array | None = None
 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
