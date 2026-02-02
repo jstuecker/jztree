@@ -12,7 +12,7 @@ You may consider these options in the following order:
 * If you like conda or if neither of the two options above are available, go with option (2)
 
 How to set up for each of these cases is explained below:
-### CUDA13 + pip setup:
+### Option (1): CUDA13 + pip setup:
 Check that the NVIDIA "Driver Version" is new enough [>= 580](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html). Note that CUDA 13 is not supported on older GPUs
 ```bash
 nvidia-smi
@@ -26,7 +26,7 @@ To check whether the installation was successful, run
 python src/benchmarks/hello_world.py
 ```
 (Note: Installation speed my be significantly higher with [uv pip](https://docs.astral.sh/uv/) )
-### CONDA + CUDA setup:
+### Option (2): CONDA + CUDA12 setup:
 Install miniforge (or any other conda distribution) / setup an environment / activate it (skip steps as appropriate)
 ```bash
 curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
@@ -37,17 +37,28 @@ conda init
 conda create --name jztest -y
 conda activate jztest
 ```
-Install prequisites via conda
+Install prequisites via conda and pip:
 ```bash
-conda install "jaxlib=0.7=*cuda12*" jax cuda-nvcc -c conda-forge   # replace jax/CUDA version as needed
+export CONDA_OVERRIDE_CUDA="12.9"  # Use a version that fits your needs
 conda install pip
+# conda install -c conda-forge cuda-nvcc cuda-version=12 cudnn nccl conda-forge libcufft cuda-cupti libcublas libcusparse
+conda install -c conda-forge cuda-nvcc cuda-version=12 cudnn nccl libcufft cuda-cupti libcublas libcusparse
+#nvidia-cuda-crt
+pip install scikit-build-core nanobind cmake=3.24
+pip install --upgrade "jax[cuda12-local]"
 ```
-Install the package
-```bash
-export CUDA_LOCAL=1   # This environment variable removes pip installed nvcc from build requirements
-pip install .
+Verify that the installation fits your drivers
 ```
-### SYSTEM CUDA setup:
+conda list
+pip list
+```
+Finally install the code with
+```
+pip install -e . --no-build-isolation
+```
+or with the [dev] optional dependencies if you'd like to use unit tests and some optional features.
+
+### Option (3): system CUDA setup:
 I assume that you have already installed or loaded some CUDA version. E.g. check with
 ```bash
 nvcc --version
