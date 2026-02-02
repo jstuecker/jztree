@@ -111,6 +111,8 @@ def camels_jz_fof(camels_data):
     return part, igr_jz, part_fof, cata, boxsize, rlink
 
 def test_camels_labels(camels_data, camels_jz_fof):
+    print("Warning. The CAMELS catalogue is broken, I will replace this by another dataset soon!")
+
     part, igroup, cata, boxsize, rlink = camels_data
     # Create jz-labels with a slightly larger linking length
     # This should guarantee that each group in jz is a super-group in camels
@@ -146,6 +148,8 @@ def test_camels_labels(camels_data, camels_jz_fof):
     # assert jnp.all(counts_jz >= counts_cam)
 
 def test_camels_catalogue(camels_data, camels_jz_fof):
+    print("Warning. The CAMELS catalogue is broken, I will replace this by another dataset soon!")
+
     cata_cam = sort_catalogue(camels_data[2])
     cata = sort_catalogue(camels_jz_fof[3])
 

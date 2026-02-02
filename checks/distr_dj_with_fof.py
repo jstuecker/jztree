@@ -28,7 +28,7 @@ def sim_and_fof():
     rlink = 0.2 * boxsize / np.cbrt(part.num_total)
 
     def distr_fof(part: jz.data.ParticleData):
-        part = jz.data.pad_particles(part, int(part.num_total // ndev * 0.5))
+        part = jz.data.pad_particles(part, int(part.num_total // ndev * 0.2))
         cfg = jz.config.FofConfig()
         cfg.tree.alloc_fac_nodes = 1.25
         part_fof, cata = jz.fof.distr_fof_and_catalogue(part, rlink=rlink, boxsize=boxsize, cfg=cfg)
