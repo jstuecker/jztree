@@ -1,5 +1,6 @@
 from . import jax_ext
 from . import config
+from . import stats
 from . import data
 from . import tools
 from . import comm
