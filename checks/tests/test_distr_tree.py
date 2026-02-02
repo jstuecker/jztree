@@ -6,7 +6,7 @@ from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.jax_ext import get_rank_info, expanding_shard_map, shard_map_constructor
 from jztree.config import TreeConfig
 from jztree.data import Pos, PosMass, TreeHierarchy, squeeze_particles
-from jztree.tree import pos_zorder_sort, distributed_zsort, adjust_domain_for_nodesize
+from jztree.tree import pos_zorder_sort, distr_zsort, adjust_domain_for_nodesize
 from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, distr_zsort_and_tree
 from jztree_utils import ics
 
@@ -22,7 +22,7 @@ def _distr_zsort():
 
     part = Pos(pos=pos, num=4096, num_total=4096*ndev)
 
-    partz = distributed_zsort(part)
+    partz = distr_zsort(part)
     return part, partz
 _distr_zsort.smapped = expanding_shard_map(_distr_zsort, jit=True, mesh=mesh)
 

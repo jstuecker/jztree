@@ -15,6 +15,7 @@ from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
 from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constructor, tree_map_by_len
 from .jax_ext import raise_if
+from .stats import statistics, stats_callback, AllocStats
 
 from jztree_cuda import ffi_fof
 jax.ffi.register_ffi_target("NodeFofAndIlist", ffi_fof.NodeFofAndIlist(), platform="CUDA")
@@ -57,6 +58,8 @@ def node_fof_and_ilist(
         "Hint: Increase alloc_fac_ilist at least by a factor of {ratio:.1f}",
         n1=n1, n2=n2, ratio=n1/n2
     )
+
+    stats_callback("allocation", AllocStats.record_filled_interactions, n1, n2)
 
     return child_igroup_out, child_ilist
 node_fof_and_ilist.jit = jax.jit(

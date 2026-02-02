@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.data import Pos, PosMass
-from jztree.tree import distributed_zsort, distr_zsort_and_tree
+from jztree.tree import distr_zsort, distr_zsort_and_tree
 from jztree.config import TreeConfig
 from jztree.jax_ext import shard_map_constructor
 from jztree_utils import ics
@@ -41,7 +41,7 @@ def get_mesh(ndev=-1):
 def bench_multi_zsort(jax_bench, ndev):
     part = ics.gaussian_particles.smap(get_mesh(ndev), jit=True)(256**3, npad=int(256**3*0.2))
 
-    fzs = distributed_zsort.smap(get_mesh(ndev), jit=True)
+    fzs = distr_zsort.smap(get_mesh(ndev), jit=True)
 
     jb = jax_bench(jit_rounds=20, jit_warmup=2, eager_rounds=0, eager_warmup=0)
 

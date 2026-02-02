@@ -11,6 +11,7 @@ from .tools import cumsum_starting_with_zero, div_ceil
 from .comm import send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
+from .stats import statistics, stats_callback, AllocStats
 
 from jztree_cuda import ffi_tree, ffi_sort
 jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")
@@ -206,7 +207,7 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
 
 def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig) -> Tuple[Pos, TreeHierarchy]:
     npart_tot = get_num_total(part)
-    partz = distributed_zsort(part, nsamp=cfg_tree.nsamp)
+    partz = distr_zsort(part, nsamp=cfg_tree.nsamp)
 
     top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
     partz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
@@ -252,7 +253,7 @@ def determine_npart(x):
     return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
 
     
-def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
+def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
     rank, ndev, axis_name = get_rank_info()
 
     if ndev == 1:
@@ -283,6 +284,8 @@ def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
 
     partz, idz = pos_zorder_sort(part)
 
+    stats_callback("allocation", AllocStats.record_filled_sort, dev_spl[-1], len(part.pos))
+
     if equalize:
         # We have posz globally and locally in z-order now
         # Let's do another communication step to improve the balance
@@ -298,8 +301,8 @@ def distributed_zsort(part: Pos, nsamp: int = 1024, equalize=True):
         partz.num = dev_spl[-1]
 
     return partz
-distributed_zsort.smap = shard_map_constructor(
-    distributed_zsort, in_specs=(P(-1), None, None), static_argnames=("nsamp", "equalize")
+distr_zsort.smap = shard_map_constructor(
+    distr_zsort, in_specs=(P(-1), None, None), static_argnames=("nsamp", "equalize")
 )
 
 def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
@@ -322,6 +325,8 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
 
     partz, npart = shift_particles_left(partz, npshift, max_send=max_node_size, npart=npart)
     partz.num = npart
+
+    stats_callback("allocation", AllocStats.record_filled_domain, partz.num, len(partz.pos))
 
     # Find the level of the new boundary
     posz = get_pos(partz)
@@ -538,6 +543,8 @@ def dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
         "Hint: Increase alloc_fac_ilist",
         nnodes=nnodes, size_nodes=size_nodes, nint=nint, size_ilist=size_ilist
     )
+
+    stats_callback("allocation", AllocStats.record_filled_interactions, nint, size_ilist)
     
     return verify_ilist(InteractionList(ispl=ispl, iother=ilist))
 dense_interaction_list.jit = jax.jit(dense_interaction_list, static_argnames=['size_ilist', 'size_nodes'])
@@ -560,9 +567,9 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
     # define the super node to node relation
     if node_range is None:
         nsuper_nodes = div_ceil(nnodes, ngroup)
-        ninteractions = nsuper_nodes*nsuper_nodes
+        nint = nsuper_nodes*nsuper_nodes
         spl_super = jnp.minimum(jnp.arange(size_super+1) * ngroup, nnodes)
-        ispl = jnp.minimum(jnp.arange(size_super+1) * nsuper_nodes, ninteractions)
+        ispl = jnp.minimum(jnp.arange(size_super+1) * nsuper_nodes, nint)
     else:
         node_range = jnp.asarray(node_range)
         super_range = node_range // ngroup
@@ -575,18 +582,20 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
         valid = (spl_super[:-1] >= node_range[0]) & (spl_super[1:] <= node_range[1])
         valid = valid & (spl_super[1:] > spl_super[:-1]) # may have some 0 nodes due to way we inserted
         ispl = cumsum_starting_with_zero(jnp.where(valid, nsuper_nodes, 0))
-        ninteractions = ispl[-1]
+        nint = ispl[-1]
 
-    nsuper_nodes = nsuper_nodes + raise_if(ninteractions > size_ilist,
+    nsuper_nodes = nsuper_nodes + raise_if(nint > size_ilist,
         "Cannot fit {n} interactions into interaction list with size {size}\n"
         "Hint: Increase alloc_fac_ilist",
-        n=ninteractions, size=size_ilist
+        n=nint, size=size_ilist
     )
     
     idx = jnp.arange(size_ilist)
-    ilist = jnp.where(idx < ninteractions, idx % nsuper_nodes, 0)
+    ilist = jnp.where(idx < nint, idx % nsuper_nodes, 0)
 
     ilist = verify_ilist(InteractionList(ispl=ispl, iother=ilist))
+
+    stats_callback("allocation", AllocStats.record_filled_interactions, nint, size_ilist)
 
     return spl_super, ilist, nsuper_nodes
 grouped_dense_interaction_list.jit = jax.jit(
