@@ -43,7 +43,7 @@ class FofCatalogueConfig():
 
 @dataclass(frozen=True)
 class FofConfig:
-    alloc_fac_ilist: float = 64.
+    alloc_fac_ilist: float = 32.
 
     tree: TreeConfig = TreeConfig(
         max_leaf_size = 48,

@@ -133,6 +133,7 @@ def detect_leaf_boundaries(
         "Hint: Increase alloc_fac_nodes or max_leaf_size",
         filled=nfilled, size=alloc_size, max_trace_depth=5
     )
+    stats_callback("allocation", AllocStats.record_filled_nodes, nfilled, alloc_size)
     
     splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
 
@@ -401,6 +402,8 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
         "Hint: Increase alloc_fac_nodes, max_leaf_size or coarse_fac",
         filled=level_spl[-1], size=alloc_size
     )
+
+    stats_callback("allocation", AllocStats.record_filled_nodes, level_spl[-1], alloc_size)
 
     # correct offsets to exclude the element at hand and invalidate inactive elements:
     offsets = jnp.where(active_on_level, offsets - active_on_level, alloc_size)

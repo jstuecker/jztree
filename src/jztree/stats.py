@@ -9,15 +9,19 @@ import jax.numpy as jnp
 from jax.experimental.multihost_utils import process_allgather
 
 from dataclasses import dataclass, replace, field
+from .config import FofConfig
 
 def max_allow_None(a, b):
-    return b if a is None else max(a,b)
+    if a is None: return b
+    if b is None: return a
+    return max(a,b)
 
 @jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class AllocStats:
     max_part_frac_sort: float | None = None
     max_part_frac_domain: float | None = None
+    max_node_frac: float | None = None
     max_ilist_frac_fof: float | None = None
 
     def record_filled_sort(self, npart, size):
@@ -25,9 +29,27 @@ class AllocStats:
 
     def record_filled_domain(self, npart, size):
         self.max_part_frac_domain = max_allow_None(self.max_part_frac_domain, float(npart/size))
+    
+    def record_filled_nodes(self, npart, size):
+        self.max_node_frac = max_allow_None(self.max_node_frac, float(npart/size))
 
     def record_filled_interactions(self, nfilled, size):
         self.max_ilist_frac_fof = max_allow_None(self.max_ilist_frac_fof, float(nfilled/size))
+
+    def suggestions(self, cfg: FofConfig):
+        print("--- Allocation Info ---")
+        fill_frac = max_allow_None(self.max_part_frac_sort, self.max_part_frac_domain)
+        if fill_frac is not None:
+            print(f"Filled at most {fill_frac:.1%} of particles. (Affected by padding.)")
+        if self.max_node_frac is not None:
+            print(f"Filled at most {self.max_node_frac:.1%} of nodes. Could decrease alloc_fac_nodes "
+                  f"at most from {cfg.tree.alloc_fac_nodes} "
+                  f"to {cfg.tree.alloc_fac_nodes * self.max_node_frac:.2f}")
+        if self.max_ilist_frac_fof is not None:
+            print(f"At most filled {self.max_ilist_frac_fof:.1%} of interaction list. Could decrease "
+                  f"alloc_fac_ilist at most from {cfg.alloc_fac_ilist} to "
+                  f"{cfg.alloc_fac_ilist * self.max_ilist_frac_fof:.2f}")
+        print("-------")
 
 @jax.tree_util.register_dataclass
 @dataclass(slots=True)
@@ -46,6 +68,9 @@ class Statistics:
     _lock: threading.Lock = field(
         default_factory=threading.Lock, repr=False, metadata=dict(static=True)
     )
+
+    def print_suggestions(self, cfg):
+        self.allocation.suggestions(cfg)
 
 # ContextVar doesn't work well with callbacks and shardmap...
 # That's why we simply set a single global variable
