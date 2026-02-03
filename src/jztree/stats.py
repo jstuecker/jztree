@@ -23,6 +23,7 @@ class AllocStats:
     max_part_frac_domain: float | None = None
     max_node_frac: float | None = None
     max_ilist_frac_fof: float | None = None
+    max_links_frac: float | None = None
 
     def record_filled_sort(self, npart, size):
         self.max_part_frac_sort = max_allow_None(self.max_part_frac_sort, float(npart/size))
@@ -35,6 +36,9 @@ class AllocStats:
 
     def record_filled_interactions(self, nfilled, size):
         self.max_ilist_frac_fof = max_allow_None(self.max_ilist_frac_fof, float(nfilled/size))
+    
+    def record_filled_links(self, nfilled, size):
+        self.max_links_frac = max_allow_None(self.max_links_frac, float(nfilled/size))
 
     def suggestions(self, cfg: FofConfig):
         print("--- Allocation Info ---")
@@ -49,6 +53,8 @@ class AllocStats:
             print(f"At most filled {self.max_ilist_frac_fof:.1%} of interaction list. Could decrease "
                   f"alloc_fac_ilist at most from {cfg.alloc_fac_ilist} to "
                   f"{cfg.alloc_fac_ilist * self.max_ilist_frac_fof:.2f}")
+        if self.max_links_frac is not None:
+            print(f"Filled at most {self.max_links_frac:.1e} of link data")
         print("-------")
 
 @jax.tree_util.register_dataclass

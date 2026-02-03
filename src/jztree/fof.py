@@ -508,6 +508,9 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     # insert new links
     links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, pids, dev_spl)
     link_data = link_data.append(links.stacked(axis=-1), num_links)
+
+    stats_callback("allocation", AllocStats.record_filled_links, link_data.nfilled(), link_data.size())
+
     links = Link.from_stacked(link_data.data)
 
     # Infer global labels
