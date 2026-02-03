@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.comm import all_to_all_with_irank, all_to_all_with_permute, arange_for_comm
+from jztree.comm import all_to_all_with_splits
+from functools import partial
 
 from fmdj_utils.ics import gaussian_blob
 
@@ -119,3 +121,38 @@ def bench_meta_comm(jax_bench, ndev):
         out = jax.lax.ragged_all_to_all(val, val, devices, ones, devices, ones, axis_name=axis_name)
         return out
     jb.measure(fn_jit=smap_jit(ragged, ndev), x=0., tag="ragged")
+
+@pytest.mark.shrink_in_quick(keep_index=2)
+@pytest.mark.parametrize("MB", (1,32,128,512,2048))
+@pytest.mark.skipif(jax.device_count() < 4, reason="Requires >= 4 devices")
+def bench_two_axes(jax_bench, MB):
+    jb = jax_bench(jit_rounds=20, jit_warmup=2)
+
+    for ndev in NDEVS[:-2]:
+        mesh = jax.make_mesh((ndev//4,4), ("nodes", "gpus"), axis_types=(jax.sharding.AxisType.Explicit,)*2)
+        
+        @partial(jax.jit, static_argnums=(0,1))
+        @jax.shard_map(in_specs=(None,None), out_specs=P(("nodes", "gpus")), mesh=mesh)
+        def two_ax_comm(MB: int, direct: bool = False):
+            rank = jax.lax.axis_index(("nodes", "gpus"))
+            N = int(1024**2 * MB / 4)
+            data = jax.random.randint(jax.random.key(rank), int(N*1.1), 0, 100, dtype=jnp.int32)
+
+            def splits(ndev):
+                dev_spl = jnp.arange(ndev+1)*(N//ndev) 
+                return dev_spl
+
+            if direct:
+                res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size(("gpus", "nodes"))), axis_name=("gpus", "nodes"), copy_self=True)
+            else:
+                res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size("gpus")), axis_name="gpus", copy_self=True)
+                res, dev_spl = all_to_all_with_splits(res, splits(jax.lax.axis_size("nodes")), axis_name="nodes", copy_self=True)
+            
+            return jnp.mean(res[:N]).reshape(1)
+        
+        if ndev == NDEVS[0]:
+            # Very first compilation seems to take longer... do a proxy
+            two_ax_comm(1, True)
+    
+        jb.measure(None, two_ax_comm, MB, False, tag=f"indirect_N{ndev}")
+        jb.measure(None, two_ax_comm, MB, True, tag=f"direct_N{ndev}")

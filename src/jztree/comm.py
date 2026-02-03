@@ -258,7 +258,7 @@ def ragged_all_to_all_through_buf(operand, output, input_offsets, send_sizes, ou
 
         return output
     
-    max_size = jax.lax.pmax(jnp.max(send_sizes), "gpus")
+    max_size = jax.lax.pmax(jnp.max(send_sizes), axis_name)
     ncomm = (max_size + buf_size - 1) // buf_size
     
     op, ospec = _pack_pytree(output, pytree_len(output))
@@ -303,7 +303,7 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
 
     if copy_self:
         # avoid communication for self i/o
-        rank = jax.lax.axis_index("gpus")
+        rank = jax.lax.axis_index(axis_name)
         iout = jnp.arange(out_size) #+ output_offsets[rank]
         iin = jnp.arange(out_size) + input_offsets[rank] - output_offsets[rank]
         mask = (iout >= output_offsets[rank]) & (iout < output_offsets[rank] + send_sizes[rank])
