@@ -1,3 +1,6 @@
+import time
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"  # hide INFO(0) + WARNING(1), keep ERROR/FATAL
 import jax
 import jax.numpy as jnp
 import importlib
@@ -40,14 +43,25 @@ def sim_and_fof(cfg: jz.config.FofConfig):
     return distr_fof(part)
 sim_and_fof = jax.jit(sim_and_fof, static_argnums=0)
 
+
+def myprint(*args, on_all = False, **kwargs):
+    if jax.process_index() == 0 or on_all:
+        print(*args, **kwargs)
+
 def main():
     with jz.stats.statistics() as stats:
         cfg = jz.config.FofConfig()
         cfg.tree.alloc_fac_nodes = 1.25
 
+        t0 = time.time()
+        myprint("Compiling...")
+        sim_and_fof.lower(cfg).compile()
+        t1 = time.time()
+        myprint(f"Done compiling ({t1-t0:.1f}s).\nRunning...")
         jax.block_until_ready(sim_and_fof(cfg))
+        myprint(f"Done running ({time.time()-t1:.1f}s).")
         if jax.process_index() == 0:
-            print("R",jz.stats.reduce_stats_multihost(stats))
+            # print("stats:", jz.stats.reduce_stats_multihost(stats))
             stats.print_suggestions(cfg)    
 
     sync_global_devices("pre-shutdown")

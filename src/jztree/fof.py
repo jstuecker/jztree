@@ -511,6 +511,11 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, pids, dev_spl)
     link_data = link_data.append(links.stacked(axis=-1), num_links)
 
+    link_data.ispl = link_data.ispl + raise_if(link_data.nfilled() > link_data.size(),
+        "The link allocation is too small. (need: {n1} have: {n2})\n"
+        "Hint: Increase alloc_fac_distr_links at least by a factor of {ratio:.1f}",
+        n1=link_data.nfilled(), n2=link_data.size(), ratio=link_data.size()/link_data.size()
+    )
     stats_callback("allocation", AllocStats.record_filled_links, link_data.nfilled(), link_data.size())
 
     links = Link.from_stacked(link_data.data)

@@ -59,7 +59,7 @@ def multi_gpu_dj_sim(boxsize = 1000., num_per_device=512**3) -> ParticleData:
 
     nres = np.int64(((np.cbrt(num_per_device * ndev))//ndev)*ndev)
 
-    print(f"total grid dim {nres}, particles per GPU {np.cbrt(nres**3/ndev):.2f}**3")
+    # print(f"total grid dim {nres}, particles per GPU {np.cbrt(nres**3/ndev):.2f}**3")
     
     scat = ScatterGatherProperties(
         res=nres,
