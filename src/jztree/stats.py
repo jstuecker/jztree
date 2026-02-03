@@ -54,7 +54,9 @@ class AllocStats:
                   f"alloc_fac_ilist at most from {cfg.alloc_fac_ilist} to "
                   f"{cfg.alloc_fac_ilist * self.max_ilist_frac_fof:.2f}")
         if self.max_links_frac is not None:
-            print(f"Filled at most {self.max_links_frac:.1e} of link data")
+            print(f"Filled at most {self.max_links_frac*100.:.2g}% of cross-task link data. Could "
+                  f"decrease alloc_fac_distr_links at most from {cfg.alloc_fac_distr_links} to"
+                  f"{cfg.alloc_fac_distr_links*self.max_links_frac:.2g}")
         print("-------")
 
 @jax.tree_util.register_dataclass

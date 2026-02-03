@@ -246,6 +246,8 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
         send_rank, links, num=nlinks, axis_name=axis_name, copy_self=False,
         pack_pytree=True
     )
+
+    stats_callback("allocation", AllocStats.record_filled_links, dev_spl[-1], links.a.igroup.size)
     
     valid = jnp.arange(pytree_len(links), dtype=jnp.int32) < dev_spl[-1]
 
@@ -790,7 +792,8 @@ def distr_fof_z_with_tree(
     rank, ndev, axis_name = get_rank_info()
 
     node_data, ilist, link_data = distr_node_node_fof(
-        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist, size_links=len(posz)
+        th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist,
+        size_links=int(cfg.alloc_fac_distr_links * len(posz))
     )
 
     labels = distr_particle_particle_fof(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
