@@ -8,11 +8,14 @@ from jax.experimental.multihost_utils import sync_global_devices
 import jztree as jz
 from jztree_utils import ics, io
 
+if jz.comm.should_init_jax_distributed():
+    jax.distributed.initialize()
+
+mesh = jax.make_mesh((jax.device_count(),), ("gpus",), axis_types=jax.sharding.AxisType.Explicit)
+
 has_discodj = importlib.util.find_spec("discodj") is not None
 if not has_discodj:
     raise ImportError("This example requires DISCO-DJ with multi-GPU support installed!")
-
-mesh = jax.make_mesh((jax.device_count(),), ("gpus",), axis_types=jax.sharding.AxisType.Explicit)
 
 def sim_and_fof(cfg: jz.config.FofConfig):
     ndev = jax.device_count()
@@ -38,9 +41,6 @@ def sim_and_fof(cfg: jz.config.FofConfig):
 sim_and_fof = jax.jit(sim_and_fof, static_argnums=0)
 
 def main():
-    if jz.comm.should_init_jax_distributed():
-        jax.distributed.initialize()
-
     with jz.stats.statistics() as stats:
         cfg = jz.config.FofConfig()
         cfg.tree.alloc_fac_nodes = 1.25
