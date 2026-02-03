@@ -48,8 +48,8 @@ class FofConfig:
 
     tree: TreeConfig = TreeConfig(
         max_leaf_size = 48,
-        coarse_fac = 8.,       
-        alloc_fac_nodes = 1.,
+        coarse_fac = 8.,
+        alloc_fac_nodes = 1.1,
         stop_coarsen = 2048,
         mass_centered = False
     )
@@ -61,7 +61,7 @@ class KNNConfig:
 
     tree: TreeConfig = TreeConfig(
         max_leaf_size = 48,
-        coarse_fac = 8.,       
+        coarse_fac = 8.,
         alloc_fac_nodes = 1.,
         stop_coarsen = 2048,
         mass_centered = False
