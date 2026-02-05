@@ -18,15 +18,16 @@ jax.ffi.register_ffi_target("RearangeSegments", ffi_tools.RearangeSegments(), pl
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
+def size_bytes(x: jax.Array):
+    return np.int64(jnp.size(x)) * np.int64(jnp.dtype(x).itemsize)
+
 def rearange_segments(data, seg_spl_out, seg_offset_in, block_size=64):
     data_out = jax.ShapeDtypeStruct(data.shape, data.dtype)
-
-    print("dtsize",np.int64(data[0].on_device_size_in_bytes()))
 
     with jax.enable_x64():
         return jax.ffi.ffi_call("RearangeSegments", (data_out,))(
             data, jnp.astype(seg_spl_out, jnp.int64), jnp.astype(seg_offset_in, jnp.int64),
-            size=np.int64(len(data)), dtype_bytes=np.int64(data[0].on_device_size_in_bytes()),
+            size=np.int64(len(data)), dtype_bytes=size_bytes(data[0]),
             grid_size=np.uint64(div_ceil(len(data), block_size)), block_size=np.uint64(block_size)
         )[0]
 
@@ -207,18 +208,21 @@ def ragged_transpose(data: jax.Array, n: jax.Array, axes: Tuple[int]):
 
     # determine segment offsets
     n_T = jnp.transpose(n, axes)
-    seg_off_out = jnp.cumsum(n_T.flatten())-n_T.flatten()
-    seg_off_in = jnp.cumsum(n.flatten()) - n.flatten()
+    seg_spl_out = jnp.pad(jnp.cumsum(n_T.flatten()), (1,0), constant_values=0)
+    seg_off_in = (jnp.cumsum(n.flatten()) - n.flatten())[iseg_from]
     
     # find which particle belongs to which segment in the output and its internal offset
-    idx_seg = jnp.cumsum(jnp.zeros(pytree_len(data), dtype=jnp.int32).at[seg_off_out+n_T.flatten()].add(1))
-    idx = jnp.arange(len(data))
-    idx_delta = idx - seg_off_out[idx_seg]
+    # idx_seg = jnp.cumsum(jnp.zeros(pytree_len(data), dtype=jnp.int32).at[seg_off_out+n_T.flatten()].add(1))
+    # idx = jnp.arange(len(data))
+    # idx_delta = idx - seg_off_out[idx_seg]
 
     # do the transpose through a gather
-    idx_from = seg_off_in[iseg_from[idx_seg]] + idx_delta
+    # idx_from = seg_off_in[iseg_from[idx_seg]] + idx_delta
+
+    def rearrange(x):
+        return rearange_segments(x, seg_spl_out, seg_off_in)
     
-    return tree_map_by_len(lambda x: x[idx_from], data, pytree_len(data)), n_T
+    return tree_map_by_len(rearrange, data, pytree_len(data)), n_T
 
 # ------------------------------------------------------------------------------------------------ #
 #                                    Some useful jax constructs                                    #

@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.comm import all_to_all_with_irank, all_to_all_with_permute, arange_for_comm
-from jztree.comm import all_to_all_with_splits
+from jztree.comm import all_to_all_with_splits, nested_all_to_all_with_splits
 from functools import partial
 
 from fmdj_utils.ics import gaussian_blob
@@ -145,8 +145,9 @@ def bench_two_axes(jax_bench, MB):
             if direct:
                 res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size(("gpus", "nodes"))), axis_name=("gpus", "nodes"), copy_self=True)
             else:
-                res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size("gpus")), axis_name="gpus", copy_self=True)
-                res, dev_spl = all_to_all_with_splits(res, splits(jax.lax.axis_size("nodes")), axis_name="nodes", copy_self=True)
+                # res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size("gpus")), axis_name="gpus", copy_self=True)
+                # res, dev_spl = all_to_all_with_splits(res, splits(jax.lax.axis_size("nodes")), axis_name="nodes", copy_self=True)
+                res, dev_spl = nested_all_to_all_with_splits(data, splits(jax.lax.axis_size(("gpus", "nodes"))), copy_self=True)
             
             return jnp.mean(res[:N]).reshape(1)
         

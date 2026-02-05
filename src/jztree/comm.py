@@ -347,6 +347,9 @@ def all_to_all_along_axis(data, nij, axis=1, err_hint="", copy_self=True, pack_p
     shape = jax.sharding.get_abstract_mesh().axis_sizes
     ndim = len(shape)
 
+    if shape[axis] == 1:
+        return data, nij
+
     assert nij.ndim == ndim
 
     axis_name = axis_names[axis]
