@@ -358,7 +358,6 @@ def all_to_all_along_axis(data, nij, axis=1, err_hint="", copy_self=True, pack_p
     transpose = (axis,) + tuple(i for i in range(ndim) if i !=axis)
     # transposition that moves it back to where it came from:
     inv_transpose = tuple((i+(i<axis) if i != axis else 0) for i in range(ndim))
-    print("transpose", transpose, inv_transpose)
     
     def get_splits(n):
         ninner = jnp.sum(n, axis=range(1,ndim))

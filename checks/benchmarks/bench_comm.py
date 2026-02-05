@@ -5,6 +5,7 @@ import pytest
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.comm import all_to_all_with_irank, all_to_all_with_permute, arange_for_comm
 from jztree.comm import all_to_all_with_splits, nested_all_to_all_with_splits
+from jztree.jax_ext import shard_map_constructor
 from functools import partial
 
 from fmdj_utils.ics import gaussian_blob
@@ -122,38 +123,68 @@ def bench_meta_comm(jax_bench, ndev):
         return out
     jb.measure(fn_jit=smap_jit(ragged, ndev), x=0., tag="ragged")
 
+def n_ax_comm(MB: int, direct: bool = False):
+    axes = jax.sharding.get_abstract_mesh().axis_names
+    rank = jax.lax.axis_index(axes)
+    N = int(1024**2 * MB / 4)
+    data = jax.random.randint(jax.random.key(rank), int(N*1.1), 0, 100, dtype=jnp.int32)
+
+    def splits(ndev):
+        dev_spl = jnp.arange(ndev+1)*(N//ndev) 
+        return dev_spl
+
+    if direct:
+        res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size(axes)), axis_name=axes, copy_self=True)
+    else:
+        res, dev_spl = nested_all_to_all_with_splits(data, splits(jax.lax.axis_size(axes)), copy_self=True)
+    
+    return jnp.mean(res[:N]**2)
+n_ax_comm.smap = shard_map_constructor(n_ax_comm, in_specs=(None, None), static_argnums=(0,1))
+
 @pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("MB", (1,32,128,512,2048))
 @pytest.mark.skipif(jax.device_count() < 4, reason="Requires >= 4 devices")
 def bench_two_axes(jax_bench, MB):
-    jb = jax_bench(jit_rounds=20, jit_warmup=2)
+    jb = jax_bench(jit_rounds=5, jit_loops=4, jit_warmup=2)
 
     for ndev in NDEVS[:-2]:
         mesh = jax.make_mesh((ndev//4,4), ("nodes", "gpus"), axis_types=(jax.sharding.AxisType.Explicit,)*2)
         
-        @partial(jax.jit, static_argnums=(0,1))
-        @jax.shard_map(in_specs=(None,None), out_specs=P(("nodes", "gpus")), mesh=mesh)
-        def two_ax_comm(MB: int, direct: bool = False):
-            rank = jax.lax.axis_index(("nodes", "gpus"))
-            N = int(1024**2 * MB / 4)
-            data = jax.random.randint(jax.random.key(rank), int(N*1.1), 0, 100, dtype=jnp.int32)
-
-            def splits(ndev):
-                dev_spl = jnp.arange(ndev+1)*(N//ndev) 
-                return dev_spl
-
-            if direct:
-                res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size(("gpus", "nodes"))), axis_name=("gpus", "nodes"), copy_self=True)
-            else:
-                # res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size("gpus")), axis_name="gpus", copy_self=True)
-                # res, dev_spl = all_to_all_with_splits(res, splits(jax.lax.axis_size("nodes")), axis_name="nodes", copy_self=True)
-                res, dev_spl = nested_all_to_all_with_splits(data, splits(jax.lax.axis_size(("gpus", "nodes"))), copy_self=True)
-            
-            return jnp.mean(res[:N]).reshape(1)
-        
-        if ndev == NDEVS[0]:
-            # Very first compilation seems to take longer... do a proxy
-            two_ax_comm(1, True)
+        # In parallel setups very first compilation seems to take longer... do it once
+        # to get reliable timing
+        n_ax_comm.smap(mesh, jit=True)(1, True)
     
-        jb.measure(None, two_ax_comm, MB, False, tag=f"indirect_N{ndev}")
-        jb.measure(None, two_ax_comm, MB, True, tag=f"direct_N{ndev}")
+        res1 = jb.measure(None, n_ax_comm.smap(mesh, jit=True), MB, True, tag=f"direct_N{ndev}")[1]
+        res2 = jb.measure(None, n_ax_comm.smap(mesh, jit=True), MB, False, tag=f"indirect_N{ndev}")[1]
+
+        assert res1 == pytest.approx(res2, rel=1e-4)
+
+@pytest.mark.shrink_in_quick(keep_index=2)
+@pytest.mark.parametrize("MB", (1,32,128,512,2048))
+@pytest.mark.skipif(jax.device_count() < 64, reason="Requires 64 devices")
+def bench_indirect_mesh(jax_bench, MB):
+    jb = jax_bench(jit_rounds=20, jit_loops=1, jit_warmup=2)
+
+    expl = jax.sharding.AxisType.Explicit
+
+    mesh1 = jax.make_mesh((64,), ("gpus"), axis_types=(expl,))
+    mesh2 = jax.make_mesh((16,4), ("nodes", "gpus"), axis_types=(expl,)*2)
+    mesh3 = jax.make_mesh((4,4,4), ("snodes", "nodes", "gpus"), axis_types=(expl,)*3)
+    mesh4 = jax.make_mesh((2,2,2,2,4), ("i", "j", "k", "l", "gpus"), axis_types=(expl,)*5)
+    
+    f1 = n_ax_comm.smap(mesh1, jit=True)
+    f2 = n_ax_comm.smap(mesh2, jit=True)
+    f3 = n_ax_comm.smap(mesh3, jit=True)
+    f4 = n_ax_comm.smap(mesh4, jit=True)
+
+    r1 = jb.measure(None, f1, MB, False, tag=f"mesh_64")[1]
+    r2 = jb.measure(None, f2, MB, False, tag=f"mesh_16x4")[1]
+    r3 = jb.measure(None, f3, MB, False, tag=f"mesh_4x4x4")[1]
+    r4 = jb.measure(None, f3, MB, False, tag=f"mesh_2x2x2x2x4")[1]
+
+    def p0(x):
+        return jax.device_put(x, jax.sharding.NamedSharding(mesh1, P()))
+
+    assert p0(r2) == pytest.approx(p0(r1), rel=1e-4)
+    assert p0(r3) == pytest.approx(p0(r1), rel=1e-4)
+    assert p0(r4) == pytest.approx(p0(r1), rel=1e-4)
