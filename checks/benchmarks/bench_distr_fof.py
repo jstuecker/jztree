@@ -30,12 +30,13 @@ run_fof.smap = shard_map_constructor(run_fof, in_specs=(None, None), static_argn
 @pytest.mark.shrink_in_quick(keep_index=1)
 @pytest.mark.parametrize("N", [int(1e6), int(1e7), int(3e7), int(1e8), int(3e8)])
 def bench_fof(jax_bench, pos, N):
+    ndev = jax.device_count()
 
     jb = jax_bench(jit_rounds=4, jit_warmup=1)
 
     rlink = 0.5*np.cbrt(1./ (N*jax.device_count()))
 
-    jb.measure(fn_jit=run_fof.smap(mesh, jit=True), N=N, rlink=rlink, tag="fof")
+    jb.measure(fn_jit=run_fof.smap(mesh, jit=True), N=N, rlink=rlink, tag=f"fof_{ndev}")
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.shrink_in_quick(keep_index=1)

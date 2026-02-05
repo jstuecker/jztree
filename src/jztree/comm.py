@@ -379,7 +379,6 @@ def all_to_all_along_axis(data, nij, axis=1, err_hint="", copy_self=True, pack_p
     return data_ij, nij
 
 def nested_all_to_all_with_splits(data, ispl, **kwargs):
-    axis_names = jax.sharding.get_abstract_mesh().axis_names
     shape = jax.sharding.get_abstract_mesh().axis_sizes
     ndim = len(shape)
 

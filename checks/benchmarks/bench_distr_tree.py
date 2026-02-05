@@ -34,12 +34,16 @@ def mk_pos(Ntot, alloc_fac=1.2, ndev=4):
     return f
 
 def get_mesh(ndev=-1):
-    return jax.sharding.Mesh(jax.devices()[:ndev], ('gpus',), axis_types=(AxisType.Auto))
+    if ndev <= 4:
+        return jax.make_mesh((ndev,), ('gpus',), axis_types=(AxisType.Auto))
+    else:
+        return jax.make_mesh((ndev//4, 4), ('nodes', 'gpus'), axis_types=(AxisType.Auto,AxisType.Auto))
 
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_multi_zsort(jax_bench, ndev):
-    part = ics.gaussian_particles.smap(get_mesh(ndev), jit=True)(256**3, npad=int(256**3*0.2))
+    part = ics.gaussian_particles.smap(get_mesh(ndev), jit=True)(512**3, npad=int(512**3*0.2))
 
     fzs = distr_zsort.smap(get_mesh(ndev), jit=True)
 
@@ -47,13 +51,13 @@ def bench_multi_zsort(jax_bench, ndev):
 
     partz = jb.measure(fn_jit=fzs, part=part, tag="random")[1]
     jb.measure(fn_jit=fzs, part=partz, tag="sorted")
-    partz.pos = partz.pos + 1e-2 * jax.random.uniform(jax.random.key(0), partz.pos.shape)
+    partz.pos = partz.pos + 1e-2 * part.pos
     jb.measure(fn_jit=fzs, part=partz, tag="displaced")
 
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_multi_tree(jax_bench, ndev):
-    part = ics.gaussian_particles.smap(get_mesh(ndev), jit=True)(256**3, npad=int(256**3*0.2))
+    part = ics.gaussian_particles.smap(get_mesh(ndev), jit=True)(512**3, npad=int(512**3*0.2))
 
     jb = jax_bench(jit_rounds=5, jit_warmup=1)
 
