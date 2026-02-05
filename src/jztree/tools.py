@@ -1,9 +1,11 @@
 import inspect
 import os
+import numpy as np
 import jax
 from jax.experimental import io_callback
 import jax.numpy as jnp
-from typing import TypeAlias, Any
+from typing import TypeAlias, Any, Tuple
+from .jax_ext import tree_map_by_len
 
 from .config import LoggingConfig
 
@@ -150,6 +152,50 @@ def set_range(arr : jax.Array, values, start, end):
         cond = (idx >= start) & (idx < end)
         cond = cond.reshape((-1,) + (1,) * (values.ndim - 1))
         return jnp.where(cond, values[idx - start], arr)
+
+# ------------------------------------------------------------------------------------------------ #
+#                                       Ragged Array Helpers                                       #
+# ------------------------------------------------------------------------------------------------ #
+
+def leading_len(x):
+    if jnp.size(x) == 1:
+        return 1
+    else:
+        return len(x)
+
+def pytree_len(x):
+    """Returns the size of the largest first axis of any leaf of a pytree"""
+    leaves = jax.tree_util.tree_leaves(x)
+
+    return max(leading_len(x) for x in leaves)
+
+def ragged_transpose(data: jax.Array, n: jax.Array, axes: Tuple[int]):
+    """Transposes a matrix of segments in a (ragged) flat array
+    Segments are defined in the flat array as follows:
+    segment[i,j,...] = data[offsets[i,j,...]:offsets[i,j,...]+n[i,j,...]]
+    where offsets are determined by the cumulative sum over flattened "n"
+    if d is a pytree, we apply over all leaves that have the maximum length
+    """
+    assert n.ndim == len(axes)
+    assert pytree_len(data) < 2**31, "Int32 overflow likely..."
+
+    # Define transposition on segment indices
+    iseg = jnp.arange(n.size).reshape(n.shape)
+    iseg_from = jnp.transpose(iseg, axes).flatten()
+
+    # determine segment offsets
+    nflat = n.flatten()
+    seg_offsets = jnp.cumsum(nflat)-nflat
+    
+    # find which particle belongs to which segment and its internal offset
+    idx_seg = jnp.cumsum(jnp.zeros(pytree_len(data), dtype=jnp.int32).at[seg_offsets+nflat].add(1))
+    idx = jnp.arange(len(data))
+    idx_delta = idx - seg_offsets[idx_seg]
+
+    # do the transpose through a gather
+    idx_from = seg_offsets[iseg_from[idx_seg]] + idx_delta
+    
+    return tree_map_by_len(lambda x: x[idx_from], data, pytree_len(data))
 
 # ------------------------------------------------------------------------------------------------ #
 #                                    Some useful jax constructs                                    #
