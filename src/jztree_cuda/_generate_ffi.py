@@ -123,3 +123,21 @@ gen.generate_ffi_module_file(
     functions = functions, 
     includes = default_includes + ["../tree.cuh"]
 )
+
+# ------------------------------------------------------------------------------------------------ #
+#                                             tools.cuh                                            #
+# ------------------------------------------------------------------------------------------------ #
+
+functions = parse.get_functions_from_file(
+    str(HERE / "tools.cuh"),
+    names=["RearangeSegments"],
+    only_kernels=False
+)
+
+functions["RearangeSegments"].par["size_seg"].expression = "seg_spl_out.element_count()-1"
+
+gen.generate_ffi_module_file(
+    output_file = str(HERE / "generated/ffi_tools.cu"), 
+    functions = functions, 
+    includes = default_includes + ["../tools.cuh"]
+)

@@ -11,6 +11,25 @@ from .config import LoggingConfig
 
 Pytree: TypeAlias = Any
 
+from jztree_cuda import ffi_tools
+jax.ffi.register_ffi_target("RearangeSegments", ffi_tools.RearangeSegments(), platform="CUDA")
+
+# ------------------------------------------------------------------------------------------------ #
+#                                             FFI Calls                                            #
+# ------------------------------------------------------------------------------------------------ #
+
+def rearange_segments(data, seg_spl_out, seg_offset_in, block_size=64):
+    data_out = jax.ShapeDtypeStruct(data.shape, data.dtype)
+
+    print("dtsize",np.int64(data[0].on_device_size_in_bytes()))
+
+    with jax.enable_x64():
+        return jax.ffi.ffi_call("RearangeSegments", (data_out,))(
+            data, jnp.astype(seg_spl_out, jnp.int64), jnp.astype(seg_offset_in, jnp.int64),
+            size=np.int64(len(data)), dtype_bytes=np.int64(data[0].on_device_size_in_bytes()),
+            grid_size=np.uint64(div_ceil(len(data), block_size)), block_size=np.uint64(block_size)
+        )[0]
+
 # ------------------------------------------------------------------------------------------------ #
 #                                          Errors and Logs                                         #
 # ------------------------------------------------------------------------------------------------ #
