@@ -179,23 +179,27 @@ def ragged_transpose(data: jax.Array, n: jax.Array, axes: Tuple[int]):
     assert n.ndim == len(axes)
     assert pytree_len(data) < 2**31, "Int32 overflow likely..."
 
+    if axes == tuple(range(n.ndim)): # already have this order... nothing to do!
+        return data, n
+
     # Define transposition on segment indices
     iseg = jnp.arange(n.size).reshape(n.shape)
     iseg_from = jnp.transpose(iseg, axes).flatten()
 
     # determine segment offsets
-    nflat = n.flatten()
-    seg_offsets = jnp.cumsum(nflat)-nflat
+    n_T = jnp.transpose(n, axes)
+    seg_off_out = jnp.cumsum(n_T.flatten())-n_T.flatten()
+    seg_off_in = jnp.cumsum(n.flatten()) - n.flatten()
     
-    # find which particle belongs to which segment and its internal offset
-    idx_seg = jnp.cumsum(jnp.zeros(pytree_len(data), dtype=jnp.int32).at[seg_offsets+nflat].add(1))
+    # find which particle belongs to which segment in the output and its internal offset
+    idx_seg = jnp.cumsum(jnp.zeros(pytree_len(data), dtype=jnp.int32).at[seg_off_out+n_T.flatten()].add(1))
     idx = jnp.arange(len(data))
-    idx_delta = idx - seg_offsets[idx_seg]
+    idx_delta = idx - seg_off_out[idx_seg]
 
     # do the transpose through a gather
-    idx_from = seg_offsets[iseg_from[idx_seg]] + idx_delta
+    idx_from = seg_off_in[iseg_from[idx_seg]] + idx_delta
     
-    return tree_map_by_len(lambda x: x[idx_from], data, pytree_len(data))
+    return tree_map_by_len(lambda x: x[idx_from], data, pytree_len(data)), n_T
 
 # ------------------------------------------------------------------------------------------------ #
 #                                    Some useful jax constructs                                    #

@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from typing import Tuple, Any, TypeAlias
 
 from .jax_ext import get_rank_info, tree_map_by_len, raise_if
-from .tools import cumsum_starting_with_zero, inverse_of_splits
+from .tools import cumsum_starting_with_zero, inverse_of_splits, ragged_transpose
 
 # Currently jax doesn't have a typehint for pytrees. We simply define one ourselves for clarity
 Pytree: TypeAlias = Any
@@ -341,6 +341,52 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
         return _unpack_pytree(op, ospec, x), dev_spl
     else:
         return jax.tree.map(comm, x, output), dev_spl
+
+def all_to_all_along_axis(data, nij, axis=1, err_hint="", copy_self=True, pack_pytree=False):
+    axis_names = jax.sharding.get_abstract_mesh().axis_names
+    shape = jax.sharding.get_abstract_mesh().axis_sizes
+    ndim = len(shape)
+
+    assert nij.ndim == ndim
+
+    axis_name = axis_names[axis]
+
+    # transposition that moves axis to the beginning
+    transpose = (axis,) + tuple(i for i in range(ndim) if i !=axis)
+    # transposition that moves it back to where it came from:
+    inv_transpose = tuple((i+(i<axis) if i != axis else 0) for i in range(ndim))
+    print("transpose", transpose, inv_transpose)
+    
+    def get_splits(n):
+        ninner = jnp.sum(n, axis=range(1,ndim))
+        return jnp.pad(jnp.cumsum(ninner), (1,0), constant_values=0)
+  
+    # transpose communication axis to beginning
+    data_ji, nji = ragged_transpose(data, nij, axes=transpose)
+    
+    # communicate
+    data_ji, dspl = all_to_all_with_splits(
+        data_ji, get_splits(nji), axis_name=axis_name, err_hint=err_hint, copy_self=copy_self, 
+        pack_pytree=pack_pytree
+    )
+    nji = jax.lax.all_to_all(nij, axis_name, axis, 0)
+
+    # transpose the axis back where it belongs
+    data_ij, nij = ragged_transpose(data_ji, nji, axes=inv_transpose)
+
+    return data_ij, nij
+
+def nested_all_to_all_with_splits(data, ispl, **kwargs):
+    axis_names = jax.sharding.get_abstract_mesh().axis_names
+    shape = jax.sharding.get_abstract_mesh().axis_sizes
+    ndim = len(shape)
+
+    nij = (ispl[1:] - ispl[:-1]).reshape(shape)
+    
+    for i in reversed(range(0, ndim)):
+        data, nij = all_to_all_along_axis(data, nij, axis=i, **kwargs)
+    
+    return data, jnp.pad(jnp.cumsum(nij.flatten()), (1,0), constant_values=0)
 
 def dynamic_all_gather(x, nsend, output=None, axis_name="gpus", verify=True):
     """An all-gather where each task may send different amounts.
