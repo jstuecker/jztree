@@ -84,6 +84,7 @@ def smap_jit(f, ndev):
     fsm = jax.shard_map(f, in_specs=P(), out_specs=P("gpus"), mesh=get_mesh(ndev))
     return jax.jit(lambda x: fsm(x)) # the lambda helps with passing x as keyword argument
 
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_meta_comm(jax_bench, ndev):
@@ -110,10 +111,23 @@ def bench_meta_comm(jax_bench, ndev):
         return jax.lax.all_gather(get_sum(x), axis_name).reshape(-1)
     jb.measure(fn_jit=smap_jit(allgather, ndev), x=0., tag="allgather")
 
+    def allgather_samp(x):
+        rank = jax.lax.axis_index("gpus")
+        data = jax.random.uniform(jax.random.key(rank), (1024,1024,16))**x + x
+        return jax.lax.all_gather(data, axis_name).reshape(-1)
+    jb.measure(fn_jit=smap_jit(allgather_samp, ndev), x=0., tag="allgather_samp")
+
     def all_to_all(x):
         val = get_sum(x) * jnp.arange(ndev)
         return jax.lax.all_to_all(val, axis_name, 0, 0, tiled=True).reshape(-1)
     jb.measure(fn_jit=smap_jit(all_to_all, ndev), x=0., tag="all_to_all")
+
+    def all_to_all_samp(x):
+        rank = jax.lax.axis_index("gpus")
+        ndev = jax.lax.axis_size("gpus")
+        data = jax.random.uniform(jax.random.key(rank), (ndev,1024,1024,256//ndev))**x + x
+        return jax.lax.all_to_all(data, axis_name, 0, 0, tiled=True).reshape(-1)
+    jb.measure(fn_jit=smap_jit(all_to_all_samp, ndev), x=0., tag="all_to_all_samp")
 
     def ragged(x):
         val = get_sum(x) * jnp.arange(ndev)
@@ -123,7 +137,7 @@ def bench_meta_comm(jax_bench, ndev):
         return out
     jb.measure(fn_jit=smap_jit(ragged, ndev), x=0., tag="ragged")
 
-def n_ax_comm(MB: int, direct: bool = False):
+def n_ax_comm(MB: int, direct: bool = False, normal_all2all=False):
     axes = jax.sharding.get_abstract_mesh().axis_names
     rank = jax.lax.axis_index(axes)
     N = int(1024**2 * MB / 4)
@@ -133,13 +147,15 @@ def n_ax_comm(MB: int, direct: bool = False):
         dev_spl = jnp.arange(ndev+1)*(N//ndev) 
         return dev_spl
 
-    if direct:
+    if normal_all2all:
+        res = jax.lax.all_to_all(data[0:N], axes, split_axis=0, concat_axis=0, tiled=True)
+    elif direct:
         res, dev_spl = all_to_all_with_splits(data, splits(jax.lax.axis_size(axes)), axis_name=axes, copy_self=True)
     else:
         res, dev_spl = nested_all_to_all_with_splits(data, splits(jax.lax.axis_size(axes)), copy_self=True)
     
     return jnp.mean(res[:N]**2)
-n_ax_comm.smap = shard_map_constructor(n_ax_comm, in_specs=(None, None), static_argnums=(0,1))
+n_ax_comm.smap = shard_map_constructor(n_ax_comm, in_specs=(None, None, None), static_argnums=(0,1,2))
 
 @pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("MB", (1,32,128,512,2048))
@@ -180,7 +196,9 @@ def bench_indirect_mesh(jax_bench, MB):
     r1 = jb.measure(None, f1, MB, False, tag=f"mesh_64")[1]
     r2 = jb.measure(None, f2, MB, False, tag=f"mesh_16x4")[1]
     r3 = jb.measure(None, f3, MB, False, tag=f"mesh_4x4x4")[1]
-    r4 = jb.measure(None, f3, MB, False, tag=f"mesh_2x2x2x2x4")[1]
+    r4 = jb.measure(None, f4, MB, False, tag=f"mesh_2x2x2x2x4")[1]
+    
+    jb.measure(None, f1, MB, False, True, tag=f"fixed_all2all")
 
     def p0(x):
         return jax.device_put(x, jax.sharding.NamedSharding(mesh1, P()))
@@ -188,3 +206,21 @@ def bench_indirect_mesh(jax_bench, MB):
     assert p0(r2) == pytest.approx(p0(r1), rel=1e-4)
     assert p0(r3) == pytest.approx(p0(r1), rel=1e-4)
     assert p0(r4) == pytest.approx(p0(r1), rel=1e-4)
+
+# @pytest.mark.shrink_in_quick(keep_index=0)
+@pytest.mark.parametrize("ndev", NDEVS)
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple")
+def bench_a2a_ndev(jax_bench, ndev):
+    jb = jax_bench(jit_rounds=20, jit_loops=1, jit_warmup=2)
+
+    expl = jax.sharding.AxisType.Explicit
+
+    mesh1 = jax.make_mesh((ndev,), ("gpus"), axis_types=(expl,))
+    
+    f1 = n_ax_comm.smap(mesh1, jit=True)
+
+    jb.measure(None, f1, 1, False, tag=f"ragged_all2all_1MB")[1]
+    jb.measure(None, f1, 1, False, True, tag=f"all2all_1MB")[1]
+
+    jb.measure(None, f1, 2048, False, tag=f"ragged_all2all_2GB")[1]
+    jb.measure(None, f1, 2048, False, True, tag=f"all2all_2GB")[1]

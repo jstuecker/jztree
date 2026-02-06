@@ -1,5 +1,6 @@
 notebooks
 checks/data
+checks/profiling/*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
