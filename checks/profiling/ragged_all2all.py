@@ -4,6 +4,10 @@ import numpy as np
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 import time
 import matplotlib.pyplot as plt
+import os
+
+save_reference = False
+load_reference = True
 
 def balanced_a2a(MB: int, ragged=True):
     axes = jax.sharding.get_abstract_mesh().axis_names
@@ -60,6 +64,11 @@ def main():
         plt.fill_between(mbs, means_rag-stds_rag, means_rag+stds_rag, alpha=0.3)
         plt.plot(mbs, means, marker="o", label="all2all", alpha=0.8)
         plt.fill_between(mbs, means-stds, means+stds, alpha=0.3)
+        if load_reference and os.path.exists("reference.npy"):
+            rmean, rstd, rmean_rag, rstd_rag = np.load("reference.npy")
+            plt.plot(mbs, rmean_rag, marker="o", label="ref_ragged", alpha=0.6, color="black")
+            plt.fill_between(mbs, rmean_rag-rstd_rag, rmean_rag+rstd_rag, alpha=0.3, color="black")
+        
         plt.legend()
         plt.title(f"Performance with {jax.device_count()} GPUs")
         plt.ylabel("Time (ms)")
@@ -67,6 +76,9 @@ def main():
         plt.yscale("log")
         plt.xscale("log")
         plt.savefig(f"ragged_performance_{jax.device_count()}.png", bbox_inches="tight")
+
+        if save_reference:
+            np.save("reference.npy", np.stack([means, stds, means_rag, stds_rag], axis=0))
 
     jax.distributed.shutdown()
 
