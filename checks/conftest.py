@@ -32,7 +32,7 @@ def pytest_configure(config):
     if should_init_jax_distributed():
         jax.distributed.initialize()
     else:
-        print("Using single-GPU mode")
+        print("Using single-host mode")
 
     if jax.process_index() != 0:
         _silence_process_output()

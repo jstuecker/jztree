@@ -277,8 +277,8 @@ def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
     partz, idz = pos_zorder_sort(part)
     spl = search_sorted_z(get_pos(partz), xpivot)
 
-    part, dev_spl = nested_all_to_all_with_splits(
-        partz, spl, err_hint="\nHint: Increase padding of positions", pack_pytree=False
+    part, dev_spl = all_to_all_with_splits(
+        partz, spl, err_hint="\nHint: Increase padding of positions",
     )
     part.num = dev_spl[-1]
 
@@ -294,9 +294,8 @@ def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
             spl_target = (jnp.arange(0, ndev+1, dtype=jnp.int64) * (numtot // ndev)).at[-1].set(numtot)
             spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num).astype(jnp.int32)
 
-        partz, dev_spl = nested_all_to_all_with_splits(
+        partz, dev_spl = all_to_all_with_splits(
             partz, spl_send, err_hint="\nHint: Increase padding of positions",
-            pack_pytree=False
         )
         partz.num = dev_spl[-1]
 
