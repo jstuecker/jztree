@@ -1,8 +1,9 @@
 import numpy as np
 from typing import Tuple
+from dataclasses import replace
 import jax
 import jax.numpy as jnp
-from dataclasses import replace
+from jax.sharding import PartitionSpec as P
 
 from .config import FofConfig, FofCatalogueConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
@@ -624,6 +625,9 @@ def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = Non
     part.num = dev_spl[-1]
 
     return part, gcnt
+distr_fof_order.smap = shard_map_constructor(distr_fof_order,
+    in_specs=(P(-1), P(-1), None), static_argnames=["size_out"]
+)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                      Fof Catalogue Reduction                                     #
@@ -760,6 +764,10 @@ def fof_catalogue_from_groups(
     cata = tree_map_by_len(remove_first, cata, len(cata.count))
 
     return cata
+fof_catalogue_from_groups.smap = shard_map_constructor(fof_catalogue_from_groups,
+    in_specs=(P(-1), P(-1), None, None, None),
+    static_argnames=["cfg_cata", "boxsize", "size_cata"]
+)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          User Interface                                          #
