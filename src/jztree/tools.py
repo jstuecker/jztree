@@ -115,7 +115,6 @@ def bucket_prefix_sum(key, count=None, num=None):
         count_sort = count[isort]
         csum_sort = jnp.cumsum(count_sort) - count_sort
     ifirst = jnp.searchsorted(key_sort, key_sort, side="left")
-    rank = jax.lax.axis_index("gpus")
     
     cdiff = csum_sort - csum_sort[ifirst]
     if num is not None:

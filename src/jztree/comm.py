@@ -21,7 +21,6 @@ def leading_len(x):
     else:
         return len(x)
 
-
 # ------------------------------------------------------------------------------------------------ #
 #                                Distributed Initialization Helpers                                #
 # ------------------------------------------------------------------------------------------------ #
@@ -166,7 +165,9 @@ def _unpack_pytree(x: jax.Array, p: PackingSpec, template: Pytree) -> Pytree:
 #                                  Simple Communication Directives                                 #
 # ------------------------------------------------------------------------------------------------ #
 
-def global_splits(n, axis_name="gpus"):
+def global_splits(n, axis_name=None):
+    if axis_name is None:
+        axis_name = jax.sharding.get_abstract_mesh().axis_names
     alln = jax.lax.all_gather(n, axis_name)
     return jnp.pad(jnp.cumsum(alln), (1,0), constant_values=0)
 
@@ -265,7 +266,7 @@ def ragged_all_to_all_through_buf(operand, output, input_offsets, send_sizes, ou
     op = jax.lax.fori_loop(0, ncomm, comm, op)
     return _unpack_pytree(op, ospec)
 
-def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, err_hint="", copy_self=True, pack_pytree=False):
+def all_to_all_with_splits(x, ispl, output=None, axis_name=None, verify=True, err_hint="", copy_self=True, pack_pytree=False):
     """all_to_all communication with data-dependent communication volume
     
     We send to rank i: x[ispl[i]:ispl[i+1]] 
@@ -285,6 +286,8 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name="gpus", verify=True, 
     """
     if output is None:
         output = empty_like(x)
+    if axis_name is None:
+        axis_name = jax.sharding.get_abstract_mesh().axis_names
 
     out_size = pytree_len(output)
 
@@ -389,13 +392,15 @@ def nested_all_to_all_with_splits(data, ispl, **kwargs):
     
     return data, jnp.pad(jnp.cumsum(nij.flatten()), (1,0), constant_values=0)
 
-def dynamic_all_gather(x, nsend, output=None, axis_name="gpus", verify=True):
+def dynamic_all_gather(x, nsend, output=None, axis_name=None, verify=True):
     """An all-gather where each task may send different amounts.
     
     returns output, dev_spl -- where output[dev_spl[i]:dev_spl[i+1]] contains rank i's input
     """
     if output is None:
         output = empty_like(x)
+    if axis_name is None:
+        axis_name = jax.sharding.get_abstract_mesh().axis_names
     
     rank = jax.lax.axis_index(axis_name)
     ndev = jax.lax.axis_size(axis_name)
@@ -422,7 +427,9 @@ def dynamic_all_gather(x, nsend, output=None, axis_name="gpus", verify=True):
     return jax.tree.map(comm, x, output), dev_spl
 
 def arange_for_comm(irank: jax.Array, x: jax.Array, 
-                    num: jax.Array | int |None = None, axis_name="gpus"):
+                    num: jax.Array | int |None = None, axis_name=None):
+    if axis_name is None:
+        axis_name = jax.sharding.get_abstract_mesh().axis_names
     rank = jax.lax.axis_index(axis_name)
     ndev = jax.lax.axis_size(axis_name)
 
@@ -440,7 +447,7 @@ def all_to_all_with_irank(
         x: jax.Array | Pytree,
         output: jax.Array | Pytree | None = None,
         num: jax.Array | int | None = None,
-        axis_name: str = "gpus",
+        axis_name: str = None,
         verify: bool = True,
         err_hint: str = "",
         copy_self: bool = True,
@@ -451,6 +458,8 @@ def all_to_all_with_irank(
 
     To understand most arguments, see documentation of all_to_all_with_splits
     """
+    if axis_name is None:
+        axis_name = jax.sharding.get_abstract_mesh().axis_names
     xsort, dev_spl, isort = arange_for_comm(irank, x, num=num, axis_name=axis_name)
     x, dev_spl = all_to_all_with_splits(xsort, dev_spl, output, axis_name, verify=verify, err_hint=err_hint, copy_self=copy_self, pack_pytree=pack_pytree)
     if get_inverse:
@@ -465,12 +474,14 @@ def all_to_all_request(
     x: jax.Array | Pytree,
     output: jax.Array | Pytree | None = None,
     num: jax.Array | int | None = None,
-    axis_name: str = "gpus",
+    axis_name: str = None,
     verify: bool = True,
     err_hint: str = "",
     copy_self: bool = True,
     pack_pytree: bool = False
 ) -> jax.Array:
+    if axis_name is None:
+        axis_name = jax.sharding.get_abstract_mesh().axis_names
     # First inform the task with the data which indices we need
     indices_sort, dev_spl, isort = arange_for_comm(irank, indices, num=num, axis_name=axis_name)
     indices, dev_spl = all_to_all_with_splits(
@@ -492,7 +503,7 @@ def all_to_all_request_children(
     spl: jax.Array,
     data: jax.Array | Pytree,
     output: jax.Array | Pytree | None = None,
-    axis_name: str = "gpus",
+    axis_name: str = None,
     verify: bool = True,
     err_hint: str = "",
     copy_self: bool = True,
@@ -500,6 +511,8 @@ def all_to_all_request_children(
 ):
     if output is None:
         output = empty_like(data)
+    if axis_name is None:
+        axis_name = jax.sharding.get_abstract_mesh().axis_names
 
     size = pytree_len(output)
 
