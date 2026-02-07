@@ -435,10 +435,15 @@ def verify_ilist(ilist: InteractionList):
 # ------------------------------------------------------------------------------------------------ #
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(slots=True)
 class Label:
+    # global labels are pointing to a particle that may lie on another task
     irank: jax.Array
     igroup: jax.Array
+
+    # Optional, points towards a local particle that has the same global label
+    # Useful for saving communication time
+    ilocal_segment: jax.Array | None = None
 
     def stacked(self) -> jax.Array:
         return jnp.stack([self.irank, self.igroup], axis=-1)

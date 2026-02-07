@@ -526,6 +526,7 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     labels = link_distributed(igroup_new, labels, links, dev_spl, link_data.ispl[-1])
     
     labels = tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
+    labels.ilocal_segment = igroup_new
 
     return labels
 distr_particle_particle_fof.jit = jax.jit(distr_particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
@@ -565,10 +566,13 @@ def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = Non
     npart = get_num(part)
     size = len(label.igroup)
 
-    iseg = global_to_local_label(label)
+    if label.ilocal_segment is None:
+        iseg = global_to_local_label(label)
+    else:
+        iseg = label.ilocal_segment
 
     # Count locally known roots
-    is_segment_root = iseg == jnp.arange(len(iseg))
+    is_segment_root = (iseg == jnp.arange(len(iseg))) & (jnp.arange(len(iseg)) < npart)
     seg_idx, num_segs = offset_sum(is_segment_root)
     seg_idx = jnp.where(jnp.arange(size) < npart, seg_idx[iseg], size) # mask invalid particles
     seg_counts = jnp.zeros(size, dtype=jnp.int32).at[seg_idx].add(1)
@@ -830,6 +834,9 @@ def distr_fof(part: Pos, rlink: float, boxsize: float = 0.,
     labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
 
     return partz, labels
+distr_fof.smap = shard_map_constructor(distr_fof,
+    in_specs=(P(-1), None, None, None), static_argnums=(1,2,3)
+)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                        New User Interface                                        #
