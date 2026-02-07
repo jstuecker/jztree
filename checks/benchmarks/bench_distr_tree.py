@@ -34,24 +34,27 @@ def mk_pos(Ntot, alloc_fac=1.2, ndev=4):
     return f
 
 def get_mesh(ndev=-1):
-    if ndev <= 4:
-        return jax.make_mesh((ndev,), ('gpus',), axis_types=(AxisType.Auto))
-    else:
-        return jax.make_mesh((ndev//4, 4), ('nodes', 'gpus'), axis_types=(AxisType.Auto,AxisType.Auto))
+    # if ndev <= 4:
+    return jax.make_mesh((ndev,), ('gpus',), axis_types=(AxisType.Auto))
+    # else:
+    #     return jax.make_mesh((ndev//4, 4), ('nodes', 'gpus'), axis_types=(AxisType.Auto,AxisType.Auto))
 
 @pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_multi_zsort(jax_bench, ndev):
+    print("particles")
     part = ics.gaussian_particles.smap(get_mesh(ndev), jit=True)(512**3, npad=int(512**3*0.2))
-
+    print("sort")
     fzs = distr_zsort.smap(get_mesh(ndev), jit=True)
 
-    jb = jax_bench(jit_rounds=20, jit_warmup=2, eager_rounds=0, eager_warmup=0)
-
+    jb = jax_bench(jit_rounds=5, jit_warmup=1, eager_rounds=0, eager_warmup=0)
+    
     partz = jb.measure(fn_jit=fzs, part=part, tag="random")[1]
+    print("sort2")
     jb.measure(fn_jit=fzs, part=partz, tag="sorted")
     partz.pos = partz.pos + 1e-2 * part.pos
+    print("sort3")
     jb.measure(fn_jit=fzs, part=partz, tag="displaced")
 
 @pytest.mark.parametrize("ndev", NDEVS)

@@ -90,4 +90,4 @@ def multi_gpu_dj_sim(boxsize = 1000., num_per_device=512**3) -> ParticleData:
     )
 
     return part
-multi_gpu_dj_sim.jit = jax.jit(multi_gpu_dj_sim)
+multi_gpu_dj_sim.jit = jax.jit(multi_gpu_dj_sim, static_argnums=(0,1))

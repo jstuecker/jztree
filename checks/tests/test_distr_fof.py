@@ -58,9 +58,11 @@ def test_distributed_links(nperdev):
     assert jnp.all(igroup_a == igroup_b)
 
 def distr_fof_labels(seed):
+    # almost everything gets linked so we need a bit larger allocation than usual:
+    cfg = FofConfig(alloc_fac_distr_links=0.1)
     part = ics.gaussian_particles(1024*1024, npad=1024*256, seed=seed)
-    partz, th = distr_zsort_and_tree(part, FofConfig().tree)
-    igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True)
+    partz, th = distr_zsort_and_tree(part, cfg.tree)
+    igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True, cfg=cfg)
 
     return partz, igroup
 distr_fof_labels.smapped = expanding_shard_map(distr_fof_labels, 
@@ -86,8 +88,10 @@ def test_labels_vs_single(seed):
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.parametrize("seed", [0,17,23,99])
 def test_catalogue_vs_single(seed):
+    # almost everything gets linked so we need a bit larger allocation than usual:
+    cfg = FofConfig(alloc_fac_distr_links=0.1)
     part = ics.gaussian_particles.smap(mesh, jit=True)(1024*1024, npad=1024*256, seed=seed)
-    partf, cata1 = distr_fof_and_catalogue.smap(mesh, jit=True)(part, rlink=0.05)
+    partf, cata1 = distr_fof_and_catalogue.smap(mesh, jit=True)(part, rlink=0.05, cfg=cfg)
 
     p2, cata2 = fof_and_catalogue.jit(squeeze_particles(partf), rlink=0.05)
     
@@ -106,11 +110,11 @@ def test_catalogue_vs_single(seed):
 @pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_discodj_fof():
-    mesh = jax.make_mesh((jax.device_count(),), ("gpus",))
+    mesh = jax.make_mesh((jax.device_count(),), ("gpus",), (AxisType.Explicit,))
     ndev = jax.device_count()
     boxsize = 1000.
 
-    part = ics.multi_gpu_dj_sim.jit()
+    part = ics.multi_gpu_dj_sim.jit(num_per_device=128**3)
     part = expand_particles(part, ndev)
 
     rlink = 0.2 * boxsize / np.cbrt(part.num_total)
@@ -125,7 +129,9 @@ def test_discodj_fof():
         return part_fof, cata
     distr_fof = expanding_shard_map(distr_fof, mesh=mesh, jit=True)
     
-    part_fof, cata = distr_fof(part)
+    sharding = jax.sharding.NamedSharding(mesh, P())
+    cata = jax.device_put(distr_fof(part)[1], sharding)
+
     cata = sort_catalogue(squeeze_catalogue(cata))
 
     print(cata.mass[0:20])

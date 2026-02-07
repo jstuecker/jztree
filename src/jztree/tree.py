@@ -9,7 +9,7 @@ from .data import get_num_total, get_pos, get_num, verify_ilist
 from .config import TreeConfig
 from .tools import cumsum_starting_with_zero, div_ceil
 from .comm import send_to_left, send_to_right, shift_particles_left
-from .comm import all_to_all_with_splits, global_splits, nested_all_to_all_with_splits
+from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
 from .stats import statistics, stats_callback, AllocStats
 
@@ -254,7 +254,7 @@ def determine_npart(x):
     return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
 
     
-def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
+def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True, mode=1):
     rank, ndev, axis_name = get_rank_info()
 
     if ndev == 1:
@@ -274,12 +274,16 @@ def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
     xpivot = jnp.pad(xpivot, ((1,1), (0,0)), constant_values=jnp.inf).at[0].set(-jnp.inf)
 
     # Now organize and determine which chunks need to be send to each rank
-    partz, idz = pos_zorder_sort(part)
-    spl = search_sorted_z(get_pos(partz), xpivot)
-
-    part, dev_spl = all_to_all_with_splits(
-        partz, spl, err_hint="\nHint: Increase padding of positions",
-    )
+    if mode == 0:
+        partz, idz = pos_zorder_sort(part)
+        spl = search_sorted_z(get_pos(partz), xpivot)
+        part, dev_spl = all_to_all_with_splits(
+            partz, spl, err_hint="\nHint: Increase padding of positions",
+        )
+    else:
+        irank = search_sorted_z(xpivot, part.pos)-1
+        part, dev_spl = all_to_all_with_irank(irank, part, num=part.num)
+    
     part.num = dev_spl[-1]
 
     partz, idz = pos_zorder_sort(part)
@@ -301,7 +305,7 @@ def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
 
     return partz
 distr_zsort.smap = shard_map_constructor(
-    distr_zsort, in_specs=(P(-1), None, None), static_argnames=("nsamp", "equalize")
+    distr_zsort, in_specs=(P(-1), None, None, None), static_argnames=("nsamp", "equalize", "mode")
 )
 
 def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):

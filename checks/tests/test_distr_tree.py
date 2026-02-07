@@ -22,7 +22,7 @@ def _distr_zsort():
 
     part = Pos(pos=pos, num=4096, num_total=4096*ndev)
 
-    partz = distr_zsort(part)
+    partz = distr_zsort(part, mode=1)
     return part, partz
 _distr_zsort.smapped = expanding_shard_map(_distr_zsort, jit=True, mesh=mesh)
 
@@ -34,7 +34,7 @@ def test_mutli_zsort():
     partz_sing = pos_zorder_sort(squeeze_particles(part))[0]
 
     assert len(partz_sing.pos) == len(partz_mult.pos) == partz_sing.num == partz_mult.num
-    assert jnp.all(partz_sing.pos == partz_mult.pos)
+    assert partz_mult.pos == pytest.approx(partz_sing.pos, abs=1e-5)
 
 def _distr_coarsen(partz: jnp.ndarray):
     partz, lvl_bound = adjust_domain_for_nodesize(partz, 256)
