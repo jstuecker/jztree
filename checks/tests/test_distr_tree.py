@@ -22,7 +22,7 @@ def _distr_zsort():
 
     part = Pos(pos=pos, num=4096, num_total=4096*ndev)
 
-    partz = distr_zsort(part, mode=1)
+    partz = distr_zsort(part)
     return part, partz
 _distr_zsort.smapped = expanding_shard_map(_distr_zsort, jit=True, mesh=mesh)
 
