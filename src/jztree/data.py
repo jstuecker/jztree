@@ -483,7 +483,7 @@ class Link:
 @dataclass
 class FofNodeData():
     lvl: jax.Array
-    label: Label | jax.Array # Local index pointer for single-gpu, but (rank,id) pointer for multi
+    igroup: jax.Array
     spl: jax.Array
 
 @partial(jax.tree_util.register_dataclass, 

@@ -139,7 +139,7 @@ node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", 
 def particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                           rlink: float, boxsize: float = 0., block_size=32):
     part_igroup = node_to_child_label(
-        node_data.label, node_data.lvl, node_data.spl, len(posz), rlink=rlink
+        node_data.igroup, node_data.lvl, node_data.spl, len(posz), rlink=rlink
     )
 
     igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
@@ -154,7 +154,7 @@ particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rli
 #                                         Helper Functions                                         #
 # ------------------------------------------------------------------------------------------------ #
 
-def global_to_local_label(labels: Label) -> jax.Array:
+def global_label_to_local_segment(labels: Label) -> jax.Array:
     """Map each global to the index of the first occurence of it"""
     # Note, currently the Fof self-linking detection can be wrong for index 0!
     pairs = labels.stacked()
@@ -435,7 +435,7 @@ def distr_node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     l2p = th.ispl_n2n.get(0, size+1)
 
     def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
-        igroup = node_to_child_label(node_data.label, node_data.lvl, node_data.spl, size, rlink=rlink) 
+        igroup = node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, size, rlink=rlink) 
 
         poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
@@ -489,10 +489,14 @@ distr_node_node_fof.jit = jax.jit(
 def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, 
                                 link_data: PackedArray, posz: jax.Array,
                                 rlink: float, boxsize: float = 0., block_size=32) -> Label:
+    # We distinguish between global Labels that point to the global root particle
+    # and local segment labels that point towards a locally known particle that has the
+    # same group
+    
     rank, ndev, axis_name = get_rank_info()
     size = len(posz)
 
-    igroup = node_to_child_label(node_data.label, node_data.lvl, node_data.spl, size, rlink=rlink)
+    iseg = node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, size, rlink=rlink)
 
     numpart = node_data.spl[-1]
     (posz, pids), spl, dev_spl = all_to_all_request_children(
@@ -501,15 +505,15 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
 
     # Treat remote nodes as roots
     irank = inverse_of_splits(dev_spl, size)
-    igroup = jnp.where(irank==rank, igroup, jnp.arange(size))
+    iseg = jnp.where(irank==rank, iseg, jnp.arange(size))
 
-    igroup_new = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), igroup.dtype),))(
-        ilist.ispl, ilist.iother, spl, posz, igroup,
+    iseg_new = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), iseg.dtype),))(
+        ilist.ispl, ilist.iother, spl, posz, iseg,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
     # insert new links
-    links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, pids, dev_spl)
+    links, num_links = distr_detect_new_cross_task_links(iseg, iseg_new, pids, dev_spl)
     link_data = link_data.append(links.stacked(axis=-1), num_links)
 
     link_data.ispl = link_data.ispl + raise_if(link_data.nfilled() > link_data.size(),
@@ -522,11 +526,11 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     links = Link.from_stacked(link_data.data)
 
     # Infer global labels
-    labels = Label(jnp.full(igroup.shape, rank, dtype=jnp.int32), igroup)
-    labels = link_distributed(igroup_new, labels, links, dev_spl, link_data.ispl[-1])
+    labels = Label(jnp.full(iseg.shape, rank, dtype=jnp.int32), iseg)
+    labels = link_distributed(iseg_new, labels, links, dev_spl, link_data.ispl[-1])
     
     labels = tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
-    labels.ilocal_segment = igroup_new
+    labels.ilocal_segment = iseg_new
 
     return labels
 distr_particle_particle_fof.jit = jax.jit(distr_particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
@@ -567,7 +571,7 @@ def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = Non
     size = len(label.igroup)
 
     if label.ilocal_segment is None:
-        iseg = global_to_local_label(label)
+        iseg = global_label_to_local_segment(label)
     else:
         iseg = label.ilocal_segment
 
