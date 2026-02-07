@@ -606,18 +606,28 @@ def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = Non
     )
     seg_offsets = dense_seg_offsets[inv]
 
+    part_seg_offset = bucket_prefix_sum(iseg, num=npart)
+
     with jax.enable_x64():
         dev_offsets = cumsum_starting_with_zero(jnp.astype(dev_counts, jnp.int64))
         seg_offsets = jnp.astype(dense_seg_offsets[inv], jnp.int64) + dev_offsets[seg_label.irank]
         
-        part_gid = seg_offsets[seg_idx] + bucket_prefix_sum(iseg, num=npart)
+        part_gid = seg_offsets[seg_idx] + part_seg_offset.astype(jnp.int64)
 
         nparttot = dev_offsets[-1]
         target_global_dev_spl = jnp.pad(jnp.arange(ndev) * (nparttot // ndev), (0,1), constant_values=nparttot)
 
-        send_irank = jnp.searchsorted(target_global_dev_spl, part_gid, side="right") - 1
-        (gid, part, gcnt), dev_spl = all_to_all_with_irank(
-            send_irank, (part_gid, part, root_group_counts), num=npart, pack_pytree=True
+        send_irank = (jnp.searchsorted(target_global_dev_spl, part_gid, side="right") - 1).astype(jnp.int32)
+
+    isort = jnp.argsort(send_irank) # do argsort with int32 -- int64 is extremely slow in jax
+    dev_spl = jnp.searchsorted(send_irank[isort], jnp.arange(ndev+1, dtype=send_irank.dtype), side="left")
+
+    with jax.enable_x64():
+        part_gid, part, root_group_counts = tree_map_by_len(
+            lambda x: x[isort], (part_gid, part, root_group_counts), size
+        )
+        (gid, part, gcnt), dev_spl = all_to_all_with_splits(
+            (part_gid, part, root_group_counts), dev_spl, pack_pytree=True
         )
 
         valid = jnp.arange(len(gid)) < dev_spl[-1]
