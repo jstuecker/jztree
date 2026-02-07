@@ -41,7 +41,7 @@ def bench_fof(jax_bench, pos, N):
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 @pytest.mark.shrink_in_quick(keep_index=0)
-@pytest.mark.parametrize("ndev", [i for i in (256,64,16,4,2,1) if i <= jax.device_count()])
+@pytest.mark.parametrize("ndev", [i for i in (256,128,64,32,16,8,4,2,1) if i <= jax.device_count()])
 def bench_fof_steps(jax_bench, pos, ndev):
     jb = jax_bench(jit_rounds=4, jit_warmup=1)
 
