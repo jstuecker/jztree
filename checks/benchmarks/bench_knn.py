@@ -5,6 +5,9 @@ from dataclasses import replace
 from jztree.tree import pos_zorder_sort
 from jztree.knn import prepare_knn, prepare_knn_z_new, evaluate_knn, evaluate_knn_z, knn, knn_z
 
+import importlib
+has_jaxkd = (importlib.util.find_spec("jaxkd") is not None) and (importlib.util.find_spec("jaxkd_cuda") is not None)
+
 @pytest.mark.shrink_in_quick(keep_index=1)
 @pytest.mark.parametrize("npart", [int(1e5), int(1e6), int(3e6)])
 def bench_knn_steps(jax_bench, pos):
@@ -35,3 +38,23 @@ def bench_knn_k(jax_bench, pos, k):
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
 
     jb.measure(fn_jit=knn.jit, pos0=pos, k=k)
+
+@pytest.mark.shrink_in_quick(keep_index=1)
+@pytest.mark.parametrize("N", [1e5,3e5,1e6,3e6,1e7])
+def bench_knn_N(jax_bench, N):
+    jb = jax_bench(jit_rounds=5, jit_loops=5, jit_warmup=1)
+
+    pos = jax.random.uniform(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
+
+    jb.measure(fn_jit=knn.jit, pos0=pos, k=4, tag="jztree_k4")
+    jb.measure(fn_jit=knn.jit, pos0=pos, k=16, tag="jztree_k16")
+
+    if has_jaxkd:
+        import jaxkd
+
+        def f(pos, k):
+            return jaxkd.build_and_query(pos, pos, k=k, cuda=True)
+        f.jit = jax.jit(f, static_argnames=["k"])
+
+        jb.measure(fn_jit=f.jit, pos=pos, k=4, tag="jaxkd_cuda_k4")
+        jb.measure(fn_jit=f.jit, pos=pos, k=16, tag="jaxkd_cuda_k16")
