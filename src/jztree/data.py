@@ -334,7 +334,7 @@ class TreeHierarchy():
     geom_cent: PackedArray
     mass: PackedArray | None = None
     mass_cent: PackedArray | None = None
-
+    
     plane_sizes: List[int] = static_field(default_factory=list)
 
     def npart(self, level: int, size=None) -> jax.Array:
@@ -377,6 +377,11 @@ class TreeHierarchy():
 
     def num(self, level) -> int:
         return self.lvl.num(level)
+    
+    def base_size(self) -> int:
+        """The recommended allocation size at the leaf level"""
+        # Could choose something smaller here later...
+        return self.ispl_n2n.size() - 1
 
 # ------------------------------------------------------------------------------------------------ #
 #                                         Interaction Data                                         #
