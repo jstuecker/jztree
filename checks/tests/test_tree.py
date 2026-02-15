@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 import jax
-from jztree.data import PosMass, TreePlane, TreeHierarchy
+from jztree.data import PosMass, TreeHierarchy
 import pytest
 import numpy.testing as npt
 from jztree.config import TreeConfig
@@ -20,12 +20,10 @@ def test_tree_hierarchy(tree_hierarchy : TreeHierarchy):
         assert jnp.max(in2l) == nleaves
         assert jnp.max(in2n) == jnp.argmax(th.ispl_n2n.get(lvl-1))
     
-    tree_planes = list(th.planes())
-    
-    npart = jnp.sum(tree_planes[0].npart)
-    for tplane  in tree_planes:
-        assert jnp.sum(tplane.npart) == npart
-        lvls = tplane.lvl[:tplane.nnodes]
+    npart = jnp.sum(th.npart(0))
+    for i in range(th.num_planes()):
+        assert jnp.sum(th.npart(i)) == npart
+        lvls = th.lvl.get(i, size=th.num(i))
         assert jnp.all((lvls >= -100 ) & (lvls < 100))
 
 def test_node_geometry(pos_mass_z: PosMass):
