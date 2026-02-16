@@ -631,3 +631,54 @@ def simplify_interaction_list(ilist: InteractionList, num_always_keep: jax.Array
     ilist = InteractionList(ispl, prefix[ilist.iother], reduced_ids, reduced_dev_spl)
     
     return verify_ilist(ilist)
+
+# ------------------------------------------------------------------------------------------------ #
+#                                       Tree Walking Helpers                                       #
+# ------------------------------------------------------------------------------------------------ #
+
+from dataclasses import dataclass
+from typing import Callable
+
+@dataclass
+class TreeWalkFunctions:
+    top_node_out: Callable
+    child_input: Callable
+    evaluate_n2n: Callable
+
+from typing import Callable
+def dual_tree_walk(
+    f: TreeWalkFunctions,
+    th: TreeHierarchy,
+    size_ilist: int
+):
+    nplanes = th.num_planes()
+
+    size = th.base_size()
+
+    spl, ilist, nsup = grouped_dense_interaction_list(
+        th.num(nplanes-1), size_ilist=size_ilist, ngroup=32, size_super=size
+    )
+
+    node_data = f.top_node_out(num=nsup, size=len(spl)-1)
+
+    # Add an extra-level to splits for super-nodes
+    spl_n2n = th.ispl_n2n.resize_levels(nplanes+1).set(nplanes, spl, nsup+1, fill_value=spl[-1])
+
+    def handle_level(i, carry):
+        level = nplanes - 1 - i
+        node_data, ilist = carry
+
+        spl = spl_n2n.get(level+1, size=size+1)
+
+        child_data = f.child_input(level=level, node_data=node_data, spl=spl)
+
+        child_res, child_ilist = f.evaluate_n2n(
+            level=level, ilist=ilist, node_data=node_data, spl=spl, child_data=child_data
+        )
+        
+        return child_res, child_ilist
+
+    for i in range(nplanes):
+        node_data, ilist = handle_level(i, (node_data, ilist))
+    
+    return node_data, ilist
