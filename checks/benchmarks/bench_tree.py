@@ -14,13 +14,13 @@ def bench_build_tree_hierarchy(jax_bench, npart):
 
     jb = jax_bench(jit_rounds=10, jit_warmup=5, eager_rounds=0, eager_warmup=0)
 
-    cfg_tree = TreeConfig(mass_centered=True)
+    cfg_tree = TreeConfig(mass_centered=False)
 
     jb.measure(
         fn=build_tree_hierarchy, fn_jit=build_tree_hierarchy.jit, 
         part=pos_mass_z, cfg_tree=cfg_tree, tag="geom_centered")
     
-    cfg = replace(cfg, tree=TreeConfig(mass_centered=True))
+    cfg_tree.mass_centered = True
     jb.measure(
         fn=build_tree_hierarchy, fn_jit=build_tree_hierarchy.jit, 
         part=pos_mass_z, cfg_tree=cfg_tree, tag="mass_centered")
