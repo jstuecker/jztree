@@ -11,7 +11,7 @@ from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num, ver
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from .tools import bucket_prefix_sum, masked_to_dense
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
-from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
+from .tree import simplify_interaction_list, distr_zsort_and_tree, distr_grouped_dense_interaction_list
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
 from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constructor, tree_map_by_len
@@ -359,34 +359,17 @@ def _distr_detect_new_cross_task_links(igroup, igroup_new, origin_group, dev_spl
 #                                          Distributed FoF                                         #
 # ------------------------------------------------------------------------------------------------ #
 
-def linearly_grouped(num, size, ngroup=32):
-    num_sup = div_ceil(num, ngroup)
-    return jnp.minimum(jnp.arange(size+1) * ngroup, num), num_sup
-
-def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
+def _distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
                         ) -> Tuple[FofNodeData, InteractionList]:
     rank, ndev, axis_name = get_rank_info()
 
-    # Define splits and their data
-    spl, nsuper = linearly_grouped(num_local, size, ngroup=32)
+    spl, ilist = distr_grouped_dense_interaction_list(
+        num_local, size, int(size*alloc_fac_ilist), only_geq=True
+    )
     
     labels = pcast_vma(jnp.arange(size), axis_name)
     node_lvl = pcast_vma(jnp.full(size, 388), axis_name)
     node_data = FofNodeData(node_lvl, labels, spl)
-    
-    # define interaction list with remote interactions
-    nper_rank = jax.lax.all_gather(nsuper, axis_name)
-    
-    # due to pruning, only need data from larger tasks
-    dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev) >= rank))
-
-    # Define a dense interaction list on top-nodes:
-    ilist = dense_interaction_list(
-        dev_spl[-1], size, int(size*alloc_fac_ilist),
-        node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
-    )
-    ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
-    ilist.dev_spl = dev_spl
     
     return node_data, ilist
 
@@ -436,7 +419,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         return node_data, ilist, link_data
     
     # Seed with dense interactions at top-level
-    node_data, ilist = distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
+    node_data, ilist = _distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
     
     # Set up an empty PackedArray to save link data and mark as varying per gpu
     link_data = PackedArray.create_empty(

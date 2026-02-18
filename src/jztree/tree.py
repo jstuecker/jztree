@@ -7,7 +7,7 @@ from typing import Tuple
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .data import get_num_total, get_pos, get_num, verify_ilist
 from .config import TreeConfig
-from .tools import cumsum_starting_with_zero, div_ceil
+from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits
 from .comm import send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
@@ -599,6 +599,33 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
 grouped_dense_interaction_list.jit = jax.jit(
     grouped_dense_interaction_list, static_argnames=["size_ilist", "size_super"]
 )
+
+def _linearly_grouped(num, size, ngroup=32):
+    num_sup = div_ceil(num, ngroup)
+    return jnp.minimum(jnp.arange(size+1) * ngroup, num), num_sup
+
+def distr_grouped_dense_interaction_list(
+        num_local: int, size: int, size_ilist: int, only_geq: bool = False
+        ) -> Tuple[jax.Array, InteractionList]:
+    rank, ndev, axis_name = get_rank_info()
+
+    spl, nsuper = _linearly_grouped(num_local, size, ngroup=32)
+
+    nper_rank = jax.lax.all_gather(nsuper, axis_name)
+
+    if only_geq:
+        dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev) >= rank))
+    else:
+        dev_spl = cumsum_starting_with_zero(nper_rank)
+    
+    # Define a dense interaction list on top-nodes:
+    ilist = dense_interaction_list(dev_spl[-1], size, size_ilist,
+        node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
+    )
+    ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
+    ilist.dev_spl = dev_spl
+
+    return spl, ilist
 
 def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
