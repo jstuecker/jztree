@@ -470,18 +470,18 @@ ffi::Error KnnNode2Node(
     const float rfac_maxbin,
     float boxsize,
     // parameters that can be infered inside ffi:
-    const int nparents,
-    const int nnodes,
+    const int size_parents,
+    const int size_nodes,
     const size_t node_ilist_size
 ) {
-    cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(nnodes+1), stream);
+    cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(size_nodes+1), stream);
 
     constexpr int BINS = INTERACTION_BINS;
     float bins_per_log2 = BINS / log2f(rfac_maxbin);
 
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
-    KernelCountInteractions<<< nparents, blocksize_fill, smem_alloc_size, stream>>>(
+    KernelCountInteractions<<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         parent_ilist_spl, parent_ilist, parent_ilist_r2, parent_spl, nodes, nodes_npart,
         node_ilist_spl + 1, node_rmax2,
         k, bins_per_log2, boxsize
@@ -492,7 +492,7 @@ ffi::Error KnnNode2Node(
     // This should easily fit in general, but better check that it actually does:
     size_t tmp_bytes;
     cub::DeviceScan::InclusiveSum(
-        nullptr, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1,  nnodes, stream
+        nullptr, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1,  size_nodes, stream
     ); // determine the needed allocation size for CUB:
 
     if (tmp_bytes > node_ilist_size * sizeof(int)) {
@@ -501,12 +501,12 @@ ffi::Error KnnNode2Node(
             "Have:" + std::to_string(node_ilist_size * sizeof(int)) + " bytes. ");
     }
     cub::DeviceScan::InclusiveSum(
-        node_ilist, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1, nnodes, stream
+        node_ilist, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1, size_nodes, stream
     );
 
     // Now insert the interactions
     smem_alloc_size = blocksize_fill * 2*sizeof(float3);
-    KernelInsertInteractions<<< nparents, blocksize_fill, smem_alloc_size, stream>>>(
+    KernelInsertInteractions<<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         parent_ilist_spl, parent_ilist, parent_ilist_r2, parent_spl, nodes, 
         node_ilist_spl, node_rmax2,
         node_ilist, node_ilist_r2, // output
@@ -520,8 +520,8 @@ ffi::Error KnnNode2Node(
     // small overhead (~ O(2ms) for 1M particles). So it is well worth it.
     int smem_size = 512;
     size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int32_t));
-    segmented_bitonic_sort_kv<<<nnodes, blocksize_sort, smem_bytes, stream>>>(
-        node_ilist_r2, node_ilist, node_ilist_spl, nnodes, smem_size
+    segmented_bitonic_sort_kv<<<size_nodes, blocksize_sort, smem_bytes, stream>>>(
+        node_ilist_r2, node_ilist, node_ilist_spl, size_nodes, smem_size
     );
     
     cudaError_t last_error = cudaGetLastError();
@@ -542,18 +542,18 @@ ffi::Error SegmentSort(
     const int32_t* val,
     float* key_out,
     int32_t* val_out,
-    const int32_t nsegs,
-    const int32_t nkeys,
+    const int32_t size_segs,
+    const int32_t size_keys,
     const size_t smem_size
 ) {
     int blocksize = 64;
     size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int32_t));
 
-    cudaMemcpyAsync(key_out, key, nkeys*sizeof(float), cudaMemcpyDeviceToDevice, stream);
-    cudaMemcpyAsync(val_out, val, nkeys*sizeof(int32_t), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(key_out, key, size_keys*sizeof(float), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(val_out, val, size_keys*sizeof(int32_t), cudaMemcpyDeviceToDevice, stream);
 
-    segmented_bitonic_sort_kv<<< nsegs, blocksize, smem_bytes, stream>>>(
-        key_out, val_out, spl, nsegs, smem_size
+    segmented_bitonic_sort_kv<<< size_segs, blocksize, smem_bytes, stream>>>(
+        key_out, val_out, spl, size_segs, smem_size
     );
 
     cudaError_t last_error = cudaGetLastError();

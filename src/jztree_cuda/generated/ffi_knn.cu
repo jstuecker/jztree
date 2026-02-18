@@ -138,8 +138,8 @@ ffi::Error KnnNode2NodeFFIHost(
     float rfac_maxbin,
     float boxsize
 ) {
-    int nparents = parent_spl.element_count() - 1;
-    int nnodes = nodes_npart.element_count();
+    int size_parents = parent_spl.element_count() - 1;
+    int size_nodes = nodes_npart.element_count();
     size_t node_ilist_size = node_ilist->element_count();
 
     // Now call our function
@@ -160,8 +160,8 @@ ffi::Error KnnNode2NodeFFIHost(
         blocksize_sort,
         rfac_maxbin,
         boxsize,
-        nparents,
-        nnodes,
+        size_parents,
+        size_nodes,
         node_ilist_size
     );
 
@@ -207,8 +207,8 @@ ffi::Error SegmentSortFFIHost(
     ffi::Result<ffi::AnyBuffer> val_out,
     size_t smem_size
 ) {
-    int32_t nsegs = spl.element_count() - 1;
-    int32_t nkeys = key.element_count();
+    int32_t size_segs = spl.element_count() - 1;
+    int32_t size_keys = key.element_count();
 
     // Now call our function
     ffi::Error result = SegmentSort(
@@ -218,8 +218,8 @@ ffi::Error SegmentSortFFIHost(
         reinterpret_cast<int32_t*>(val.untyped_data()),
         reinterpret_cast<float*>(key_out->untyped_data()),
         reinterpret_cast<int32_t*>(val_out->untyped_data()),
-        nsegs,
-        nkeys,
+        size_segs,
+        size_keys,
         smem_size
     );
 

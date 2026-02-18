@@ -24,12 +24,12 @@ functions["KnnLeaf2Leaf"].block_size_expression = 32
 functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId)"
 functions["KnnLeaf2Leaf"].grid_size_expression = "splQ.element_count() - 1"
 
-functions["KnnNode2Node"].par["nparents"].expression = "parent_spl.element_count() - 1"
-functions["KnnNode2Node"].par["nnodes"].expression = "nodes_npart.element_count()"
+functions["KnnNode2Node"].par["size_parents"].expression = "parent_spl.element_count() - 1"
+functions["KnnNode2Node"].par["size_nodes"].expression = "nodes_npart.element_count()"
 functions["KnnNode2Node"].par["node_ilist_size"].expression = "node_ilist->element_count()"
 
-functions["SegmentSort"].par["nkeys"].expression = "key.element_count()"
-functions["SegmentSort"].par["nsegs"].expression = "spl.element_count() - 1"
+functions["SegmentSort"].par["size_segs"].expression = "spl.element_count() - 1"
+functions["SegmentSort"].par["size_keys"].expression = "key.element_count()"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_knn.cu"), 
