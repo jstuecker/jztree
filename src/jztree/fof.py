@@ -78,11 +78,11 @@ def _insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size
     
     return pcast_like(igr_out, like=igroup)
 
-def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
-                        rlink: float, 
-                        size_child: int | None = None,
-                        flag_local: jax.Array | None = None,
-                        block_size: int = 64) -> jax.Array:
+def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
+                         rlink: float, num: int | None = None,
+                         size_child: int | None = None,
+                         flag_local: jax.Array | None = None,
+                         block_size: int = 64) -> jax.Array:
     if size_child is None:
         size_child = igroup.size
 
@@ -93,6 +93,9 @@ def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
     igroup_child = jax.ffi.ffi_call("NodeToChildLabel",  outputs)(
         igroup, flag_local, lvl, spl, block_size=np.uint64(block_size), r2link=np.float32(rlink*rlink)
     )[0]
+
+    if num is not None:
+        igroup_child = jnp.where(jnp.arange(size_child) < num, igroup_child, 0)
 
     return igroup_child
 _node_to_child_label.jit = jax.jit(_node_to_child_label, static_argnames=("size_child", "rlink", "block_size"))
@@ -128,7 +131,8 @@ def _fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac
         level = nplanes - 1 - i
         parent_spl = spl_n2n.get(level+1, size+1)
 
-        igroup = _node_to_child_label(igroup, nlvl.get(level+1, size), parent_spl, rlink=rlink)
+        igroup = _node_to_child_label(igroup, nlvl.get(level+1, size), parent_spl,
+                                      num=th.num(level), rlink=rlink)
         node_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=nlvl.get(level, size))
 
         igroup, ilist = _fof_node2node(
@@ -145,9 +149,10 @@ def _fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac
 _fof_hierarchy.jit = jax.jit(_fof_hierarchy, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
 def _fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
-                          rlink: float, boxsize: float = 0., block_size=32):
+                   rlink: float, boxsize: float = 0., block_size=32):
     part_igroup = _node_to_child_label(
-        leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz)
+        leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz),
+        num=leaf_data.spl[-1]
     )
 
     igroup = jax.ffi.ffi_call("FofLeaf2Leaf", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
@@ -390,7 +395,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         parent_lvl = node_lvl.get(level+1, size)
         parent_spl = spl_n2n.get(level+1, size+1)
 
-        igroup = _node_to_child_label(parent_igroup, parent_lvl, parent_spl, rlink=rlink)
+        igroup = _node_to_child_label(parent_igroup, parent_lvl, parent_spl, rlink=rlink, num=th.num(level))
 
         poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
@@ -429,9 +434,9 @@ _distr_fof_hierarchy.jit = jax.jit(
     _distr_fof_hierarchy, static_argnames=("alloc_fac_ilist", "boxsize", "rlink", "size_links")
 )
 
-def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList, 
-                                link_data: PackedArray, posz: jax.Array,
-                                rlink: float, boxsize: float = 0., block_size=32) -> Label:
+def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
+                        link_data: PackedArray, posz: jax.Array,
+                        rlink: float, boxsize: float = 0., block_size=32) -> Label:
     # We distinguish between global Labels that point to the global root particle
     # and local segment labels that point towards a locally known particle that has the
     # same group
@@ -440,7 +445,7 @@ def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
     size = len(posz)
 
     iseg = _node_to_child_label(
-        node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink, size_child=size
+        node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink, size_child=size, num=node_data.spl[-1]
     )
 
     numpart = node_data.spl[-1]
