@@ -396,7 +396,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
         
         # Request the remote node children that we need to interact with
-        (poslvl, ids, pid), spl, dev_spl = all_to_all_request_children(
+        (poslvl, ids, pid), parent_spl, dev_spl = all_to_all_request_children(
             ilist.dev_spl, ilist.ids, parent_spl, (poslvl, jnp.arange(size), pid),
             axis_name=axis_name
         )
@@ -406,7 +406,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         igroup = jnp.where(irank==rank, igroup, jnp.arange(size))
 
         igroup_new, ilist = _fof_node2node(
-            ilist, spl, poslvl, igroup, rlink=rlink, boxsize=boxsize
+            ilist, parent_spl, poslvl, igroup, rlink=rlink, boxsize=boxsize
         )
         # Save cross-task links for later
         links, num_links = _distr_detect_new_cross_task_links(igroup, igroup_new, pid, dev_spl)
@@ -414,7 +414,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
 
         # Remove 0 interaction nodes from interaction list (reduces unnecessary remote requests)
         ilist = replace(ilist, ids=ids, dev_spl=dev_spl)
-        ilist = simplify_interaction_list(ilist, th.num(level))
+        ilist = simplify_interaction_list(ilist, always_keep=(irank==rank))
 
         return igroup_new, ilist, link_data
 

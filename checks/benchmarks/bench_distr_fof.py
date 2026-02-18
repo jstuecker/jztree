@@ -54,7 +54,7 @@ def bench_fof_steps(jax_bench, pos, ndev):
     def node_node_fof(th, partz):
         cfg = FofConfig()
         return _distr_fof_hierarchy(
-            th, rlink=rlink, boxsize=0., alloc_fac_ilist=cfg.alloc_fac_ilist, size_links=len(partz.pos)
+            th, rlink=rlink, boxsize=0., alloc_fac_ilist=cfg.alloc_fac_ilist, size_links=int(len(partz.pos)*0.5)
         )
     node_node_fof = shard_map_constructor(node_node_fof)(mesh, jit=True)
     node_data, ilist, link_data = jb.measure(None, node_node_fof, th, partz, tag=f"node-node")[1]
@@ -69,8 +69,10 @@ def bench_fof_steps(jax_bench, pos, ndev):
     partf, counts = jb.measure(None, distr_fof_order.smap(mesh, jit=True),
         labels, partz, tag=f"fof-order"
     )[1]
+
     cata = jb.measure(None, fof_catalogue_from_groups.smap(mesh, jit=True),
         partf, counts, tag=f"catalogue"
     )[1]
+
     
     jb.measure(fn_jit=distr_fof_and_catalogue.smap(mesh, jit=True), part=part, rlink=rlink, tag=f"total")

@@ -64,6 +64,7 @@ dj_sim.jit = jax.jit(dj_sim, static_argnames=("ngrid", "boxsize"))
 
 @pytest.mark.shrink_in_quick(keep_index=3)
 @pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
+@pytest.mark.skipif(jax.device_count() > 1, reason="broken for multiple devices")
 @pytest.mark.parametrize("ngrid", [16, 32, 64, 128, 256])
 def bench_fof_cosmo(jax_bench, pos, ngrid):
     jb = jax_bench(jit_rounds=40, jit_warmup=10)

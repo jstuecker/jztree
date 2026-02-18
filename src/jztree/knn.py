@@ -1,12 +1,15 @@
+from dataclasses import replace
 import numpy as np
 import jax
 import jax.numpy as jnp
 
 from .config import KNNConfig
-from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId
+from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierarchy, PackedArray
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
+from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list
 from .tools import inverse_indices
-from .jax_ext import raise_if
+from .jax_ext import raise_if, pcast_vma
+from .comm import get_rank_info, all_to_all_request_children
 
 from jztree_cuda import ffi_knn
 jax.ffi.register_ffi_target("KnnLeaf2Leaf", ffi_knn.KnnLeaf2Leaf(), platform="CUDA")
@@ -207,3 +210,57 @@ def knn(pos0, k=16, boxsize=0., cfg : KNNConfig = KNNConfig(), pos_query=None):
     rknn, iknn = evaluate_knn(data, pos_query=pos_query)
     return rknn, iknn
 knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "cfg"])
+
+# ------------------------------------------------------------------------------------------------ #
+#                                          Distributed KNN                                         #
+# ------------------------------------------------------------------------------------------------ #
+
+def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0., 
+                         alloc_fac_ilist = 32
+                        ): #-> Tuple[FofNodeData, InteractionList, PackedArray]:
+    rank, ndev, axis_name = get_rank_info()
+
+    size = th.base_size()
+
+    spl, ilist, nsup = distr_grouped_dense_interaction_list(
+        th.num(th.num_planes()-1), size, int(size*alloc_fac_ilist)
+    )
+    ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
+
+    # Define arrays we need during tree-walk
+    spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+
+    def handle_plane(i: int, ilist: InteractionList):
+        level = th.num_planes() - 1 - i
+
+        parent_spl = spl_n2n.get(level+1, size+1)
+
+        node_pos_lvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
+        node_data = PosLvlNum(node_pos_lvl, npart=th.npart(level, size))
+
+        # Request the remote node children that we need to interact with
+        (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
+            ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
+            axis_name=axis_name
+        )
+
+        ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
+
+        # Remove 0 interaction nodes from interaction list (reduces unnecessary remote requests)
+        ilist = replace(ilist, ids=ids, dev_spl=dev_spl)
+        is_local = (jnp.arange(size) >= dev_spl[rank]) & (jnp.arange(size) < dev_spl[rank+1])
+        ilist = simplify_interaction_list(ilist, always_keep=is_local)
+
+        return ilist
+
+    ilist = jax.lax.fori_loop(0, th.num_planes(), handle_plane, ilist)
+
+    # (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
+    #     ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
+    #     axis_name=axis_name
+    # )
+
+    return ilist
+# _distr_knn_dual_walk.jit = jax.jit(
+#     _distr_knn_dual_walk, static_argnames=("k", "alloc_fac_ilist", "boxsize")
+# )

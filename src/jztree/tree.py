@@ -631,7 +631,7 @@ def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
     return arr.at[indices].set(values)
 
-def simplify_interaction_list(ilist: InteractionList, num_always_keep: jax.Array | None = None
+def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | None = None
                               ) -> InteractionList:
     """Get reduced version of the interaction and node list skipping nodes without interactions
     
@@ -644,8 +644,9 @@ def simplify_interaction_list(ilist: InteractionList, num_always_keep: jax.Array
     ioth = jnp.where(idx < ilist.ispl[-1], ilist.iother, size_nodes)
     flag = ilist.ispl[1:] > ilist.ispl[:-1] # appears as receiver
     flag = flag.at[ioth].set(True) # appears as source
-    if num_always_keep is not None:
-        flag = flag | (jnp.arange(len(ilist.ids)) < num_always_keep)
+
+    if always_keep is not None:
+        flag = flag | always_keep
     
     # create reduced id list
     prefix = cumsum_starting_with_zero(flag)

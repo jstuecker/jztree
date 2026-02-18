@@ -165,7 +165,7 @@ def squeeze_particles(part: Pos):
             if (part.mass.ndim == 1) and (len(part.mass) == ndev): # scalar mass per device
                 part_sq.mass = part.mass[0]
         
-        return part_sq
+    return part_sq
 
 def all_particles_equal(p1: ParticleData, p2: ParticleData):
     flag_tree = jax.tree.map(lambda a, b: jnp.all(a==b), p1, p2)
