@@ -44,26 +44,26 @@ def ilist_knn_search(ilist: InteractionList, isplitT, xT, xQ=None,  isplitQ=None
     return rknn, iknn
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
 
-def build_ilist_knn(ilist: InteractionList, spl: jax.Array, child_data: PosLvlNum,
-                    k: int = 32, boxsize: float = 0., alloc_fac: float = 128, 
-                    rfac_maxbin: float = 16.) -> InteractionList:
+def knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvlNum,
+                  k: int = 32, boxsize: float = 0., rfac_maxbin: float = 16.) -> InteractionList:
     boxsize = 0. if boxsize is None else boxsize
 
-    assert ilist.ispl.shape[0] == spl.shape[0], "Should both correspond to no. of nodes+1"
+    assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
     assert ilist.iother.shape == ilist.rad2.shape, "node_ilist and node_ir2list must have the same shape"
+    assert ilist.size() < 2**31, f"Ilist allocation is in overflow danger {ilist.size()/2**31}"
 
-    size = len(child_data.poslvl.pos)
-    x4leaf = child_data.poslvl.pos_lvl()
+    size = len(node_data.poslvl.pos)
+    x4leaf = node_data.poslvl.pos_lvl()
 
-    rbuf = jax.ShapeDtypeStruct((size,), jnp.float32)
-    leaf_ilist = jax.ShapeDtypeStruct((int(alloc_fac * size),), jnp.int32)
-    leaf_ilist_splits = jax.ShapeDtypeStruct((size+1,), jnp.int32)
-    leaf_ilist_rad = jax.ShapeDtypeStruct(leaf_ilist.shape, jnp.float32)
+    outputs = (
+        jax.ShapeDtypeStruct((size,), jnp.float32), # radii buffer (temporary)
+        jax.ShapeDtypeStruct((ilist.size(),), jnp.int32), # ilist
+        jax.ShapeDtypeStruct((ilist.size(),), jnp.float32), # ilist radii
+        jax.ShapeDtypeStruct((size+1,), jnp.int32) # ilist splits
+    )
 
-    assert leaf_ilist.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
-
-    radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
-        x4leaf, child_data.npart, spl, ilist.iother, ilist.rad2, ilist.ispl,
+    radii, il, ilr2, ispl = jax.ffi.ffi_call("ConstructIlist", outputs)(
+        x4leaf, node_data.npart, spl_parent, ilist.iother, ilist.rad2, ilist.ispl,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
         rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize)
     )
@@ -74,8 +74,8 @@ def build_ilist_knn(ilist: InteractionList, spl: jax.Array, child_data: PosLvlNu
         n1=ispl[-1], n2=il.size, ratio=ispl[-1]/il.size
     )
 
-    return InteractionList(ispl, il, rad2=ir2l)
-build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac"])
+    return InteractionList(ispl, il, rad2=ilr2)
+knn_node2node_ilist.jit = jax.jit(knn_node2node_ilist, static_argnames=["k", "boxsize", "rfac_maxbin"])
 
 def segment_sort(key, val, isplit, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
@@ -159,15 +159,12 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     def handle_level(i, ilist: InteractionList):
         level = nlevels - i - 1
         
-        spl = spl_n2n.get(level+1, size+1)
+        spl_parent = spl_n2n.get(level+1, size+1)
 
         node_pos_lvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         node_data = PosLvlNum(node_pos_lvl, npart=th.npart(level, size))
 
-        ilist = build_ilist_knn(
-            ilist, spl, node_data, k=k, boxsize=boxsize, alloc_fac=cfg.alloc_fac_ilist
-        )
-        return ilist
+        return knn_node2node_ilist(ilist, spl_parent, node_data, k=k, boxsize=boxsize)
     
     ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
 
