@@ -141,45 +141,6 @@ def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_
     return node_data, ilist
 node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
-from dataclasses import dataclass
-@dataclass
-class NodeData:
-    poslvl: PosLvl
-    igroup: jnp.ndarray
-
-def node_node_fof_v2(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
-                  ) -> Tuple[FofNodeData, InteractionList]:
-    def init_nodes(num, size):
-        poslvl = PosLvl(pos=jnp.zeros((size,3), jnp.float32), lvl=jnp.zeros(size, dtype=jnp.int32))
-        return NodeData(poslvl=poslvl, igroup=jnp.arange(size, dtype=int))
-
-    def child_input(level, node_data: NodeData, spl):
-        size = th.plane_sizes[level]
-        return NodeData(
-            poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size)),
-            igroup = node_to_child_label(node_data.igroup, node_data.poslvl.lvl, spl, size, rlink=rlink)
-        )
-
-    def n2n(level, ilist, node_data, spl, child_data):
-        igroup, ilist = node_fof_and_ilist(
-            ilist, spl, child_data.poslvl, child_data.igroup,
-            rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
-        )
-        return NodeData(child_data.poslvl, igroup), ilist
-
-    tw_def = TreeWalkFunctions(
-        top_node_out=init_nodes,
-        child_input=child_input,
-        evaluate_n2n=n2n
-    )
-
-    size = th.base_size()
-    node_data, ilist = dual_tree_walk(tw_def, th, size_ilist=int(th.base_size()*alloc_fac_ilist))
-
-    fof_data = FofNodeData(th.lvl.get(0, size), node_data.igroup, th.ispl_n2n.get(0, size+1))
-
-    return fof_data, ilist
-
 def particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                           rlink: float, boxsize: float = 0., block_size=32):
     part_igroup = node_to_child_label(
