@@ -26,6 +26,18 @@ struct PosR {
     float r;
 };
 
+struct ConstInteractionList {
+    const int32_t* spl;
+    const int32_t* iother;
+    const float* rad2 = nullptr;
+};
+
+struct InteractionList {
+    int32_t* spl;
+    int32_t* iother;
+    float* rad2 = nullptr;
+};
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                         Nearest K Heap                                         */
 /* ---------------------------------------------------------------------------------------------- */
@@ -233,9 +245,7 @@ struct LogBinMap {
 #define INTERACTION_BINS 16
 
 __global__ void KernelCountInteractions(
-    const int* parent_ilist_splits,
-    const int* parent_ilist,
-    const float* parent_ilist_r2,
+    ConstInteractionList par_ilist,
     const int* parent_spl,
     const Node* nodes,
     const int* nodes_npart,
@@ -276,8 +286,7 @@ __global__ void KernelCountInteractions(
         CumHist<INTERACTION_BINS> rhist;
 
         PrefetchList2<int,float> pf_ilist(
-            parent_ilist, parent_ilist_r2, parent_ilist_splits[parentQ], 
-            parent_ilist_splits[parentQ + 1]
+            par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
         );
 
         float rmax2 = INFINITY;
@@ -326,7 +335,7 @@ __global__ void KernelCountInteractions(
         // // since we need to include any node that may contain particles within rmax
         int ncount = 0;
 
-        pf_ilist.restart(parent_ilist_splits[parentQ], parent_ilist_splits[parentQ + 1]);
+        pf_ilist.restart(par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]);
 
         while(!pf_ilist.finished()) {
             Pair<int,float> interaction = pf_ilist.next();
@@ -368,15 +377,11 @@ __global__ void KernelCountInteractions(
 }
 
 __global__ void KernelInsertInteractions(
-    const int* parent_ilist_spl,
-    const int* parent_ilist,
-    const float* parent_ilist_r2,
+    ConstInteractionList par_ilist,
     const int* parent_spl,
     const Node* nodes,
-    const int* node_splits,
     const float* node_rmax2,
-    int* node_ilist,
-    float* node_ilist_r2,
+    InteractionList node_ilist,
     int nmax,
     float boxsize
 ) {
@@ -391,12 +396,12 @@ __global__ void KernelInsertInteractions(
         float3 xQ = nodeQ.center;
         float3 extQ = LvlToHalfExt(nodeQ.level);
         float rmaxQ2 = node_rmax2[inodeQ];
-        int out_offset = node_splits[inodeQ];
+        int out_offset = node_ilist.spl[inodeQ];
 
         int ninserted = 0;
 
         PrefetchList2<int,float> pf_ilist(
-            parent_ilist, parent_ilist_r2, parent_ilist_spl[parentQ], parent_ilist_spl[parentQ + 1]
+            par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
         );
         
         while(!pf_ilist.finished()) {
@@ -435,8 +440,8 @@ __global__ void KernelInsertInteractions(
                             r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
                         }
 
-                        node_ilist_r2[offset] = r2;
-                        node_ilist[offset] = itoff + j;
+                        node_ilist.rad2[offset] = r2;
+                        node_ilist.iother[offset] = itoff + j;
                         ninserted += 1;
                     }
                 }
@@ -452,16 +457,16 @@ __global__ void KernelInsertInteractions(
 
 ffi::Error KnnNode2Node(
     cudaStream_t stream,
-    const int* parent_ilist_spl,
-    const int* parent_ilist,
+    const int32_t* parent_ilist_spl,
+    const int32_t* parent_ilist_ioth,
     const float* parent_ilist_r2,
-    const int* parent_spl,
+    const int32_t* parent_spl,
     const Node* nodes,
-    const int* nodes_npart,
+    const int32_t* nodes_npart,
     // outputs
     float* node_rmax2,
-    int* node_ilist_spl,
-    int* node_ilist,
+    int32_t* node_ilist_spl,
+    int32_t* node_ilist_ioth,
     float* node_ilist_r2,
     // parameters
     const int k,
@@ -474,7 +479,10 @@ ffi::Error KnnNode2Node(
     const int size_nodes,
     const size_t node_ilist_size
 ) {
-    cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(size_nodes+1), stream);
+    ConstInteractionList par_ilist = {parent_ilist_spl, parent_ilist_ioth, parent_ilist_r2};
+    InteractionList node_ilist = {node_ilist_spl, node_ilist_ioth, node_ilist_r2};
+
+    cudaMemsetAsync(node_ilist.spl, 0, sizeof(int32_t)*(size_nodes+1), stream);
 
     constexpr int BINS = INTERACTION_BINS;
     float bins_per_log2 = BINS / log2f(rfac_maxbin);
@@ -482,8 +490,8 @@ ffi::Error KnnNode2Node(
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
     KernelCountInteractions<<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-        parent_ilist_spl, parent_ilist, parent_ilist_r2, parent_spl, nodes, nodes_npart,
-        node_ilist_spl + 1, node_rmax2,
+        par_ilist, parent_spl, nodes, nodes_npart,
+        node_ilist.spl + 1, node_rmax2,
         k, bins_per_log2, boxsize
     );
 
@@ -492,7 +500,7 @@ ffi::Error KnnNode2Node(
     // This should easily fit in general, but better check that it actually does:
     size_t tmp_bytes;
     cub::DeviceScan::InclusiveSum(
-        nullptr, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1,  size_nodes, stream
+        nullptr, tmp_bytes, node_ilist.spl + 1, node_ilist.spl + 1,  size_nodes, stream
     ); // determine the needed allocation size for CUB:
 
     if (tmp_bytes > node_ilist_size * sizeof(int)) {
@@ -501,15 +509,14 @@ ffi::Error KnnNode2Node(
             "Have:" + std::to_string(node_ilist_size * sizeof(int)) + " bytes. ");
     }
     cub::DeviceScan::InclusiveSum(
-        node_ilist, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1, size_nodes, stream
+        node_ilist_ioth, tmp_bytes, node_ilist.spl + 1, node_ilist.spl + 1, size_nodes, stream
     );
 
     // Now insert the interactions
     smem_alloc_size = blocksize_fill * 2*sizeof(float3);
     KernelInsertInteractions<<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-        parent_ilist_spl, parent_ilist, parent_ilist_r2, parent_spl, nodes, 
-        node_ilist_spl, node_rmax2,
-        node_ilist, node_ilist_r2, // output
+        par_ilist, parent_spl, nodes, node_rmax2,
+        node_ilist, // output
         node_ilist_size, boxsize    // parameters
     );
 
@@ -521,7 +528,7 @@ ffi::Error KnnNode2Node(
     int smem_size = 512;
     size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int32_t));
     segmented_bitonic_sort_kv<<<size_nodes, blocksize_sort, smem_bytes, stream>>>(
-        node_ilist_r2, node_ilist, node_ilist_spl, size_nodes, smem_size
+        node_ilist_r2, node_ilist_ioth, node_ilist.spl, size_nodes, smem_size
     );
     
     cudaError_t last_error = cudaGetLastError();

@@ -123,14 +123,14 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 ffi::Error KnnNode2NodeFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer parent_ilist_spl,
-    ffi::AnyBuffer parent_ilist,
+    ffi::AnyBuffer parent_ilist_ioth,
     ffi::AnyBuffer parent_ilist_r2,
     ffi::AnyBuffer parent_spl,
     ffi::AnyBuffer nodes,
     ffi::AnyBuffer nodes_npart,
     ffi::Result<ffi::AnyBuffer> node_rmax2,
     ffi::Result<ffi::AnyBuffer> node_ilist_spl,
-    ffi::Result<ffi::AnyBuffer> node_ilist,
+    ffi::Result<ffi::AnyBuffer> node_ilist_ioth,
     ffi::Result<ffi::AnyBuffer> node_ilist_r2,
     int k,
     size_t blocksize_fill,
@@ -140,20 +140,20 @@ ffi::Error KnnNode2NodeFFIHost(
 ) {
     int size_parents = parent_spl.element_count() - 1;
     int size_nodes = nodes_npart.element_count();
-    size_t node_ilist_size = node_ilist->element_count();
+    size_t node_ilist_size = node_ilist_ioth->element_count();
 
     // Now call our function
     ffi::Error result = KnnNode2Node(
         stream,
-        reinterpret_cast<int*>(parent_ilist_spl.untyped_data()),
-        reinterpret_cast<int*>(parent_ilist.untyped_data()),
+        reinterpret_cast<int32_t*>(parent_ilist_spl.untyped_data()),
+        reinterpret_cast<int32_t*>(parent_ilist_ioth.untyped_data()),
         reinterpret_cast<float*>(parent_ilist_r2.untyped_data()),
-        reinterpret_cast<int*>(parent_spl.untyped_data()),
+        reinterpret_cast<int32_t*>(parent_spl.untyped_data()),
         reinterpret_cast<Node*>(nodes.untyped_data()),
-        reinterpret_cast<int*>(nodes_npart.untyped_data()),
+        reinterpret_cast<int32_t*>(nodes_npart.untyped_data()),
         reinterpret_cast<float*>(node_rmax2->untyped_data()),
-        reinterpret_cast<int*>(node_ilist_spl->untyped_data()),
-        reinterpret_cast<int*>(node_ilist->untyped_data()),
+        reinterpret_cast<int32_t*>(node_ilist_spl->untyped_data()),
+        reinterpret_cast<int32_t*>(node_ilist_ioth->untyped_data()),
         reinterpret_cast<float*>(node_ilist_r2->untyped_data()),
         k,
         blocksize_fill,
@@ -177,14 +177,14 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // parent_ilist_spl
-        .Arg<ffi::AnyBuffer>() // parent_ilist
+        .Arg<ffi::AnyBuffer>() // parent_ilist_ioth
         .Arg<ffi::AnyBuffer>() // parent_ilist_r2
         .Arg<ffi::AnyBuffer>() // parent_spl
         .Arg<ffi::AnyBuffer>() // nodes
         .Arg<ffi::AnyBuffer>() // nodes_npart
         .Ret<ffi::AnyBuffer>() // node_rmax2
         .Ret<ffi::AnyBuffer>() // node_ilist_spl
-        .Ret<ffi::AnyBuffer>() // node_ilist
+        .Ret<ffi::AnyBuffer>() // node_ilist_ioth
         .Ret<ffi::AnyBuffer>() // node_ilist_r2
         .Attr<int>("k")
         .Attr<size_t>("blocksize_fill")
