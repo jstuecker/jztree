@@ -83,19 +83,19 @@ struct SortedNearestK {
 /* ---------------------------------------------------------------------------------------------- */
 
 template <int k>
-__global__ void IlistKNN(
-    const PosR* xT,             // input positions
-    const PosR* xQ,             // query positions
-    const int* isplitT,         // leaf-ranges in A
-    const int* isplitQ,         // leaf-ranges in B
+__global__ void KnnLeaf2Leaf(
+    const int* ilist_spl,       // leaf-ranges in ilist
     const int* ilist,           // interaction list
-    const float* ir2list,       // (lower) interaction rmax2
-    const int* ilist_splitsQ,   // B leaf-ranges in ilist
+    const float* ilist_r2,      // (lower) interaction rmax2
+    const int* splT,            // leaf-ranges in A
+    const PosR* xT,             // input positions
+    const int* splQ,            // leaf-ranges in B
+    const PosR* xQ,             // query positions
     Neighbor* knn,              // output knn list
     float boxsize               // if > 0, use for periodic wrapping
 ) {
-    int inodeQ = blockIdx.x;
-    int iqstart = isplitQ[inodeQ], iqend = isplitQ[inodeQ + 1];
+    int ileafQ = blockIdx.x;
+    int iqstart = splQ[ileafQ], iqend = splQ[ileafQ + 1];
     int max_part_smem = blockDim.x;
 
     for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
@@ -108,12 +108,12 @@ __global__ void IlistKNN(
         extern __shared__ PosId particles[];
 
         PrefetchList2<int,float> pf_ilist(
-            ilist, ir2list, ilist_splitsQ[inodeQ], ilist_splitsQ[inodeQ + 1]
+            ilist, ilist_r2, ilist_spl[ileafQ], ilist_spl[ileafQ + 1]
         );
 
         while(!pf_ilist.finished()) {
             Pair<int,float> interaction = pf_ilist.next();
-            int inodeT = interaction.first;
+            int ileafT = interaction.first;
             float r2T = interaction.second;
 
             // r2T are the lower leaf-leaf distances and the interactions are sorted by these rmax2
@@ -124,8 +124,8 @@ __global__ void IlistKNN(
             if(!any_accept) break;
 
             /* Now load the leaf */
-            int ipartTstart = isplitT[inodeT];
-            int ipartTend = isplitT[inodeT + 1];
+            int ipartTstart = splT[ileafT];
+            int ipartTend = splT[ileafT + 1];
             for(int ioff = ipartTstart; ioff < ipartTend; ioff += max_part_smem) {
                 int nload = min(max_part_smem, ipartTend - ioff);
                 for(int i = threadIdx.x; i < nload; i += blockDim.x)

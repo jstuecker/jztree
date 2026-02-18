@@ -22,45 +22,45 @@ namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: IlistKNN                                  */
+/*                             FFI call to CUDA kernel: KnnLeaf2Leaf                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error IlistKNNFFIHost(
+ffi::Error KnnLeaf2LeafFFIHost(
     cudaStream_t stream,
-    ffi::AnyBuffer xT,
-    ffi::AnyBuffer xQ,
-    ffi::AnyBuffer isplitT,
-    ffi::AnyBuffer isplitQ,
+    ffi::AnyBuffer ilist_spl,
     ffi::AnyBuffer ilist,
-    ffi::AnyBuffer ir2list,
-    ffi::AnyBuffer ilist_splitsQ,
+    ffi::AnyBuffer ilist_r2,
+    ffi::AnyBuffer splT,
+    ffi::AnyBuffer xT,
+    ffi::AnyBuffer splQ,
+    ffi::AnyBuffer xQ,
     ffi::Result<ffi::AnyBuffer> knn,
     float boxsize,
     int k
 ) {
     dim3 blockDim(32);
-    dim3 gridDim(isplitQ.element_count() - 1);
+    dim3 gridDim(splQ.element_count() - 1);
     size_t smem = blockDim.x * sizeof(PosId);
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
-    PosR* xT_val = reinterpret_cast<PosR*>(xT.untyped_data());
-    PosR* xQ_val = reinterpret_cast<PosR*>(xQ.untyped_data());
-    int* isplitT_val = reinterpret_cast<int*>(isplitT.untyped_data());
-    int* isplitQ_val = reinterpret_cast<int*>(isplitQ.untyped_data());
+    int* ilist_spl_val = reinterpret_cast<int*>(ilist_spl.untyped_data());
     int* ilist_val = reinterpret_cast<int*>(ilist.untyped_data());
-    float* ir2list_val = reinterpret_cast<float*>(ir2list.untyped_data());
-    int* ilist_splitsQ_val = reinterpret_cast<int*>(ilist_splitsQ.untyped_data());
+    float* ilist_r2_val = reinterpret_cast<float*>(ilist_r2.untyped_data());
+    int* splT_val = reinterpret_cast<int*>(splT.untyped_data());
+    PosR* xT_val = reinterpret_cast<PosR*>(xT.untyped_data());
+    int* splQ_val = reinterpret_cast<int*>(splQ.untyped_data());
+    PosR* xQ_val = reinterpret_cast<PosR*>(xQ.untyped_data());
     Neighbor* knn_val = reinterpret_cast<Neighbor*>(knn->untyped_data());
 
     void* args[] = {
-        &xT_val,
-        &xQ_val,
-        &isplitT_val,
-        &isplitQ_val,
+        &ilist_spl_val,
         &ilist_val,
-        &ir2list_val,
-        &ilist_splitsQ_val,
+        &ilist_r2_val,
+        &splT_val,
+        &xT_val,
+        &splQ_val,
+        &xQ_val,
         &knn_val,
         &boxsize
     };
@@ -68,22 +68,22 @@ ffi::Error IlistKNNFFIHost(
     // We have template parameters, so we need to instantiate all valid templates
     // For this we select a function pointer through a map
     using TTuple = std::tuple<int>;
-    using TFunctionType = decltype(IlistKNN<4>);
+    using TFunctionType = decltype(KnnLeaf2Leaf<4>);
 
     std::map<TTuple, TFunctionType*> instance_map;
-    instance_map[{4}] = IlistKNN<4>;
-    instance_map[{8}] = IlistKNN<8>;
-    instance_map[{12}] = IlistKNN<12>;
-    instance_map[{16}] = IlistKNN<16>;
-    instance_map[{32}] = IlistKNN<32>;
-    instance_map[{64}] = IlistKNN<64>;
+    instance_map[{4}] = KnnLeaf2Leaf<4>;
+    instance_map[{8}] = KnnLeaf2Leaf<8>;
+    instance_map[{12}] = KnnLeaf2Leaf<12>;
+    instance_map[{16}] = KnnLeaf2Leaf<16>;
+    instance_map[{32}] = KnnLeaf2Leaf<32>;
+    instance_map[{64}] = KnnLeaf2Leaf<64>;
 
     auto it = instance_map.find({k});
 
     if(it == instance_map.end()) {
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (k)"\
-            " in IlistKNNFFIHost -- Only supporting:\n"\
+            " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
             "(4), (8), (12), (16), (32), (64)"
         );
     }
@@ -100,16 +100,16 @@ ffi::Error IlistKNNFFIHost(
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    IlistKNNFFI, IlistKNNFFIHost,
+    KnnLeaf2LeafFFI, KnnLeaf2LeafFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // xT
-        .Arg<ffi::AnyBuffer>() // xQ
-        .Arg<ffi::AnyBuffer>() // isplitT
-        .Arg<ffi::AnyBuffer>() // isplitQ
+        .Arg<ffi::AnyBuffer>() // ilist_spl
         .Arg<ffi::AnyBuffer>() // ilist
-        .Arg<ffi::AnyBuffer>() // ir2list
-        .Arg<ffi::AnyBuffer>() // ilist_splitsQ
+        .Arg<ffi::AnyBuffer>() // ilist_r2
+        .Arg<ffi::AnyBuffer>() // splT
+        .Arg<ffi::AnyBuffer>() // xT
+        .Arg<ffi::AnyBuffer>() // splQ
+        .Arg<ffi::AnyBuffer>() // xQ
         .Ret<ffi::AnyBuffer>() // knn
         .Attr<float>("boxsize")
         .Attr<int>("k"),
@@ -248,7 +248,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_knn, m) {
-    m.def("IlistKNN", []() { return EncapsulateFfiCall(&IlistKNNFFI); });
+    m.def("KnnLeaf2Leaf", []() { return EncapsulateFfiCall(&KnnLeaf2LeafFFI); });
     m.def("KnnNode2Node", []() { return EncapsulateFfiCall(&KnnNode2NodeFFI); });
     m.def("SegmentSort", []() { return EncapsulateFfiCall(&SegmentSortFFI); });
 }

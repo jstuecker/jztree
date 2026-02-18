@@ -15,14 +15,14 @@ default_includes = ["../common/math.cuh"]
 
 functions = parse.get_functions_from_file(
     str(HERE / "knn.cuh"),
-    names=["IlistKNN", "KnnNode2Node", "SegmentSort"],
+    names=["KnnLeaf2Leaf", "KnnNode2Node", "SegmentSort"],
     only_kernels=False
 )
 
-functions["IlistKNN"].template_par["k"].instances = k_instance_values
-functions["IlistKNN"].block_size_expression = 32
-functions["IlistKNN"].smem_size_expression = "blockDim.x * sizeof(PosId)"
-functions["IlistKNN"].grid_size_expression = "isplitQ.element_count() - 1"
+functions["KnnLeaf2Leaf"].template_par["k"].instances = k_instance_values
+functions["KnnLeaf2Leaf"].block_size_expression = 32
+functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId)"
+functions["KnnLeaf2Leaf"].grid_size_expression = "splQ.element_count() - 1"
 
 functions["KnnNode2Node"].par["nparents"].expression = "parent_spl.element_count() - 1"
 functions["KnnNode2Node"].par["nnodes"].expression = "nodes_npart.element_count()"

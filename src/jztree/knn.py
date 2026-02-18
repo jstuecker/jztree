@@ -9,7 +9,7 @@ from .tools import inverse_indices
 from .jax_ext import raise_if
 
 from jztree_cuda import ffi_knn
-jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
+jax.ffi.register_ffi_target("KnnLeaf2Leaf", ffi_knn.KnnLeaf2Leaf(), platform="CUDA")
 jax.ffi.register_ffi_target("KnnNode2Node", ffi_knn.KnnNode2Node(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")
 
@@ -17,17 +17,17 @@ jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
-def ilist_knn_search(ilist: InteractionList, isplitT, xT, xQ=None,  isplitQ=None, k=32, boxsize=0.):
+def knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
     if xQ is None: xQ = xT
-    if isplitQ is None: isplitQ = isplitT
+    if splQ is None: splQ = splT
 
     assert ilist.rad2.shape == ilist.iother.shape, "rilist must have the same shape as ilist"
 
     assert xT.dtype == xQ.dtype == jnp.float32
     assert xT.shape[-1] == xQ.shape[-1] == 3
-    assert isplitT.dtype == isplitQ.dtype == jnp.int32
+    assert splT.dtype == splQ.dtype == jnp.int32
     assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
     assert k in (4,8,12,16,32,64), "Only k=4,8,12,16,32,64 supported"
 
@@ -35,14 +35,14 @@ def ilist_knn_search(ilist: InteractionList, isplitT, xT, xQ=None,  isplitQ=None
     x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)
 
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
-    knn = jax.ffi.ffi_call("IlistKNN", (out_type, ))(
-        x4a, x4b, isplitT, isplitQ, ilist.iother, ilist.rad2, ilist.ispl,
+    knn = jax.ffi.ffi_call("KnnLeaf2Leaf", (out_type, ))(
+        ilist.ispl, ilist.iother, ilist.rad2, splT, x4a, splQ, x4b,
         boxsize=np.float32(boxsize), k=np.int32(k)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
  
     return rknn, iknn
-ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
+knn_leaf2leaf.jit = jax.jit(knn_leaf2leaf, static_argnames=("k", "boxsize"))
 
 def knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvlNum,
                   k: int = 32, boxsize: float = 0., rfac_maxbin: float = 16.) -> InteractionList:
@@ -108,9 +108,9 @@ def evaluate_knn_z(d : KNNData, posz_query=None):
     else:
         posz_query, spl_query = None, None
     
-    rnnz, innz = ilist_knn_search(
-        d.ilist, d.spl, d.partz.pos, k=d.k, boxsize=d.boxsize,
-        xQ=posz_query, isplitQ=spl_query)
+    rnnz, innz = knn_leaf2leaf(
+        d.ilist, d.spl, d.partz.pos, k=d.k, boxsize=d.boxsize, splQ=spl_query, xQ=posz_query
+    )
     
     if d.partz.id is not None: 
         # map back to original indices
