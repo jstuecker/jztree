@@ -431,7 +431,7 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     
     return node_data, ilist
 
-def distr_node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float = 0., 
+def distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0., 
                         alloc_fac_ilist = 32, size_links = None
                         ) -> Tuple[FofNodeData, InteractionList, PackedArray]:
     rank, ndev, axis_name = get_rank_info()
@@ -489,11 +489,11 @@ def distr_node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     node_data, ilist, link_data = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist, link_data))
 
     return node_data, ilist, link_data
-distr_node_node_fof.jit = jax.jit(
-    distr_node_node_fof, static_argnames=("alloc_fac_ilist", "boxsize", "rlink", "size_links")
+distr_fof_hierarchy.jit = jax.jit(
+    distr_fof_hierarchy, static_argnames=("alloc_fac_ilist", "boxsize", "rlink", "size_links")
 )
 
-def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, 
+def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList, 
                                 link_data: PackedArray, posz: jax.Array,
                                 rlink: float, boxsize: float = 0., block_size=32) -> Label:
     # We distinguish between global Labels that point to the global root particle
@@ -542,7 +542,7 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     labels.ilocal_segment = iseg_new
 
     return labels
-distr_particle_particle_fof.jit = jax.jit(distr_particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
+distr_fof_leaf2leaf.jit = jax.jit(distr_fof_leaf2leaf, static_argnames=["rlink", "boxsize", "block_size"])
 
 # ------------------------------------------------------------------------------------------------ #
 #                                   Ordering particles by groups                                   #
@@ -831,12 +831,12 @@ def distr_fof_z_with_tree(
     """
     rank, ndev, axis_name = get_rank_info()
 
-    node_data, ilist, link_data = distr_node_node_fof(
+    node_data, ilist, link_data = distr_fof_hierarchy(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist,
         size_links=int(cfg.alloc_fac_distr_links * len(posz))
     )
 
-    labels = distr_particle_particle_fof(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
+    labels = distr_fof_leaf2leaf(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
 
     if linearize_labels:
         num = jax.lax.all_gather(jnp.sum(~jnp.isnan(posz[...,0]), axis=0), axis_name)

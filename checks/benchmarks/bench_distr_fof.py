@@ -6,7 +6,7 @@ import numpy as np
 
 from jztree.config import FofConfig
 from jztree.tree import distr_zsort_and_tree
-from jztree.fof import distr_fof_z_with_tree, distr_node_node_fof, distr_particle_particle_fof
+from jztree.fof import distr_fof_z_with_tree, distr_fof_hierarchy, distr_fof_leaf2leaf
 from jztree.fof import fof_catalogue_from_groups, distr_fof_order, distr_fof_and_catalogue
 from jztree.jax_ext import get_rank_info, shard_map_constructor
 from jztree_utils import ics
@@ -53,14 +53,14 @@ def bench_fof_steps(jax_bench, pos, ndev):
 
     def node_node_fof(th, partz):
         cfg = FofConfig()
-        return distr_node_node_fof(
+        return distr_fof_hierarchy(
             th, rlink=rlink, boxsize=0., alloc_fac_ilist=cfg.alloc_fac_ilist, size_links=len(partz.pos)
         )
     node_node_fof = shard_map_constructor(node_node_fof)(mesh, jit=True)
     node_data, ilist, link_data = jb.measure(None, node_node_fof, th, partz, tag=f"node-node")[1]
 
     def particle_fof(node_data, ilist, link_data, partz):
-        return distr_particle_particle_fof(
+        return distr_fof_leaf2leaf(
             node_data, ilist, link_data, partz.pos, rlink=rlink, boxsize=0.
         )
     particle_fof = shard_map_constructor(particle_fof)(mesh, jit=True)
