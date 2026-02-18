@@ -117,44 +117,44 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: ConstructIlist                            */
+/*                             FFI call to CUDA kernel: KnnNode2Node                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error ConstructIlistFFIHost(
+ffi::Error KnnNode2NodeFFIHost(
     cudaStream_t stream,
-    ffi::AnyBuffer leaves,
-    ffi::AnyBuffer leaves_npart,
-    ffi::AnyBuffer isplit,
-    ffi::AnyBuffer node_ilist,
-    ffi::AnyBuffer node_ir2list,
-    ffi::AnyBuffer node_ilist_splits,
+    ffi::AnyBuffer parent_ilist_spl,
+    ffi::AnyBuffer parent_ilist,
+    ffi::AnyBuffer parent_ilist_r2,
+    ffi::AnyBuffer parent_spl,
+    ffi::AnyBuffer nodes,
+    ffi::AnyBuffer nodes_npart,
     ffi::Result<ffi::AnyBuffer> rmax2,
-    ffi::Result<ffi::AnyBuffer> leaf_ilist,
-    ffi::Result<ffi::AnyBuffer> leaf_ilist_rad,
-    ffi::Result<ffi::AnyBuffer> leaf_ilist_splits,
+    ffi::Result<ffi::AnyBuffer> node_ilist_splits,
+    ffi::Result<ffi::AnyBuffer> node_ilist,
+    ffi::Result<ffi::AnyBuffer> node_ilist_r2,
     int k,
     size_t blocksize_fill,
     size_t blocksize_sort,
     float rfac_maxbin,
     float boxsize
 ) {
-    int nnodes = isplit.element_count() - 1;
-    int nleaves = leaves_npart.element_count();
-    size_t leaf_ilist_size = leaf_ilist->element_count();
+    int nnodes = parent_spl.element_count() - 1;
+    int nleaves = nodes_npart.element_count();
+    size_t node_ilist_size = node_ilist->element_count();
 
     // Now call our function
-    ffi::Error result = ConstructIlist(
+    ffi::Error result = KnnNode2Node(
         stream,
-        reinterpret_cast<Node*>(leaves.untyped_data()),
-        reinterpret_cast<int*>(leaves_npart.untyped_data()),
-        reinterpret_cast<int*>(isplit.untyped_data()),
-        reinterpret_cast<int*>(node_ilist.untyped_data()),
-        reinterpret_cast<float*>(node_ir2list.untyped_data()),
-        reinterpret_cast<int*>(node_ilist_splits.untyped_data()),
+        reinterpret_cast<int*>(parent_ilist_spl.untyped_data()),
+        reinterpret_cast<int*>(parent_ilist.untyped_data()),
+        reinterpret_cast<float*>(parent_ilist_r2.untyped_data()),
+        reinterpret_cast<int*>(parent_spl.untyped_data()),
+        reinterpret_cast<Node*>(nodes.untyped_data()),
+        reinterpret_cast<int*>(nodes_npart.untyped_data()),
         reinterpret_cast<float*>(rmax2->untyped_data()),
-        reinterpret_cast<int*>(leaf_ilist->untyped_data()),
-        reinterpret_cast<float*>(leaf_ilist_rad->untyped_data()),
-        reinterpret_cast<int*>(leaf_ilist_splits->untyped_data()),
+        reinterpret_cast<int*>(node_ilist_splits->untyped_data()),
+        reinterpret_cast<int*>(node_ilist->untyped_data()),
+        reinterpret_cast<float*>(node_ilist_r2->untyped_data()),
         k,
         blocksize_fill,
         blocksize_sort,
@@ -162,7 +162,7 @@ ffi::Error ConstructIlistFFIHost(
         boxsize,
         nnodes,
         nleaves,
-        leaf_ilist_size
+        node_ilist_size
     );
 
     cudaError_t last_error = cudaGetLastError();
@@ -173,19 +173,19 @@ ffi::Error ConstructIlistFFIHost(
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    ConstructIlistFFI, ConstructIlistFFIHost,
+    KnnNode2NodeFFI, KnnNode2NodeFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // leaves
-        .Arg<ffi::AnyBuffer>() // leaves_npart
-        .Arg<ffi::AnyBuffer>() // isplit
-        .Arg<ffi::AnyBuffer>() // node_ilist
-        .Arg<ffi::AnyBuffer>() // node_ir2list
-        .Arg<ffi::AnyBuffer>() // node_ilist_splits
+        .Arg<ffi::AnyBuffer>() // parent_ilist_spl
+        .Arg<ffi::AnyBuffer>() // parent_ilist
+        .Arg<ffi::AnyBuffer>() // parent_ilist_r2
+        .Arg<ffi::AnyBuffer>() // parent_spl
+        .Arg<ffi::AnyBuffer>() // nodes
+        .Arg<ffi::AnyBuffer>() // nodes_npart
         .Ret<ffi::AnyBuffer>() // rmax2
-        .Ret<ffi::AnyBuffer>() // leaf_ilist
-        .Ret<ffi::AnyBuffer>() // leaf_ilist_rad
-        .Ret<ffi::AnyBuffer>() // leaf_ilist_splits
+        .Ret<ffi::AnyBuffer>() // node_ilist_splits
+        .Ret<ffi::AnyBuffer>() // node_ilist
+        .Ret<ffi::AnyBuffer>() // node_ilist_r2
         .Attr<int>("k")
         .Attr<size_t>("blocksize_fill")
         .Attr<size_t>("blocksize_sort")
@@ -249,6 +249,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 NB_MODULE(ffi_knn, m) {
     m.def("IlistKNN", []() { return EncapsulateFfiCall(&IlistKNNFFI); });
-    m.def("ConstructIlist", []() { return EncapsulateFfiCall(&ConstructIlistFFI); });
+    m.def("KnnNode2Node", []() { return EncapsulateFfiCall(&KnnNode2NodeFFI); });
     m.def("SegmentSort", []() { return EncapsulateFfiCall(&SegmentSortFFI); });
 }

@@ -10,7 +10,7 @@ from .jax_ext import raise_if
 
 from jztree_cuda import ffi_knn
 jax.ffi.register_ffi_target("IlistKNN", ffi_knn.IlistKNN(), platform="CUDA")
-jax.ffi.register_ffi_target("ConstructIlist", ffi_knn.ConstructIlist(), platform="CUDA")
+jax.ffi.register_ffi_target("KnnNode2Node", ffi_knn.KnnNode2Node(), platform="CUDA")
 jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA")
 
 # ------------------------------------------------------------------------------------------------ #
@@ -53,17 +53,17 @@ def knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data
     assert ilist.size() < 2**31, f"Ilist allocation is in overflow danger {ilist.size()/2**31}"
 
     size = len(node_data.poslvl.pos)
-    x4leaf = node_data.poslvl.pos_lvl()
+    poslvl = node_data.poslvl.pos_lvl()
 
     outputs = (
         jax.ShapeDtypeStruct((size,), jnp.float32), # radii buffer (temporary)
+        jax.ShapeDtypeStruct((size+1,), jnp.int32), # ilist splits
         jax.ShapeDtypeStruct((ilist.size(),), jnp.int32), # ilist
-        jax.ShapeDtypeStruct((ilist.size(),), jnp.float32), # ilist radii
-        jax.ShapeDtypeStruct((size+1,), jnp.int32) # ilist splits
+        jax.ShapeDtypeStruct((ilist.size(),), jnp.float32) # ilist radii
     )
 
-    radii, il, ilr2, ispl = jax.ffi.ffi_call("ConstructIlist", outputs)(
-        x4leaf, node_data.npart, spl_parent, ilist.iother, ilist.rad2, ilist.ispl,
+    radii, ispl, il, ilr2 = jax.ffi.ffi_call("KnnNode2Node", outputs)(
+        ilist.ispl, ilist.iother, ilist.rad2, spl_parent, poslvl, node_data.npart,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
         rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize)
     )

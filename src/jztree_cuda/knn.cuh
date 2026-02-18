@@ -443,19 +443,19 @@ __global__ void KernelInsertInteractions(
 /*                                          Host function                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error ConstructIlist(
+ffi::Error KnnNode2Node(
     cudaStream_t stream,
-    const Node* leaves,
-    const int* leaves_npart,
-    const int* isplit,
-    const int* node_ilist,
-    const float* node_ir2list,
-    const int* node_ilist_splits,
+    const int* parent_ilist_spl,
+    const int* parent_ilist,
+    const float* parent_ilist_r2,
+    const int* parent_spl,
+    const Node* nodes,
+    const int* nodes_npart,
     // outputs
     float* rmax2,
-    int* leaf_ilist,
-    float* leaf_ilist_rad,
-    int* leaf_ilist_splits,
+    int* node_ilist_splits,
+    int* node_ilist,
+    float* node_ilist_r2,
     // parameters
     const int k,
     const size_t blocksize_fill,
@@ -465,9 +465,9 @@ ffi::Error ConstructIlist(
     // parameters that can be infered inside ffi:
     const int nnodes,
     const int nleaves,
-    const size_t leaf_ilist_size
+    const size_t node_ilist_size
 ) {
-    cudaMemsetAsync(leaf_ilist_splits, 0, sizeof(int)*(nleaves+1), stream);
+    cudaMemsetAsync(node_ilist_splits, 0, sizeof(int)*(nleaves+1), stream);
 
     constexpr int BINS = INTERACTION_BINS;
     float bins_per_log2 = BINS / log2f(rfac_maxbin);
@@ -475,8 +475,8 @@ ffi::Error ConstructIlist(
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
     KernelCountInteractions<<< nnodes, blocksize_fill, smem_alloc_size, stream>>>(
-        leaves, leaves_npart, isplit, node_ilist, node_ir2list, node_ilist_splits,
-        leaf_ilist_splits + 1, rmax2,
+        nodes, nodes_npart, parent_spl, parent_ilist, parent_ilist_r2, parent_ilist_spl,
+        node_ilist_splits + 1, rmax2,
         k, bins_per_log2, boxsize
     );
 
@@ -485,24 +485,24 @@ ffi::Error ConstructIlist(
     // This should easily fit in general, but better check that it actually does:
     size_t tmp_bytes;
     cub::DeviceScan::InclusiveSum(
-        nullptr, tmp_bytes, leaf_ilist_splits + 1, leaf_ilist_splits + 1,  nleaves, stream
+        nullptr, tmp_bytes, node_ilist_splits + 1, node_ilist_splits + 1,  nleaves, stream
     ); // determine the needed allocation size for CUB:
 
-    if (tmp_bytes > leaf_ilist_size * sizeof(int)) {
+    if (tmp_bytes > node_ilist_size * sizeof(int)) {
         return ffi::Error(ffi::ErrorCode::kOutOfRange,
             "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
-            "Have:" + std::to_string(leaf_ilist_size * sizeof(int)) + " bytes. ");
+            "Have:" + std::to_string(node_ilist_size * sizeof(int)) + " bytes. ");
     }
     cub::DeviceScan::InclusiveSum(
-        leaf_ilist, tmp_bytes, leaf_ilist_splits + 1, leaf_ilist_splits + 1, nleaves, stream
+        node_ilist, tmp_bytes, node_ilist_splits + 1, node_ilist_splits + 1, nleaves, stream
     );
 
     // Now insert the interactions
     smem_alloc_size = blocksize_fill * 2*sizeof(float3);
     KernelInsertInteractions<<< nnodes, blocksize_fill, smem_alloc_size, stream>>>(
-        leaves, isplit, node_ilist, node_ir2list, node_ilist_splits, leaf_ilist_splits, rmax2,
-        leaf_ilist, leaf_ilist_rad, // output
-        leaf_ilist_size, boxsize    // parameters
+        nodes, parent_spl, parent_ilist, parent_ilist_r2, parent_ilist_spl, node_ilist_splits, rmax2,
+        node_ilist, node_ilist_r2, // output
+        node_ilist_size, boxsize    // parameters
     );
 
     // Now sort the interaction list segments. (This will allow early exit in the knn search)
@@ -513,7 +513,7 @@ ffi::Error ConstructIlist(
     int smem_size = 512;
     size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int32_t));
     segmented_bitonic_sort_kv<<<nleaves, blocksize_sort, smem_bytes, stream>>>(
-        leaf_ilist_rad, leaf_ilist, leaf_ilist_splits, nleaves, smem_size
+        node_ilist_r2, node_ilist, node_ilist_splits, nleaves, smem_size
     );
     
     cudaError_t last_error = cudaGetLastError();
