@@ -368,7 +368,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
                         ) -> Tuple[FofNodeData, InteractionList, PackedArray]:
     rank, ndev, axis_name = get_rank_info()
 
-    size = th.plane_sizes[0]*2
+    size = th.base_size()
     if size_links is  None:
         size_links = size
 
