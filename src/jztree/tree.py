@@ -606,7 +606,7 @@ def _linearly_grouped(num, size, ngroup=32):
 
 def distr_grouped_dense_interaction_list(
         num_local: int, size: int, size_ilist: int, only_geq: bool = False
-        ) -> Tuple[jax.Array, InteractionList]:
+        ) -> Tuple[jax.Array, InteractionList, jax.Array]:
     rank, ndev, axis_name = get_rank_info()
 
     spl, nsuper = _linearly_grouped(num_local, size, ngroup=32)
@@ -625,7 +625,7 @@ def distr_grouped_dense_interaction_list(
     ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
     ilist.dev_spl = dev_spl
 
-    return spl, ilist
+    return spl, ilist, nsuper
 
 def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))

@@ -358,20 +358,6 @@ def _distr_detect_new_cross_task_links(igroup, igroup_new, origin_group, dev_spl
 #                                          Distributed FoF                                         #
 # ------------------------------------------------------------------------------------------------ #
 
-def _distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
-                        ) -> Tuple[FofNodeData, InteractionList]:
-    rank, ndev, axis_name = get_rank_info()
-
-    spl, ilist = distr_grouped_dense_interaction_list(
-        num_local, size, int(size*alloc_fac_ilist), only_geq=True
-    )
-    
-    labels = pcast_vma(jnp.arange(size), axis_name)
-    node_lvl = pcast_vma(jnp.full(size, 388), axis_name)
-    node_data = FofNodeData(node_lvl, labels, spl)
-    
-    return node_data, ilist
-
 def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0., 
                          alloc_fac_ilist = 32, size_links = None
                         ) -> Tuple[FofNodeData, InteractionList, PackedArray]:
@@ -381,17 +367,37 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     if size_links is  None:
         size_links = size
 
+    spl, ilist, nsup = distr_grouped_dense_interaction_list(
+        th.num(th.num_planes()-1), size, int(size*alloc_fac_ilist), only_geq=True
+    )
+    # Define arrays we need during tree-walk
+    spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+    node_lvl = th.lvl.append(jnp.full(size, 388), nsup, fill_value=388, resize=True)
     l2p = th.ispl_n2n.get(0, size+1)
 
-    def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
-        igroup = _node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink) 
+    # initialize labels of top-level
+    igroup = pcast_vma(jnp.arange(size), axis_name)
+
+    # Set up an empty PackedArray to save link data
+    link_data = PackedArray.create_empty(
+        (size_links, 4), levels=th.num_planes()+1, dtype=jnp.int32, vma=jax.typeof(rank).vma
+    )
+
+    def handle_plane(i: int, carry: Tuple[jax.Array, InteractionList, PackedArray]):
+        level = th.num_planes() - 1 - i
+        parent_igroup, ilist, link_data = carry
+
+        parent_lvl = node_lvl.get(level+1, size)
+        parent_spl = spl_n2n.get(level+1, size+1)
+
+        igroup = _node_to_child_label(parent_igroup, parent_lvl, parent_spl, rlink=rlink)
 
         poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
         
         # Request the remote node children that we need to interact with
         (poslvl, ids, pid), spl, dev_spl = all_to_all_request_children(
-            ilist.dev_spl, ilist.ids, node_data.spl, (poslvl, jnp.arange(size), pid),
+            ilist.dev_spl, ilist.ids, parent_spl, (poslvl, jnp.arange(size), pid),
             axis_name=axis_name
         )
 
@@ -402,32 +408,21 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         igroup_new, ilist = _fof_node2node(
             ilist, spl, poslvl, igroup, rlink=rlink, boxsize=boxsize
         )
-        ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # save the node origins in ilist
-
+        # Save cross-task links for later
         links, num_links = _distr_detect_new_cross_task_links(igroup, igroup_new, pid, dev_spl)
         link_data = link_data.append(links.stacked(axis=-1), num_links)
 
-        # Simplify interaction list (reduces unnecessary remote requests)
+        # Remove 0 interaction nodes from interaction list (reduces unnecessary remote requests)
+        ilist = replace(ilist, ids=ids, dev_spl=dev_spl)
         ilist = simplify_interaction_list(ilist, th.num(level))
 
-        # Define node-splits for next level
-        node_data = FofNodeData(
-            th.lvl.get(level, size), igroup_new, th.ispl_n2n.get(level, size+1)
-        )
+        return igroup_new, ilist, link_data
 
-        return node_data, ilist, link_data
-    
-    # Seed with dense interactions at top-level
-    node_data, ilist = _distr_fof_top_level(th.num(th.num_planes()-1), size, alloc_fac_ilist)
-    
-    # Set up an empty PackedArray to save link data and mark as varying per gpu
-    link_data = PackedArray.create_empty(
-        (size_links, 4), levels=th.num_planes()+1, dtype=jnp.int32, vma=jax.typeof(rank).vma
+    igroup, ilist, link_data = jax.lax.fori_loop(
+        0, th.num_planes(), handle_plane, (igroup, ilist, link_data)
     )
 
-    def loop_body(i, carry):
-        return handle_plane(th.num_planes()-i-1, *carry)
-    node_data, ilist, link_data = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist, link_data))
+    node_data = FofNodeData(th.lvl.get(0, size), igroup, spl_n2n.get(0, size))
 
     return node_data, ilist, link_data
 _distr_fof_hierarchy.jit = jax.jit(
