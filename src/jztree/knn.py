@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from .config import KNNConfig
-from .data import KNNData, PosLvl, PosLvlNum, InteractionList
+from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .tools import inverse_indices
 from .jax_ext import raise_if
@@ -17,18 +17,18 @@ jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
-def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  isplitQ=None, k=32, boxsize=0.):
+def ilist_knn_search(ilist: InteractionList, isplitT, xT, xQ=None,  isplitQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
     if xQ is None: xQ = xT
     if isplitQ is None: isplitQ = isplitT
 
-    assert ir2list.shape == ilist.shape, "rilist must have the same shape as ilist"
+    assert ilist.rad2.shape == ilist.iother.shape, "rilist must have the same shape as ilist"
 
     assert xT.dtype == xQ.dtype == jnp.float32
     assert xT.shape[-1] == xQ.shape[-1] == 3
     assert isplitT.dtype == isplitQ.dtype == jnp.int32
-    assert ilist.dtype == ilist_splitsB.dtype == jnp.int32
+    assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
     assert k in (4,8,12,16,32,64), "Only k=4,8,12,16,32,64 supported"
 
     x4a = jnp.concatenate((xT, jnp.zeros(xT.shape[:-1])[...,None]), axis=-1)
@@ -36,7 +36,7 @@ def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  ispli
 
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
     knn = jax.ffi.ffi_call("IlistKNN", (out_type, ))(
-        x4a, x4b, isplitT, isplitQ, ilist, ir2list, ilist_splitsB,
+        x4a, x4b, isplitT, isplitQ, ilist.iother, ilist.rad2, ilist.ispl,
         boxsize=np.float32(boxsize), k=np.int32(k)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
@@ -102,19 +102,19 @@ def evaluate_knn_z(d : KNNData, posz_query=None):
     if posz_query is not None:
         # To use custom query points we need to group them by our original leaves
         # we can represent each leaf by the first of the particles inside
-        xleaf = jnp.where((d.spl[1:] > d.spl[:-1])[:,None], d.posz[d.spl[:-1]], jnp.inf)
+        xleaf = jnp.where((d.spl[1:] > d.spl[:-1])[:,None], d.partz.pos[d.spl[:-1]], jnp.inf)
         ileaf = search_sorted_z(xleaf, posz_query, leaf_search=True)
         spl_query = jnp.searchsorted(ileaf, jnp.arange(len(xleaf)+1), side="left")
     else:
         posz_query, spl_query = None, None
     
     rnnz, innz = ilist_knn_search(
-        d.posz, d.spl, d.ilist, d.ir2list, d.ilist_spl, k=d.k, boxsize=d.boxsize,
+        d.ilist, d.spl, d.partz.pos, k=d.k, boxsize=d.boxsize,
         xQ=posz_query, isplitQ=spl_query)
     
-    if d.idz is not None: 
+    if d.partz.id is not None: 
         # map back to original indices
-        innz = d.idz[innz]
+        innz = d.partz.id[innz]
     
     return rnnz, innz
 evaluate_knn_z.jit = jax.jit(evaluate_knn_z)
@@ -125,7 +125,7 @@ def evaluate_knn(d : KNNData, pos_query=None):
     if pos_query is not None:
         posz_query, idz_query = pos_zorder_sort(pos_query)
     else:
-        posz_query, idz_query = None, d.idz
+        posz_query, idz_query = None, d.partz.id
     
     rnn, inn = evaluate_knn_z(d, posz_query=posz_query)
 
@@ -174,12 +174,9 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     data = KNNData(
         k=k,
         boxsize=boxsize,
-        posz=posz,
-        idz=idz,
+        partz=PosId(pos=posz, id=idz),
         spl=spl_n2n.get(0, size+1),
-        ilist=ilist.iother,
-        ir2list=ilist.rad2,
-        ilist_spl=ilist.ispl
+        ilist=ilist
     )
     
     return data

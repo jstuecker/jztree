@@ -101,12 +101,12 @@ def test_io_order():
     rnnzz, innzz = evaluate_knn_z.jit(dataz)  # ids and outputs in z-order
 
     print("radii only depent on output order:")
-    assert jnp.all(rnn00[data.idz] == rnn0z)
+    assert jnp.all(rnn00[data.partz.id] == rnn0z)
     assert jnp.all(rnn0z == rnnzz)
 
     print("ids also depent on input order used to define the data")
-    assert jnp.all(inn00[data.idz] == inn0z)
-    assert jnp.all(inn0z == data.idz[innzz])
+    assert jnp.all(inn00[data.partz.id] == inn0z)
+    assert jnp.all(inn0z == data.partz.id[innzz])
 
 @pytest.mark.skip_in_quick
 def test_twice_knn():

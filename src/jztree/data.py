@@ -178,7 +178,13 @@ def all_particles_equal(p1: ParticleData, p2: ParticleData):
 # ------------------------------------------------------------------------------------------------ #
 
 @jax.tree_util.register_dataclass
-@dataclass(kw_only=True)
+@dataclass(slots=True, kw_only=True)
+class PosId():
+    pos: jax.Array
+    id: jax.Array
+
+@jax.tree_util.register_dataclass
+@dataclass(slots=True, kw_only=True)
 class PosLvl():
     pos: jax.Array
     lvl: jax.Array
@@ -186,16 +192,15 @@ class PosLvl():
     def pos_lvl(self):
         return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
     
-@dataclass
+@dataclass(slots=True)
 class PosLvlNum():
     poslvl: PosLvl
     npart: jax.Array
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(slots=True)
 class PosLvlId(PosLvl):
     id: jax.Array
-
 
 # ------------------------------------------------------------------------------------------------ #
 #                                       Generic Data Holders                                       #
@@ -590,17 +595,12 @@ def catalogues_equal(c1: FofCatalogue, c2: FofCatalogue):
 # ------------------------------------------------------------------------------------------------ #
 
 
-@partial(jax.tree_util.register_dataclass, 
-         meta_fields=["k", "boxsize"],
-         data_fields=["posz", "idz", "spl", "ilist", "ir2list", "ilist_spl"])
-@dataclass
+@partial(jax.tree_util.register_dataclass)
+@dataclass(slots=True)
 class KNNData:
-    k : int
-    boxsize : float
+    k : int = static_field()
+    boxsize : float = static_field()
 
-    posz: jax.Array       # z-sorted positions
-    idz: jax.Array        # ids so that posz = pos0[idz]
+    partz: PosId
     spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
-    ilist: jax.Array      # interaction list (leaf indices)
-    ir2list: jax.Array    # interaction r2 list (lower bound leaf-leaf distances squared)
-    ilist_spl: jax.Array  # leaf i interacts with leaves ilist[ilist_spl[i]:ilist_spl[i+1]]
+    ilist: InteractionList
