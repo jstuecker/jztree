@@ -24,12 +24,12 @@ functions["IlistKNN"].block_size_expression = 32
 functions["IlistKNN"].smem_size_expression = "blockDim.x * sizeof(PosId)"
 functions["IlistKNN"].grid_size_expression = "isplitQ.element_count() - 1"
 
-functions["KnnNode2Node"].par["nnodes"].expression = "parent_spl.element_count() - 1"
-functions["KnnNode2Node"].par["nleaves"].expression = "nodes_npart.element_count()"
+functions["KnnNode2Node"].par["nparents"].expression = "parent_spl.element_count() - 1"
+functions["KnnNode2Node"].par["nnodes"].expression = "nodes_npart.element_count()"
 functions["KnnNode2Node"].par["node_ilist_size"].expression = "node_ilist->element_count()"
 
 functions["SegmentSort"].par["nkeys"].expression = "key.element_count()"
-functions["SegmentSort"].par["nsegs"].expression = "isplit.element_count() - 1"
+functions["SegmentSort"].par["nsegs"].expression = "spl.element_count() - 1"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_knn.cu"), 

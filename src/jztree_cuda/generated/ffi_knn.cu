@@ -128,8 +128,8 @@ ffi::Error KnnNode2NodeFFIHost(
     ffi::AnyBuffer parent_spl,
     ffi::AnyBuffer nodes,
     ffi::AnyBuffer nodes_npart,
-    ffi::Result<ffi::AnyBuffer> rmax2,
-    ffi::Result<ffi::AnyBuffer> node_ilist_splits,
+    ffi::Result<ffi::AnyBuffer> node_rmax2,
+    ffi::Result<ffi::AnyBuffer> node_ilist_spl,
     ffi::Result<ffi::AnyBuffer> node_ilist,
     ffi::Result<ffi::AnyBuffer> node_ilist_r2,
     int k,
@@ -138,8 +138,8 @@ ffi::Error KnnNode2NodeFFIHost(
     float rfac_maxbin,
     float boxsize
 ) {
-    int nnodes = parent_spl.element_count() - 1;
-    int nleaves = nodes_npart.element_count();
+    int nparents = parent_spl.element_count() - 1;
+    int nnodes = nodes_npart.element_count();
     size_t node_ilist_size = node_ilist->element_count();
 
     // Now call our function
@@ -151,8 +151,8 @@ ffi::Error KnnNode2NodeFFIHost(
         reinterpret_cast<int*>(parent_spl.untyped_data()),
         reinterpret_cast<Node*>(nodes.untyped_data()),
         reinterpret_cast<int*>(nodes_npart.untyped_data()),
-        reinterpret_cast<float*>(rmax2->untyped_data()),
-        reinterpret_cast<int*>(node_ilist_splits->untyped_data()),
+        reinterpret_cast<float*>(node_rmax2->untyped_data()),
+        reinterpret_cast<int*>(node_ilist_spl->untyped_data()),
         reinterpret_cast<int*>(node_ilist->untyped_data()),
         reinterpret_cast<float*>(node_ilist_r2->untyped_data()),
         k,
@@ -160,8 +160,8 @@ ffi::Error KnnNode2NodeFFIHost(
         blocksize_sort,
         rfac_maxbin,
         boxsize,
+        nparents,
         nnodes,
-        nleaves,
         node_ilist_size
     );
 
@@ -182,8 +182,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // parent_spl
         .Arg<ffi::AnyBuffer>() // nodes
         .Arg<ffi::AnyBuffer>() // nodes_npart
-        .Ret<ffi::AnyBuffer>() // rmax2
-        .Ret<ffi::AnyBuffer>() // node_ilist_splits
+        .Ret<ffi::AnyBuffer>() // node_rmax2
+        .Ret<ffi::AnyBuffer>() // node_ilist_spl
         .Ret<ffi::AnyBuffer>() // node_ilist
         .Ret<ffi::AnyBuffer>() // node_ilist_r2
         .Attr<int>("k")
@@ -200,26 +200,26 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 ffi::Error SegmentSortFFIHost(
     cudaStream_t stream,
+    ffi::AnyBuffer spl,
     ffi::AnyBuffer key,
     ffi::AnyBuffer val,
-    ffi::AnyBuffer isplit,
     ffi::Result<ffi::AnyBuffer> key_out,
     ffi::Result<ffi::AnyBuffer> val_out,
     size_t smem_size
 ) {
+    int32_t nsegs = spl.element_count() - 1;
     int32_t nkeys = key.element_count();
-    int32_t nsegs = isplit.element_count() - 1;
 
     // Now call our function
     ffi::Error result = SegmentSort(
         stream,
+        reinterpret_cast<int32_t*>(spl.untyped_data()),
         reinterpret_cast<float*>(key.untyped_data()),
         reinterpret_cast<int32_t*>(val.untyped_data()),
-        reinterpret_cast<int32_t*>(isplit.untyped_data()),
         reinterpret_cast<float*>(key_out->untyped_data()),
         reinterpret_cast<int32_t*>(val_out->untyped_data()),
-        nkeys,
         nsegs,
+        nkeys,
         smem_size
     );
 
@@ -234,9 +234,9 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     SegmentSortFFI, SegmentSortFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // spl
         .Arg<ffi::AnyBuffer>() // key
         .Arg<ffi::AnyBuffer>() // val
-        .Arg<ffi::AnyBuffer>() // isplit
         .Ret<ffi::AnyBuffer>() // key_out
         .Ret<ffi::AnyBuffer>() // val_out
         .Attr<size_t>("smem_size"),

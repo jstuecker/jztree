@@ -22,7 +22,7 @@ def test_segment_sort():
     r = jax.random.uniform(jax.random.PRNGKey(1), (spl[-1],), minval=0, maxval=1)
 
     ikey  = jnp.arange(len(r))
-    rnew, inew = segment_sort(r, ikey, spl, smem_size=64)
+    rnew, inew = segment_sort(spl, r, ikey, smem_size=64)
 
     # for this test, we can emulate a segmented sort through a lexsort in jax
     # (it takes a factor 10 longer though)

@@ -94,8 +94,8 @@ __global__ void IlistKNN(
     Neighbor* knn,              // output knn list
     float boxsize               // if > 0, use for periodic wrapping
 ) {
-    int ileafQ = blockIdx.x;
-    int iqstart = isplitQ[ileafQ], iqend = isplitQ[ileafQ + 1];
+    int inodeQ = blockIdx.x;
+    int iqstart = isplitQ[inodeQ], iqend = isplitQ[inodeQ + 1];
     int max_part_smem = blockDim.x;
 
     for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
@@ -107,11 +107,13 @@ __global__ void IlistKNN(
 
         extern __shared__ PosId particles[];
 
-        PrefetchList2<int,float> pf_ilist(ilist, ir2list, ilist_splitsQ[ileafQ], ilist_splitsQ[ileafQ + 1]);
+        PrefetchList2<int,float> pf_ilist(
+            ilist, ir2list, ilist_splitsQ[inodeQ], ilist_splitsQ[inodeQ + 1]
+        );
 
         while(!pf_ilist.finished()) {
             Pair<int,float> interaction = pf_ilist.next();
-            int ileafT = interaction.first;
+            int inodeT = interaction.first;
             float r2T = interaction.second;
 
             // r2T are the lower leaf-leaf distances and the interactions are sorted by these rmax2
@@ -122,8 +124,8 @@ __global__ void IlistKNN(
             if(!any_accept) break;
 
             /* Now load the leaf */
-            int ipartTstart = isplitT[ileafT];
-            int ipartTend = isplitT[ileafT + 1];
+            int ipartTstart = isplitT[inodeT];
+            int ipartTend = isplitT[inodeT + 1];
             for(int ioff = ipartTstart; ioff < ipartTend; ioff += max_part_smem) {
                 int nload = min(max_part_smem, ipartTend - ioff);
                 for(int i = threadIdx.x; i < nload; i += blockDim.x)
@@ -231,13 +233,13 @@ struct LogBinMap {
 #define INTERACTION_BINS 16
 
 __global__ void KernelCountInteractions(
-    const Node* leaves,
-    const int* leaves_npart,
-    const int* isplit,
-    const int* node_ilist,
-    const float* node_ir2list,
-    const int* node_ilist_splits,
-    int* interaction_count,
+    const int* parent_ilist_splits,
+    const int* parent_ilist,
+    const float* parent_ilist_r2,
+    const int* parent_spl,
+    const Node* nodes,
+    const int* nodes_npart,
+    int* node_icount,
     float* rmax_out,
     int k,
     float bins_per_log2,
@@ -245,63 +247,66 @@ __global__ void KernelCountInteractions(
 ) {
 
     // Finds the minimal radius at which we are guaranteed to have at least k neighbors for any
-    // point of a leaf and counts the number of other leaves that are needed to interact at that 
-    //  distance
+    // point inside each a node and counts the number of other nodes that are needed to interact 
+    // at that distance
 
     // This is done in 3 steps:
     // (1) We make a histogram of the number of particles that are guaranteed to be included at
-    //     a distance r. (Note that this depends on the upper bound of the distance between leaves)
+    //     a distance r. (Note that this depends on the upper bound of the distance between nodes)
     // (2) We find the radius at which we have at least k particles
-    // (3) We go through the leaves again and count how many we need to check at that distance
-    //     (Note that here we need to use the lower bound of the distance between leaves)
+    // (3) We go through the nodes again and count how many we need to check at that distance
+    //     (Note that here we need to use the lower bound of the distance between nodes)
 
     extern __shared__ unsigned char smem[];
 
-    int nodeQ = blockIdx.x;
-    int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
-    for(int iqoff = ileafQ_start; iqoff < ileafQ_end; iqoff += blockDim.x) {
-        // we set overhead threads to the last leaf to avoid adding many conditionals
-        int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1); 
-        Node leafQ = leaves[ileafQ];
-        float3 xQ = leafQ.center;
-        float3 extQ = LvlToHalfExt(leafQ.level);
+    int parentQ = blockIdx.x;
+    int inodeQ_start = parent_spl[parentQ], inodeQ_end = parent_spl[parentQ + 1];
+    for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
+        // we set overhead threads to the last node to avoid adding many conditionals
+        int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
+        Node nodeQ = nodes[inodeQ];
+        float3 xQ = nodeQ.center;
+        float3 extQ = LvlToHalfExt(nodeQ.level);
 
-        // We will define bins in units of the diagonal size of leafQ
+        // We will define bins in units of the diagonal size of nodeQ
         // This is the radius at which every point in Q would include every other point in Q
         float rbase2 = 4.0f*dotf3(extQ, extQ); // factor 4, since ext is half the node size
         
         LogBinMap<INTERACTION_BINS> binmap(rbase2, bins_per_log2);
         CumHist<INTERACTION_BINS> rhist;
 
-        PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        PrefetchList2<int,float> pf_ilist(
+            parent_ilist, parent_ilist_r2, parent_ilist_splits[parentQ], 
+            parent_ilist_splits[parentQ + 1]
+        );
 
         float rmax2 = INFINITY;
 
         while(!pf_ilist.finished()) {
             Pair<int,float> interaction = pf_ilist.next();
-            int nodeT = interaction.first;
+            int parentT = interaction.first;
             float r2T = interaction.second;
 
             bool any_accept = syncthreads_or(r2T <= rmax2);
             if(!any_accept) break;
 
-            int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+            int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
 
             float3* xT = reinterpret_cast<float3*>(smem);
             float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
             int* npartT = reinterpret_cast<int*>(extT + blockDim.x);
 
-            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
+            for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
-                if(ilT < ileafT_end) {
-                    Node leafT = leaves[ilT];
-                    xT[threadIdx.x] = leafT.center;
-                    extT[threadIdx.x] = LvlToHalfExt(leafT.level);
-                    npartT[threadIdx.x] = leaves_npart[ilT];
+                if(ilT < inodeT_end) {
+                    Node nodeT = nodes[ilT];
+                    xT[threadIdx.x] = nodeT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
+                    npartT[threadIdx.x] = nodes_npart[ilT];
                 }
                 __syncthreads();
                 
-                for(int j = 0; j < min(ileafT_end - itoff, blockDim.x); j++) {
+                for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
                     float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     int bin = binmap.r2_to_bin(r2);
@@ -316,36 +321,36 @@ __global__ void KernelCountInteractions(
             }
         }
 
-        // // Now we have to go again through all leaves and count how many we need to interact with
+        // // Now we have to go again through all nodes and count how many we need to interact with
         // // Note that here we need to use the minimal distance, not the maximal one
-        // // since we need to include any leaf that may contain particles within rmax
+        // // since we need to include any node that may contain particles within rmax
         int ncount = 0;
 
-        pf_ilist.restart(node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        pf_ilist.restart(parent_ilist_splits[parentQ], parent_ilist_splits[parentQ + 1]);
 
         while(!pf_ilist.finished()) {
             Pair<int,float> interaction = pf_ilist.next();
-            int nodeT = interaction.first;
+            int parentT = interaction.first;
             float r2T = interaction.second;
 
             bool any_accept = syncthreads_or(r2T <= rmax2);
             if(!any_accept) break;
 
-            int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+            int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
 
             float3* xT = reinterpret_cast<float3*>(smem);
             float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
 
-            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
+            for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
-                if(ilT < ileafT_end) {
-                    Node leafT = leaves[ilT];
-                    xT[threadIdx.x] = leafT.center;
-                    extT[threadIdx.x] = LvlToHalfExt(leafT.level);
+                if(ilT < inodeT_end) {
+                    Node nodeT = nodes[ilT];
+                    xT[threadIdx.x] = nodeT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
                 }
                 __syncthreads();
                 
-                for(int j = 0; j < min(ileafT_end - itoff, blockDim.x); j++) {
+                for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
                     float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     ncount += (r2 <= rmax2);
@@ -355,68 +360,70 @@ __global__ void KernelCountInteractions(
         }
 
         // Output our results:
-        if(iqoff + threadIdx.x < ileafQ_end) {
-            rmax_out[ileafQ] = rmax2;
-            interaction_count[ileafQ] = ncount;
+        if(iqoff + threadIdx.x < inodeQ_end) {
+            rmax_out[inodeQ] = rmax2;
+            node_icount[inodeQ] = ncount;
         }
     }
 }
 
 __global__ void KernelInsertInteractions(
-    const Node* leaves,
-    const int* isplit,
-    const int* node_ilist,
-    const float* node_ir2list,
-    const int* node_ilist_splits,
-    const int* out_splits,
-    const float* rmax2,
-    int* ilist_out,
-    float* ilist_radii,
+    const int* parent_ilist_spl,
+    const int* parent_ilist,
+    const float* parent_ilist_r2,
+    const int* parent_spl,
+    const Node* nodes,
+    const int* node_splits,
+    const float* node_rmax2,
+    int* node_ilist,
+    float* node_ilist_r2,
     int nmax,
     float boxsize
 ) {
     extern __shared__ unsigned char smem[];
 
-    int nodeQ = blockIdx.x;
+    int parentQ = blockIdx.x;
 
-    int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
-    for(int iqoff = ileafQ_start; iqoff < ileafQ_end; iqoff += blockDim.x) {
-        int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1);
-        Node leafQ = leaves[ileafQ];
-        float3 xQ = leafQ.center;
-        float3 extQ = LvlToHalfExt(leafQ.level);
-        float rmaxQ2 = rmax2[ileafQ];
-        int out_offset = out_splits[ileafQ];
+    int inodeQ_start = parent_spl[parentQ], inodeQ_end = parent_spl[parentQ + 1];
+    for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
+        int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1);
+        Node nodeQ = nodes[inodeQ];
+        float3 xQ = nodeQ.center;
+        float3 extQ = LvlToHalfExt(nodeQ.level);
+        float rmaxQ2 = node_rmax2[inodeQ];
+        int out_offset = node_splits[inodeQ];
 
         int ninserted = 0;
 
-        PrefetchList2<int,float> pf_ilist(node_ilist, node_ir2list, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        PrefetchList2<int,float> pf_ilist(
+            parent_ilist, parent_ilist_r2, parent_ilist_spl[parentQ], parent_ilist_spl[parentQ + 1]
+        );
         
         while(!pf_ilist.finished()) {
             Pair<int,float> interaction = pf_ilist.next();
-            int nodeT = interaction.first;
+            int parentT = interaction.first;
             float r2T = interaction.second;
 
             bool any_accept = syncthreads_or(r2T <= rmaxQ2);
             if(!any_accept) break;
 
-            int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+            int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
 
             float3* xT = reinterpret_cast<float3*>(smem);
             float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
 
-            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
+            for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
-                if(ilT < ileafT_end) {
-                    Node leafT = leaves[ilT];
-                    xT[threadIdx.x] = leafT.center;
-                    extT[threadIdx.x] = LvlToHalfExt(leafT.level);
+                if(ilT < inodeT_end) {
+                    Node nodeT = nodes[ilT];
+                    xT[threadIdx.x] = nodeT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
                 }
                 __syncthreads();
-                for(int j = 0; j < min(ileafT_end - itoff, blockDim.x); j++) {
+                for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
                     float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
-                    if((iqoff + threadIdx.x < ileafQ_end) && (r2 <= rmaxQ2)){
+                    if((iqoff + threadIdx.x < inodeQ_end) && (r2 <= rmaxQ2)){
                         int offset = out_offset + ninserted;
 
                         if(offset >= nmax)
@@ -424,12 +431,12 @@ __global__ void KernelInsertInteractions(
 
                         if(r2 == 0.f) {
                             // For the direct neighbourhood we add a tiny contribution of the maximum
-                            // distance so that sorting guarantees that we start with the leaf itself
+                            // distance so that sorting guarantees that we start with the node itself
                             r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
                         }
 
-                        ilist_radii[offset] = r2;
-                        ilist_out[offset] = itoff + j;
+                        node_ilist_r2[offset] = r2;
+                        node_ilist[offset] = itoff + j;
                         ninserted += 1;
                     }
                 }
@@ -452,8 +459,8 @@ ffi::Error KnnNode2Node(
     const Node* nodes,
     const int* nodes_npart,
     // outputs
-    float* rmax2,
-    int* node_ilist_splits,
+    float* node_rmax2,
+    int* node_ilist_spl,
     int* node_ilist,
     float* node_ilist_r2,
     // parameters
@@ -463,20 +470,20 @@ ffi::Error KnnNode2Node(
     const float rfac_maxbin,
     float boxsize,
     // parameters that can be infered inside ffi:
+    const int nparents,
     const int nnodes,
-    const int nleaves,
     const size_t node_ilist_size
 ) {
-    cudaMemsetAsync(node_ilist_splits, 0, sizeof(int)*(nleaves+1), stream);
+    cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(nnodes+1), stream);
 
     constexpr int BINS = INTERACTION_BINS;
     float bins_per_log2 = BINS / log2f(rfac_maxbin);
 
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
-    KernelCountInteractions<<< nnodes, blocksize_fill, smem_alloc_size, stream>>>(
-        nodes, nodes_npart, parent_spl, parent_ilist, parent_ilist_r2, parent_ilist_spl,
-        node_ilist_splits + 1, rmax2,
+    KernelCountInteractions<<< nparents, blocksize_fill, smem_alloc_size, stream>>>(
+        parent_ilist_spl, parent_ilist, parent_ilist_r2, parent_spl, nodes, nodes_npart,
+        node_ilist_spl + 1, node_rmax2,
         k, bins_per_log2, boxsize
     );
 
@@ -485,7 +492,7 @@ ffi::Error KnnNode2Node(
     // This should easily fit in general, but better check that it actually does:
     size_t tmp_bytes;
     cub::DeviceScan::InclusiveSum(
-        nullptr, tmp_bytes, node_ilist_splits + 1, node_ilist_splits + 1,  nleaves, stream
+        nullptr, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1,  nnodes, stream
     ); // determine the needed allocation size for CUB:
 
     if (tmp_bytes > node_ilist_size * sizeof(int)) {
@@ -494,13 +501,14 @@ ffi::Error KnnNode2Node(
             "Have:" + std::to_string(node_ilist_size * sizeof(int)) + " bytes. ");
     }
     cub::DeviceScan::InclusiveSum(
-        node_ilist, tmp_bytes, node_ilist_splits + 1, node_ilist_splits + 1, nleaves, stream
+        node_ilist, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1, nnodes, stream
     );
 
     // Now insert the interactions
     smem_alloc_size = blocksize_fill * 2*sizeof(float3);
-    KernelInsertInteractions<<< nnodes, blocksize_fill, smem_alloc_size, stream>>>(
-        nodes, parent_spl, parent_ilist, parent_ilist_r2, parent_ilist_spl, node_ilist_splits, rmax2,
+    KernelInsertInteractions<<< nparents, blocksize_fill, smem_alloc_size, stream>>>(
+        parent_ilist_spl, parent_ilist, parent_ilist_r2, parent_spl, nodes, 
+        node_ilist_spl, node_rmax2,
         node_ilist, node_ilist_r2, // output
         node_ilist_size, boxsize    // parameters
     );
@@ -512,8 +520,8 @@ ffi::Error KnnNode2Node(
     // small overhead (~ O(2ms) for 1M particles). So it is well worth it.
     int smem_size = 512;
     size_t smem_bytes = smem_size * (sizeof(float) + sizeof(int32_t));
-    segmented_bitonic_sort_kv<<<nleaves, blocksize_sort, smem_bytes, stream>>>(
-        node_ilist_r2, node_ilist, node_ilist_splits, nleaves, smem_size
+    segmented_bitonic_sort_kv<<<nnodes, blocksize_sort, smem_bytes, stream>>>(
+        node_ilist_r2, node_ilist, node_ilist_spl, nnodes, smem_size
     );
     
     cudaError_t last_error = cudaGetLastError();
@@ -529,13 +537,13 @@ ffi::Error KnnNode2Node(
 
 ffi::Error SegmentSort(
     cudaStream_t stream,
+    const int32_t* spl,
     const float* key,
     const int32_t* val,
-    const int32_t* isplit,
     float* key_out,
     int32_t* val_out,
-    const int32_t nkeys,
     const int32_t nsegs,
+    const int32_t nkeys,
     const size_t smem_size
 ) {
     int blocksize = 64;
@@ -545,7 +553,7 @@ ffi::Error SegmentSort(
     cudaMemcpyAsync(val_out, val, nkeys*sizeof(int32_t), cudaMemcpyDeviceToDevice, stream);
 
     segmented_bitonic_sort_kv<<< nsegs, blocksize, smem_bytes, stream>>>(
-        key_out, val_out, isplit, nsegs, smem_size
+        key_out, val_out, spl, nsegs, smem_size
     );
 
     cudaError_t last_error = cudaGetLastError();

@@ -77,18 +77,18 @@ def knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data
     return InteractionList(ispl, il, rad2=ilr2)
 knn_node2node_ilist.jit = jax.jit(knn_node2node_ilist, static_argnames=["k", "boxsize", "rfac_maxbin"])
 
-def segment_sort(key, val, isplit, smem_size=512):
+def segment_sort(spl, key, val, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
     assert key.dtype == jnp.float32
     assert val.dtype == jnp.int32
-    assert isplit.dtype == jnp.int32
+    assert spl.dtype == jnp.int32
     assert key.shape == val.shape
-    assert isplit.ndim == 1
+    assert spl.ndim == 1
     assert smem_size >= 64
 
     out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
     key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
-        key, val, isplit, smem_size=np.uint64(smem_size)
+        spl, key, val, smem_size=np.uint64(smem_size)
     )
     return key_sorted, val_sorted
 
