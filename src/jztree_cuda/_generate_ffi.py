@@ -43,22 +43,22 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "fof.cuh"),
-    names=["NodeFofAndIlist", "ParticleFof", "InsertLinks", "NodeToChildLabel"],
+    names=["FofNode2Node", "FofLeaf2Leaf", "InsertLinks", "NodeToChildLabel"],
     only_kernels=False
 )
 
-functions["NodeFofAndIlist"].par["nnodes"].expression = "isplit.element_count() - 1"
-functions["NodeFofAndIlist"].par["nleaves"].expression = "leaf_igroup_in.element_count()"
-functions["NodeFofAndIlist"].par["ilist_out_size"].expression = "ilist_out->element_count()"
+functions["FofNode2Node"].par["size_parent"].expression = "parent_spl.element_count() - 1"
+functions["FofNode2Node"].par["size_node"].expression = "node_igroup->element_count()"
+functions["FofNode2Node"].par["size_node_ilist"].expression = "node_ilist->element_count()"
 
-functions["ParticleFof"].par["nnodes"].expression = "isplit.element_count() - 1"
-functions["ParticleFof"].par["npart"].expression = "particle_igroup->element_count()"
+functions["FofLeaf2Leaf"].par["size_leaves"].expression = "spl.element_count() - 1"
+functions["FofLeaf2Leaf"].par["size_part"].expression = "part_igroup->element_count()"
 
 functions["InsertLinks"].par["size_links"].expression = "igroupLinkA.element_count()"
 functions["InsertLinks"].par["size_groups"].expression = "igroup_in.element_count()"
 
 functions["NodeToChildLabel"].init_outputs_zero = True
-functions["NodeToChildLabel"].grid_size_expression = "node_igroup.element_count()"
+functions["NodeToChildLabel"].grid_size_expression = "parent_igroup.element_count()"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_fof.cu"),

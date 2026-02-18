@@ -49,52 +49,52 @@ __device__ __forceinline__ void link_roots(int* __restrict__ igroup, int a, int 
 /* ---------------------------------------------------------------------------------------------- */
 
 __global__ void NodeToChildLabel(
-    const int* __restrict__ node_igroup,
-    const bool* __restrict__ node_is_local,
-    const int* __restrict__ node_lvl,
-    const int* __restrict__ isplit,
-    int* __restrict__ leaf_igroup,
+    const int* __restrict__ parent_igroup,
+    const bool* __restrict__ parent_is_local,
+    const int* __restrict__ parent_lvl,
+    const int* __restrict__ parent_spl,
+    int* __restrict__ node_igroup,
     const float r2link
 ) {
     int node = blockIdx.x;
-    if(!node_is_local[node])
+    if(!parent_is_local[node])
         return;
-    int node_root = node_igroup[node];
-    if(!node_is_local[node_root])
+    int node_root = parent_igroup[node];
+    if(!parent_is_local[node_root])
         return;
-    float L2 = norm2(LvlToExt(node_lvl[node]));
+    float L2 = norm2(LvlToExt(parent_lvl[node]));
 
-    int ileaf_start = isplit[node], ileaf_end = isplit[node + 1];
-    for(int ileaf = ileaf_start + threadIdx.x; ileaf < ileaf_end; ileaf += blockDim.x) {
+    int inode_start = parent_spl[node], inode_end = parent_spl[node + 1];
+    for(int inode = inode_start + threadIdx.x; inode < inode_end; inode += blockDim.x) {
         if((node_root == node) && (L2 > r2link)) { // node points to self, it was not linked anywhere
-            leaf_igroup[ileaf] = ileaf;
+            node_igroup[inode] = inode;
         }
         else { 
             // If our node is linked, then we inherit the label of the first child of its root
-            leaf_igroup[ileaf] = isplit[node_root];
+            node_igroup[inode] = parent_spl[node_root];
         }
     }
 }
 
 template<int pass>
 __global__ void NodeFof_Link_Count_Insert(
-    const int* __restrict__ node_ilist_splits,
-    const int* __restrict__ node_ilist,
-    const int* __restrict__ isplit,
-    const Node* __restrict__ leaves,
-    const int* __restrict__ ilist_out_splits, // Input (pass 2)
-    int* __restrict__ leaf_igroup, // Output (pass 0) and Input (pass 0-2)
+    const int* __restrict__ parent_ilist_splits,
+    const int* __restrict__ parent_ilist,
+    const int* __restrict__ spl,
+    const Node* __restrict__ nodes,
+    const int* __restrict__ node_ilist_spl, // Input (pass 2)
+    int* __restrict__ node_igroup, // Output (pass 0) and Input (pass 0-2)
     int* __restrict__ interaction_count, // Output (pass 1)
-    int* __restrict__ ilist_out, // Output (pass 2)
+    int* __restrict__ node_ilist, // Output (pass 2)
     // Parameters:
     float r2link,
     float boxsize,
-    int ilist_out_size
+    int size_node_ilist
 ) {
     // Does a node based FoF, by evaluating guaranteed links and building an interaction list for
     // possible links at the child level
     //
-    // pass 0: Link together leaf nodes base on the interaction list
+    // pass 0: Link together nodes based on the interaction list
     //   (step 0b: Contract links in another kernel)
     // pass 1: Count the number of uncertain interactions
     //   (step 1b: Prefix sum)
@@ -102,67 +102,67 @@ __global__ void NodeFof_Link_Count_Insert(
 
     extern __shared__ unsigned char smem[];
 
-    int nodeQ = blockIdx.x;
+    int parentQ = blockIdx.x;
 
-    int ileafQ_start = isplit[nodeQ], ileafQ_end = isplit[nodeQ + 1];
-    for(int iqoff = ileafQ_start; iqoff < ileafQ_end; iqoff += blockDim.x) {
-        // we set overhead threads to the last leaf to avoid adding many conditionals
-        int ileafQ = min(iqoff + threadIdx.x, ileafQ_end - 1); 
-        bool valid = iqoff + threadIdx.x < ileafQ_end;
-        NodeWithExt leafQ = NodeLvlToHalfExt(leaves[ileafQ]);
+    int inodeQ_start = spl[parentQ], inodeQ_end = spl[parentQ + 1];
+    for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
+        // we set overhead threads to the last node to avoid adding many conditionals
+        int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
+        bool valid = iqoff + threadIdx.x < inodeQ_end;
+        NodeWithExt nodeQ = NodeLvlToHalfExt(nodes[inodeQ]);
         
-        PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        PrefetchList<int> pf_ilist(parent_ilist, parent_ilist_splits[parentQ], parent_ilist_splits[parentQ + 1]);
 
-        int leafQ_igroup = leaf_igroup[ileafQ];
+        int nodeQ_igroup = node_igroup[inodeQ];
 
         int ncount = 0;
 
         int ilist_offset;
         if(pass == 2)
-            ilist_offset = ilist_out_splits[ileafQ];
+            ilist_offset = node_ilist_spl[inodeQ];
 
         while(!pf_ilist.finished()) {
-            int nodeT = pf_ilist.next();
+            int parentT = pf_ilist.next();
 
-            if(nodeT < nodeQ)
+            if(parentT < parentQ)
                 continue; // each interaction needs to be evaluated only once
 
-            int ileafT_start = isplit[nodeT], ileafT_end = isplit[nodeT + 1];
+            int inodeT_start = spl[parentT], inodeT_end = spl[parentT + 1];
 
-            NodeWithExt* leafT = reinterpret_cast<NodeWithExt*>(smem);
-            int* igroupT = reinterpret_cast<int*>(leafT + blockDim.x);
+            NodeWithExt* nodeT = reinterpret_cast<NodeWithExt*>(smem);
+            int* igroupT = reinterpret_cast<int*>(nodeT + blockDim.x);
 
-            for(int itoff=ileafT_start; itoff < ileafT_end; itoff += blockDim.x) {
-                int ileafT = itoff + threadIdx.x;
+            for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
+                int inodeT = itoff + threadIdx.x;
 
-                if(ileafT < ileafT_end) {
-                    leafT[threadIdx.x] = NodeLvlToHalfExt(leaves[ileafT]);
-                    igroupT[threadIdx.x] = leaf_igroup[ileafT];
+                if(inodeT < inodeT_end) {
+                    nodeT[threadIdx.x] = NodeLvlToHalfExt(nodes[inodeT]);
+                    igroupT[threadIdx.x] = node_igroup[inodeT];
                 }
                 __syncthreads();
                 
-                for(int j = 0; j < min(ileafT_end - itoff, blockDim.x); j++) {
+                for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
                     if(!valid)
                         break;
-                    ileafT = itoff+j;
+                    inodeT = itoff+j;
 
-                    if((leafQ_igroup == igroupT[j]) && (ileafQ != ileafT)) { 
+                    if((nodeQ_igroup == igroupT[j]) && (inodeQ != inodeT)) { 
                         // already linked -> skip
                         // Note: on pass 0 failing this this check doesn't guarantee that we are not 
-                        //       linked, since leaf_igroup might have changed in the mean-time
+                        //       linked, since node_igroup might have changed in the mean-time
                         //       this is fine, since we will check again when linking!
                         continue; 
                     }
 
-                    // For not-yet-linked leaves there are three scenarios:
-                    // (1) The other leaf is completely inside the linking length -> link (pass 0)
-                    // (2) The other leaf is partially inside the linking length -> add to ilist (pass 1+2)
-                    // (3) The other leaf is outside the linking length -> do noting
+                    // For not-yet-linked nodes there are three scenarios:
+                    // (1) The other node is completely inside the linking length -> link (pass 0)
+                    // (2) The other node is partially inside the linking length -> add to ilist (pass 1+2)
+                    // (3) The other node is outside the linking length -> do noting
 
                     // Upper and lower bound to the distance between any two particles in A and B:
-                    NodeWithExt lT = leafT[j];
-                    float r2max = maxdist2(lT.center, leafQ.center, sumf3(leafQ.extent, lT.extent), boxsize);
-                    float r2min = mindist2(lT.center, leafQ.center, sumf3(leafQ.extent, lT.extent), boxsize);
+                    NodeWithExt lT = nodeT[j];
+                    float r2max = maxdist2(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
+                    float r2min = mindist2(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
 
                     float L2 = norm2(2*lT.extent);
                     
@@ -170,17 +170,17 @@ __global__ void NodeFof_Link_Count_Insert(
                     if(max(r2max, L2) <= r2link) {
                         // The max(..., L2) handles a very rare scenario where r2max < L2 of the
                         // target node and only r2max < r2link. (This can happen if lQ is very small 
-                        // and close). In this scenario leafT would be linked with itself, but only 
+                        // and close). In this scenario nodeT would be linked with itself, but only 
                         // thanks to the existence of lQ and the self-linkedness of lT would not 
                         // be properly detected in NodeToChildLabel. To deal with this we simply add
                         // our node also to the interaction list and resolve it at the child-level 
 
                         if(pass == 0)
-                            link_roots(leaf_igroup, ileafQ, ileafT);
+                            link_roots(node_igroup, inodeQ, inodeT);
                     }
                     else if((pass >= 1) && (r2min <= r2link)) {
-                        if((pass == 2) && (ilist_offset + ncount < ilist_out_size))
-                            ilist_out[ilist_offset + ncount] = itoff+j;
+                        if((pass == 2) && (ilist_offset + ncount < size_node_ilist))
+                            node_ilist[ilist_offset + ncount] = itoff+j;
                         ncount += 1;
                     }
                 }
@@ -190,7 +190,7 @@ __global__ void NodeFof_Link_Count_Insert(
 
         // Output our counts
         if((pass == 1) && valid)
-            interaction_count[ileafQ] = ncount;
+            interaction_count[inodeQ] = ncount;
     }
 }
 
@@ -213,50 +213,50 @@ __global__ void KernelContractLinks(
     igroup[idx] = igr;
 }
 
-ffi::Error NodeFofAndIlist(
+ffi::Error FofNode2Node(
     cudaStream_t stream,
-    const int* __restrict__ node_ilist_splits,
-    const int* __restrict__ node_ilist,
-    const int* __restrict__ isplit,
-    const Node* __restrict__ leaves,
-    const int* __restrict__ leaf_igroup_in,
-    int* __restrict__ leaf_igroup,
-    int* __restrict__ ilist_out_splits,
-    int* __restrict__ ilist_out,
+    const int* __restrict__ parent_ilist_spl,
+    const int* __restrict__ parent_ilist,
+    const int* __restrict__ parent_spl,
+    const Node* __restrict__ nodes,
+    const int* __restrict__ node_igroup_in,
+    int* __restrict__ node_igroup,
+    int* __restrict__ node_ilist_spl,
+    int* __restrict__ node_ilist,
     // Parameters:
     const float r2link,
     const float boxsize,
-    const int nnodes,
-    const int nleaves,
-    const size_t ilist_out_size,
+    const int size_parent,
+    const int size_node,
+    const size_t size_node_ilist,
     const int block_size
 ) {
     size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt) + sizeof(int));
 
-    cudaMemsetAsync(ilist_out_splits, 0, sizeof(int)*(nleaves+1), stream);
-    cudaMemsetAsync(leaf_igroup, 0, sizeof(int)*(nleaves), stream);
-    cudaMemsetAsync(ilist_out, 0, sizeof(int)*ilist_out_size, stream);
+    cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(size_node+1), stream);
+    cudaMemsetAsync(node_igroup, 0, sizeof(int)*(size_node), stream);
+    cudaMemsetAsync(node_ilist, 0, sizeof(int)*size_node_ilist, stream);
 
-    int* interaction_count = ilist_out_splits + 1; // use the ilist_out_splits as temporary storage
+    int* interaction_count = node_ilist_spl + 1; // use the node_ilist_spl as temporary storage
 
-    cudaMemcpyAsync(leaf_igroup, leaf_igroup_in, nleaves*sizeof(int), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(node_igroup, node_igroup_in, size_node*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // pass 0: link
-    NodeFof_Link_Count_Insert<0><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
-        node_ilist_splits, node_ilist, isplit, leaves, nullptr,
-        leaf_igroup, nullptr, nullptr,
-        r2link, boxsize, ilist_out_size
+    NodeFof_Link_Count_Insert<0><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
+        parent_ilist_spl, parent_ilist, parent_spl, nodes, nullptr,
+        node_igroup, nullptr, nullptr,
+        r2link, boxsize, size_node_ilist
     );
 
-    // contract links so that each leaf points to its root
-    int contract_blocks = (nleaves + block_size - 1) / block_size;
-    KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(leaf_igroup, nleaves);
+    // contract links so that each node points to its root
+    int contract_blocks = (size_node + block_size - 1) / block_size;
+    KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(node_igroup, size_node);
 
     // pass 1: count interactions
-    NodeFof_Link_Count_Insert<1><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
-        node_ilist_splits, node_ilist, isplit, leaves, nullptr,
-        leaf_igroup, interaction_count, nullptr,
-        r2link, boxsize, ilist_out_size
+    NodeFof_Link_Count_Insert<1><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
+        parent_ilist_spl, parent_ilist, parent_spl, nodes, nullptr,
+        node_igroup, interaction_count, nullptr,
+        r2link, boxsize, size_node_ilist
     );
 
     // Get the prefix sum with CUB
@@ -264,23 +264,23 @@ ffi::Error NodeFofAndIlist(
     // This should easily fit in general, but better check that it actually does:
     size_t tmp_bytes;
     cub::DeviceScan::InclusiveSum(
-        nullptr, tmp_bytes, ilist_out_splits + 1, ilist_out_splits + 1,  nleaves, stream
+        nullptr, tmp_bytes, node_ilist_spl + 1, node_ilist_spl + 1,  size_node, stream
     ); // determine the needed allocation size for CUB:
 
-    if (tmp_bytes > ilist_out_size * sizeof(int)) {
+    if (tmp_bytes > size_node_ilist * sizeof(int)) {
         return ffi::Error(ffi::ErrorCode::kOutOfRange,
             "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
-            "Have:" + std::to_string(ilist_out_size * sizeof(int)) + " bytes. ");
+            "Have:" + std::to_string(size_node_ilist * sizeof(int)) + " bytes. ");
     }
     cub::DeviceScan::InclusiveSum(
-        ilist_out, tmp_bytes, interaction_count, ilist_out_splits + 1, nleaves, stream
+        node_ilist, tmp_bytes, interaction_count, node_ilist_spl + 1, size_node, stream
     );
 
     // pass 2: insert interactions
-    NodeFof_Link_Count_Insert<2><<< nnodes, block_size, smem_alloc_bytes, stream >>>(
-        node_ilist_splits, node_ilist, isplit, leaves, ilist_out_splits,
-        leaf_igroup, nullptr, ilist_out,
-        r2link, boxsize, ilist_out_size
+    NodeFof_Link_Count_Insert<2><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
+        parent_ilist_spl, parent_ilist, parent_spl, nodes, node_ilist_spl,
+        node_igroup, nullptr, node_ilist,
+        r2link, boxsize, size_node_ilist
     );
     
     cudaError_t last_error = cudaGetLastError();
@@ -295,10 +295,10 @@ ffi::Error NodeFofAndIlist(
 /* ---------------------------------------------------------------------------------------------- */
 
 
-__global__ void ParticleFofLink(
-    const int* __restrict__ node_ilist_splits,
-    const int* __restrict__ node_ilist,
-    const int* __restrict__ isplit,
+__global__ void FofLeaf2LeafLink(
+    const int* __restrict__ ilist_spl,
+    const int* __restrict__ ilist,
+    const int* __restrict__ spl,
     const float3* __restrict__ pos,
     int* __restrict__ part_igroup,
     // Parameters:
@@ -307,15 +307,15 @@ __global__ void ParticleFofLink(
 ) {
     extern __shared__ unsigned char smem[];
 
-    int nodeQ = blockIdx.x;
+    int leafQ = blockIdx.x;
 
-    int ipartQ_start = isplit[nodeQ], ipartQ_end = isplit[nodeQ + 1];
+    int ipartQ_start = spl[leafQ], ipartQ_end = spl[leafQ + 1];
     for(int iqoff = ipartQ_start; iqoff < ipartQ_end; iqoff += blockDim.x) {
         // we set overhead threads to the last leaf to avoid adding many conditionals
         int ipartQ = min(iqoff + threadIdx.x, ipartQ_end - 1); 
         bool valid = iqoff + threadIdx.x < ipartQ_end;
         
-        PrefetchList<int> pf_ilist(node_ilist, node_ilist_splits[nodeQ], node_ilist_splits[nodeQ + 1]);
+        PrefetchList<int> pf_ilist(ilist, ilist_spl[leafQ], ilist_spl[leafQ + 1]);
         
         float3 xQ = pos[ipartQ];
         int igroupQ = part_igroup[ipartQ];
@@ -323,10 +323,10 @@ __global__ void ParticleFofLink(
         while(!pf_ilist.finished()) {
             int nodeT = pf_ilist.next();
 
-            if(nodeT < nodeQ)
+            if(nodeT < leafQ)
                 continue; // each interaction needs to be evaluated only once
 
-            int ipartT_start = isplit[nodeT], ipartT_end = isplit[nodeT + 1];
+            int ipartT_start = spl[nodeT], ipartT_end = spl[nodeT + 1];
 
             PosAndIgroup* tileT = reinterpret_cast<PosAndIgroup*>(smem);
 
@@ -354,35 +354,33 @@ __global__ void ParticleFofLink(
     }
 }
 
-ffi::Error ParticleFof(
+ffi::Error FofLeaf2Leaf(
     cudaStream_t stream,
-    const int* __restrict__ node_ilist_splits,
-    const int* __restrict__ node_ilist,
-    const int* __restrict__ isplit,
+    const int* __restrict__ ilist_spl,
+    const int* __restrict__ ilist,
+    const int* __restrict__ spl,
     const float3* __restrict__ pos,
-    const int* __restrict__ particle_igroup_in,
-    int* __restrict__ particle_igroup,
+    const int* __restrict__ part_igroup_in,
+    int* __restrict__ part_igroup,
     // Parameters:
     float r2link,
     float boxsize,
-    int nnodes,
-    int npart,
+    int size_leaves,
+    int size_part,
     int block_size
 ) {
-    cudaMemcpyAsync(particle_igroup, particle_igroup_in, npart*sizeof(int), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(part_igroup, part_igroup_in, size_part*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // Now do particle-particle linking
-    // use packed PartTile for shared positions
     size_t smem = block_size * sizeof(PosAndIgroup);
-    ParticleFofLink<<< nnodes, block_size, smem, stream >>> (
-        node_ilist_splits, node_ilist, isplit, pos,
-        particle_igroup,
+    FofLeaf2LeafLink<<< size_leaves, block_size, smem, stream >>> (
+        ilist_spl, ilist, spl, pos, part_igroup,
         r2link, boxsize
     );
 
     // contract links so that each particle points to its root
-    int contract_blocks = (npart + block_size - 1) / block_size;
-    KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(particle_igroup, npart);
+    int contract_blocks = (size_part + block_size - 1) / block_size;
+    KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(part_igroup, size_part);
     
     return ffi::Error::Success();
 }

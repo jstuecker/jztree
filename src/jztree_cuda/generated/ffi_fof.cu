@@ -27,35 +27,35 @@ namespace ffi = xla::ffi;
 
 ffi::Error NodeToChildLabelFFIHost(
     cudaStream_t stream,
-    ffi::AnyBuffer node_igroup,
-    ffi::AnyBuffer node_is_local,
-    ffi::AnyBuffer node_lvl,
-    ffi::AnyBuffer isplit,
-    ffi::Result<ffi::AnyBuffer> leaf_igroup,
+    ffi::AnyBuffer parent_igroup,
+    ffi::AnyBuffer parent_is_local,
+    ffi::AnyBuffer parent_lvl,
+    ffi::AnyBuffer parent_spl,
+    ffi::Result<ffi::AnyBuffer> node_igroup,
     float r2link,
     size_t block_size
 ) {
     dim3 blockDim(block_size);
-    dim3 gridDim(node_igroup.element_count());
+    dim3 gridDim(parent_igroup.element_count());
     size_t smem = 0;
     
     // Initialize output buffers
-    cudaMemsetAsync(leaf_igroup->untyped_data(), 0, leaf_igroup->size_bytes(), stream);
+    cudaMemsetAsync(node_igroup->untyped_data(), 0, node_igroup->size_bytes(), stream);
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer
-    int* node_igroup_val = reinterpret_cast<int*>(node_igroup.untyped_data());
-    bool* node_is_local_val = reinterpret_cast<bool*>(node_is_local.untyped_data());
-    int* node_lvl_val = reinterpret_cast<int*>(node_lvl.untyped_data());
-    int* isplit_val = reinterpret_cast<int*>(isplit.untyped_data());
-    int* leaf_igroup_val = reinterpret_cast<int*>(leaf_igroup->untyped_data());
+    int* parent_igroup_val = reinterpret_cast<int*>(parent_igroup.untyped_data());
+    bool* parent_is_local_val = reinterpret_cast<bool*>(parent_is_local.untyped_data());
+    int* parent_lvl_val = reinterpret_cast<int*>(parent_lvl.untyped_data());
+    int* parent_spl_val = reinterpret_cast<int*>(parent_spl.untyped_data());
+    int* node_igroup_val = reinterpret_cast<int*>(node_igroup->untyped_data());
 
     void* args[] = {
+        &parent_igroup_val,
+        &parent_is_local_val,
+        &parent_lvl_val,
+        &parent_spl_val,
         &node_igroup_val,
-        &node_is_local_val,
-        &node_lvl_val,
-        &isplit_val,
-        &leaf_igroup_val,
         &r2link
     };
     cudaLaunchKernel((const void*)NodeToChildLabel, gridDim, blockDim, args, smem, stream);
@@ -71,54 +71,54 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     NodeToChildLabelFFI, NodeToChildLabelFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // node_igroup
-        .Arg<ffi::AnyBuffer>() // node_is_local
-        .Arg<ffi::AnyBuffer>() // node_lvl
-        .Arg<ffi::AnyBuffer>() // isplit
-        .Ret<ffi::AnyBuffer>() // leaf_igroup
+        .Arg<ffi::AnyBuffer>() // parent_igroup
+        .Arg<ffi::AnyBuffer>() // parent_is_local
+        .Arg<ffi::AnyBuffer>() // parent_lvl
+        .Arg<ffi::AnyBuffer>() // parent_spl
+        .Ret<ffi::AnyBuffer>() // node_igroup
         .Attr<float>("r2link")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: NodeFofAndIlist                           */
+/*                             FFI call to CUDA kernel: FofNode2Node                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error NodeFofAndIlistFFIHost(
+ffi::Error FofNode2NodeFFIHost(
     cudaStream_t stream,
-    ffi::AnyBuffer node_ilist_splits,
-    ffi::AnyBuffer node_ilist,
-    ffi::AnyBuffer isplit,
-    ffi::AnyBuffer leaves,
-    ffi::AnyBuffer leaf_igroup_in,
-    ffi::Result<ffi::AnyBuffer> leaf_igroup,
-    ffi::Result<ffi::AnyBuffer> ilist_out_splits,
-    ffi::Result<ffi::AnyBuffer> ilist_out,
+    ffi::AnyBuffer parent_ilist_spl,
+    ffi::AnyBuffer parent_ilist,
+    ffi::AnyBuffer parent_spl,
+    ffi::AnyBuffer nodes,
+    ffi::AnyBuffer node_igroup_in,
+    ffi::Result<ffi::AnyBuffer> node_igroup,
+    ffi::Result<ffi::AnyBuffer> node_ilist_spl,
+    ffi::Result<ffi::AnyBuffer> node_ilist,
     float r2link,
     float boxsize,
     int block_size
 ) {
-    int nnodes = isplit.element_count() - 1;
-    int nleaves = leaf_igroup_in.element_count();
-    size_t ilist_out_size = ilist_out->element_count();
+    int size_parent = parent_spl.element_count() - 1;
+    int size_node = node_igroup->element_count();
+    size_t size_node_ilist = node_ilist->element_count();
 
     // Now call our function
-    ffi::Error result = NodeFofAndIlist(
+    ffi::Error result = FofNode2Node(
         stream,
-        reinterpret_cast<int*>(node_ilist_splits.untyped_data()),
-        reinterpret_cast<int*>(node_ilist.untyped_data()),
-        reinterpret_cast<int*>(isplit.untyped_data()),
-        reinterpret_cast<Node*>(leaves.untyped_data()),
-        reinterpret_cast<int*>(leaf_igroup_in.untyped_data()),
-        reinterpret_cast<int*>(leaf_igroup->untyped_data()),
-        reinterpret_cast<int*>(ilist_out_splits->untyped_data()),
-        reinterpret_cast<int*>(ilist_out->untyped_data()),
+        reinterpret_cast<int*>(parent_ilist_spl.untyped_data()),
+        reinterpret_cast<int*>(parent_ilist.untyped_data()),
+        reinterpret_cast<int*>(parent_spl.untyped_data()),
+        reinterpret_cast<Node*>(nodes.untyped_data()),
+        reinterpret_cast<int*>(node_igroup_in.untyped_data()),
+        reinterpret_cast<int*>(node_igroup->untyped_data()),
+        reinterpret_cast<int*>(node_ilist_spl->untyped_data()),
+        reinterpret_cast<int*>(node_ilist->untyped_data()),
         r2link,
         boxsize,
-        nnodes,
-        nleaves,
-        ilist_out_size,
+        size_parent,
+        size_node,
+        size_node_ilist,
         block_size
     );
 
@@ -130,17 +130,17 @@ ffi::Error NodeFofAndIlistFFIHost(
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    NodeFofAndIlistFFI, NodeFofAndIlistFFIHost,
+    FofNode2NodeFFI, FofNode2NodeFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // node_ilist_splits
-        .Arg<ffi::AnyBuffer>() // node_ilist
-        .Arg<ffi::AnyBuffer>() // isplit
-        .Arg<ffi::AnyBuffer>() // leaves
-        .Arg<ffi::AnyBuffer>() // leaf_igroup_in
-        .Ret<ffi::AnyBuffer>() // leaf_igroup
-        .Ret<ffi::AnyBuffer>() // ilist_out_splits
-        .Ret<ffi::AnyBuffer>() // ilist_out
+        .Arg<ffi::AnyBuffer>() // parent_ilist_spl
+        .Arg<ffi::AnyBuffer>() // parent_ilist
+        .Arg<ffi::AnyBuffer>() // parent_spl
+        .Arg<ffi::AnyBuffer>() // nodes
+        .Arg<ffi::AnyBuffer>() // node_igroup_in
+        .Ret<ffi::AnyBuffer>() // node_igroup
+        .Ret<ffi::AnyBuffer>() // node_ilist_spl
+        .Ret<ffi::AnyBuffer>() // node_ilist
         .Attr<float>("r2link")
         .Attr<float>("boxsize")
         .Attr<int>("block_size"),
@@ -148,37 +148,37 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: ParticleFof                               */
+/*                             FFI call to CUDA kernel: FofLeaf2Leaf                              */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error ParticleFofFFIHost(
+ffi::Error FofLeaf2LeafFFIHost(
     cudaStream_t stream,
-    ffi::AnyBuffer node_ilist_splits,
-    ffi::AnyBuffer node_ilist,
-    ffi::AnyBuffer isplit,
+    ffi::AnyBuffer ilist_spl,
+    ffi::AnyBuffer ilist,
+    ffi::AnyBuffer spl,
     ffi::AnyBuffer pos,
-    ffi::AnyBuffer particle_igroup_in,
-    ffi::Result<ffi::AnyBuffer> particle_igroup,
+    ffi::AnyBuffer part_igroup_in,
+    ffi::Result<ffi::AnyBuffer> part_igroup,
     float r2link,
     float boxsize,
     int block_size
 ) {
-    int nnodes = isplit.element_count() - 1;
-    int npart = particle_igroup->element_count();
+    int size_leaves = spl.element_count() - 1;
+    int size_part = part_igroup->element_count();
 
     // Now call our function
-    ffi::Error result = ParticleFof(
+    ffi::Error result = FofLeaf2Leaf(
         stream,
-        reinterpret_cast<int*>(node_ilist_splits.untyped_data()),
-        reinterpret_cast<int*>(node_ilist.untyped_data()),
-        reinterpret_cast<int*>(isplit.untyped_data()),
+        reinterpret_cast<int*>(ilist_spl.untyped_data()),
+        reinterpret_cast<int*>(ilist.untyped_data()),
+        reinterpret_cast<int*>(spl.untyped_data()),
         reinterpret_cast<float3*>(pos.untyped_data()),
-        reinterpret_cast<int*>(particle_igroup_in.untyped_data()),
-        reinterpret_cast<int*>(particle_igroup->untyped_data()),
+        reinterpret_cast<int*>(part_igroup_in.untyped_data()),
+        reinterpret_cast<int*>(part_igroup->untyped_data()),
         r2link,
         boxsize,
-        nnodes,
-        npart,
+        size_leaves,
+        size_part,
         block_size
     );
 
@@ -190,15 +190,15 @@ ffi::Error ParticleFofFFIHost(
 }
 
 XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    ParticleFofFFI, ParticleFofFFIHost,
+    FofLeaf2LeafFFI, FofLeaf2LeafFFIHost,
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // node_ilist_splits
-        .Arg<ffi::AnyBuffer>() // node_ilist
-        .Arg<ffi::AnyBuffer>() // isplit
+        .Arg<ffi::AnyBuffer>() // ilist_spl
+        .Arg<ffi::AnyBuffer>() // ilist
+        .Arg<ffi::AnyBuffer>() // spl
         .Arg<ffi::AnyBuffer>() // pos
-        .Arg<ffi::AnyBuffer>() // particle_igroup_in
-        .Ret<ffi::AnyBuffer>() // particle_igroup
+        .Arg<ffi::AnyBuffer>() // part_igroup_in
+        .Ret<ffi::AnyBuffer>() // part_igroup
         .Attr<float>("r2link")
         .Attr<float>("boxsize")
         .Attr<int>("block_size"),
@@ -260,7 +260,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 
 NB_MODULE(ffi_fof, m) {
     m.def("NodeToChildLabel", []() { return EncapsulateFfiCall(&NodeToChildLabelFFI); });
-    m.def("NodeFofAndIlist", []() { return EncapsulateFfiCall(&NodeFofAndIlistFFI); });
-    m.def("ParticleFof", []() { return EncapsulateFfiCall(&ParticleFofFFI); });
+    m.def("FofNode2Node", []() { return EncapsulateFfiCall(&FofNode2NodeFFI); });
+    m.def("FofLeaf2Leaf", []() { return EncapsulateFfiCall(&FofLeaf2LeafFFI); });
     m.def("InsertLinks", []() { return EncapsulateFfiCall(&InsertLinksFFI); });
 }
