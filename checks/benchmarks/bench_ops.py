@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from jztree.jax_ext import conditional_callback
 from jax.experimental import io_callback
-from jztree.fof import masked_min_scatter
+from jztree.fof import _masked_min_scatter
 
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("N", [int(1e5), int(1e6), int(1e7)])
@@ -63,7 +63,7 @@ def bench_min_scatter(jax_bench, N):
         else:
             ind = jax.random.randint(jax.random.key(0), N, 0, 10)
         mask = ind < N//2
-        return masked_min_scatter(mask, jnp.arange(len(ind)), ind, jnp.arange(len(ind)))
+        return _masked_min_scatter(mask, jnp.arange(len(ind)), ind, jnp.arange(len(ind)))
     f.jit = jax.jit(f, static_argnums=0)
     
     jb = jax_bench(jit_rounds=5, jit_loops=10, jit_warmup=1)

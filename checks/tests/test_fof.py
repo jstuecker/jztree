@@ -110,6 +110,7 @@ def camels_jz_fof(camels_data):
 
     return part, igr_jz, part_fof, cata, boxsize, rlink
 
+@pytest.mark.skip_in_quick
 def test_camels_labels(camels_data, camels_jz_fof):
     print("Warning. The CAMELS catalogue is broken, I will replace this by another dataset soon!")
 
@@ -147,6 +148,7 @@ def test_camels_labels(camels_data, camels_jz_fof):
 
     # assert jnp.all(counts_jz >= counts_cam)
 
+@pytest.mark.skip_in_quick
 def test_camels_catalogue(camels_data, camels_jz_fof):
     print("Warning. The CAMELS catalogue is broken, I will replace this by another dataset soon!")
 

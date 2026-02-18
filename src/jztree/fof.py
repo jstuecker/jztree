@@ -9,7 +9,7 @@ from .config import FofConfig, FofCatalogueConfig
 from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num, verify_ilist
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
-from .tools import bucket_prefix_sum
+from .tools import bucket_prefix_sum, masked_to_dense
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
@@ -28,7 +28,7 @@ jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), plat
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
-def fof_node2node(
+def _fof_node2node(
         ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvl, node_igroup: jax.Array, 
         rlink: float, boxsize: float = 0., block_size: int = 32
     ) -> Tuple[jax.Array, InteractionList]:
@@ -63,11 +63,11 @@ def fof_node2node(
     stats_callback("allocation", AllocStats.record_filled_interactions, n1, n2)
 
     return node_igroup, node_ilist
-fof_node2node.jit = jax.jit(
-    fof_node2node, static_argnames=["boxsize", "rlink", "block_size"]
+_fof_node2node.jit = jax.jit(
+    _fof_node2node, static_argnames=["boxsize", "rlink", "block_size"]
 )
 
-def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=64):
+def _insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=64):
     ngroups = len(igroup)
     if num_links is None:
         num_links = jnp.array(len(iA), dtype=jnp.int32)
@@ -78,7 +78,7 @@ def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=
     
     return pcast_like(igr_out, like=igroup)
 
-def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
+def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
                         rlink: float, 
                         size_child: int | None = None,
                         flag_local: jax.Array | None = None,
@@ -95,7 +95,7 @@ def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
     )[0]
 
     return igroup_child
-node_to_child_label.jit = jax.jit(node_to_child_label, static_argnames=("size_child", "rlink", "block_size"))
+_node_to_child_label.jit = jax.jit(_node_to_child_label, static_argnames=("size_child", "rlink", "block_size"))
 
 # def level_to_extend(lvl, diag=True):
 #     olvl, omod = lvl//3, lvl % 3
@@ -109,7 +109,7 @@ node_to_child_label.jit = jax.jit(node_to_child_label, static_argnames=("size_ch
 #     else:
 #         return jnp.stack((dx, dy, dz), axis=-1)
 
-def fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
+def _fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
                   ) -> Tuple[FofNodeData, InteractionList]:
     nplanes = th.num_planes()
     size = th.base_size()
@@ -128,10 +128,10 @@ def fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_
         level = nplanes - 1 - i
         parent_spl = spl_n2n.get(level+1, size+1)
 
-        igroup = node_to_child_label(igroup, nlvl.get(level+1, size), parent_spl, rlink=rlink)
+        igroup = _node_to_child_label(igroup, nlvl.get(level+1, size), parent_spl, rlink=rlink)
         node_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=nlvl.get(level, size))
 
-        igroup, ilist = fof_node2node(
+        igroup, ilist = _fof_node2node(
             ilist, parent_spl, node_data, igroup, rlink=rlink, boxsize=boxsize
         )
 
@@ -142,11 +142,11 @@ def fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_
     node_data = FofNodeData(nlvl.get(0, size), igroup, spl_n2n.get(0, size+1))
 
     return node_data, ilist
-fof_hierarchy.jit = jax.jit(fof_hierarchy, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
+_fof_hierarchy.jit = jax.jit(_fof_hierarchy, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
-def fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
+def _fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                           rlink: float, boxsize: float = 0., block_size=32):
-    part_igroup = node_to_child_label(
+    part_igroup = _node_to_child_label(
         leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz)
     )
 
@@ -156,13 +156,13 @@ def fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Arra
     )[0]
 
     return igroup
-fof_leaf2leaf.jit = jax.jit(fof_leaf2leaf, static_argnames=["rlink", "boxsize", "block_size"])
+_fof_leaf2leaf.jit = jax.jit(_fof_leaf2leaf, static_argnames=["rlink", "boxsize", "block_size"])
 
 # ------------------------------------------------------------------------------------------------ #
 #                                         Helper Functions                                         #
 # ------------------------------------------------------------------------------------------------ #
 
-def global_label_to_local_segment(labels: Label) -> jax.Array:
+def _global_label_to_local_segment(labels: Label) -> jax.Array:
     """Map each global to the index of the first occurence of it"""
     # Note, currently the Fof self-linking detection can be wrong for index 0!
     pairs = labels.stacked()
@@ -173,11 +173,7 @@ def global_label_to_local_segment(labels: Label) -> jax.Array:
     
     return jnp.where(labels.igroup >= 0, indices[inv], labels.igroup)
 
-def masked_scatter(mask, arr, indices, values):
-    indices = jnp.where(mask, indices, len(arr))
-    return arr.at[indices].set(values)
-
-def masked_min_scatter(mask, arr, indices, values):
+def _masked_min_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
 
     # first we erase the initial value of arr at the update locations,
@@ -186,35 +182,19 @@ def masked_min_scatter(mask, arr, indices, values):
     
     return arr.at[indices].min(values)
 
-def masked_to_dense(arr: jax.Array, mask, get_inverse=False, get_indices=False, fill_value=0):
-    pref, num = offset_sum(mask)
-    size = pytree_len(arr)
-    pref = jnp.where(mask, pref, size)
-    def upd(x):
-        return jnp.full(x.shape, fill_value, x.dtype).at[pref].set(x)
-
-    new_arr = jax.tree.map(upd, arr)
-    res = [new_arr, num]
-    if get_inverse:
-        res.append(pref)
-    if get_indices:
-        ind = jnp.full(size, size, pref.dtype).at[pref].set(jnp.arange(size))
-        res.append(ind)
-    return res
-
-def tree_where(condition: jax.Array, l1: Label, l2: Label) -> Label:
+def _tree_where(condition: jax.Array, l1: Label, l2: Label) -> Label:
     return jax.tree.map(lambda x, y: jnp.where(condition, x, y), l1, l2)
 
-def label_min_max(l1: Label, l2: Label):
-    lmax = tree_where(l1 >= l2, l1, l2)
-    lmin = tree_where(~(l1 >= l2), l1, l2)
+def _label_min_max(l1: Label, l2: Label):
+    lmax = _tree_where(l1 >= l2, l1, l2)
+    lmin = _tree_where(~(l1 >= l2), l1, l2)
     return lmin, lmax
 
-def get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
+def _get_min_label(valid: jax.Array, igroup: jax.Array, label: Label):
     """Finds the minimum of labels that are pointed to as the same local group"""
-    irankmin = masked_min_scatter(valid, label.irank, igroup, label.irank)
+    irankmin = _masked_min_scatter(valid, label.irank, igroup, label.irank)
     is_min_rank = valid & (label.irank == irankmin[igroup])
-    igroupmin = masked_min_scatter(is_min_rank, label.igroup, igroup, label.igroup)
+    igroupmin = _masked_min_scatter(is_min_rank, label.igroup, igroup, label.igroup)
     return Label(irankmin[igroup], igroupmin[igroup])
 
 def fof_is_superset(igroup_sup, igroup, mask = None):
@@ -234,8 +214,8 @@ def fof_is_superset(igroup_sup, igroup, mask = None):
 #                                        Distributed Linking                                       #
 # ------------------------------------------------------------------------------------------------ #
 
-def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.Array
-                          ) -> Tuple[jax.Array, Label, Link, jax.Array]:
+def _distr_link_step(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.Array
+                           ) -> Tuple[jax.Array, Label, Link, jax.Array]:
     rank, ndev, axis_name = get_rank_info()
     dtype = igroup.dtype
 
@@ -243,10 +223,10 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
         # Contracts labels as far as possible, given the locally available information
         # We do this step every time the local information may have changed
 
-        lA = tree_where(lA.irank == rank, labels[lA.igroup], lA)
-        lB = tree_where(lB.irank == rank, labels[lB.igroup], lB)
+        lA = _tree_where(lA.irank == rank, labels[lA.igroup], lA)
+        lB = _tree_where(lB.irank == rank, labels[lB.igroup], lB)
         are_local = (lA.irank == rank).astype(dtype) + (lB.irank == rank).astype(dtype)
-        lmin, lmax = label_min_max(lA, lB)
+        lmin, lmax = _label_min_max(lA, lB)
         return lmin, lmax, are_local
 
     # Communicate the links to the larger rank in the link
@@ -265,7 +245,7 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     # Handle fully local links. Note that insert_links also contracts the local igroup graph
     igrA, num = masked_to_dense(lA.igroup, valid & (are_local==2))
     igrB, num = masked_to_dense(lB.igroup, valid & (are_local==2))
-    igroup = insert_links(igroup, igrA, igrB, num)
+    igroup = _insert_links(igroup, igrA, igrB, num)
     labels = labels[igroup]
 
     is_root = (labels.irank == rank) & (labels.igroup == jnp.arange(len(labels.igroup)))
@@ -282,10 +262,10 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
 
     update = (are_local == 1) & (lmax.irank == rank)  & (~was_resolved)
     update = update & (labels[lmax.igroup] > lmin) & is_root[lmax.igroup]
-    labels.irank = masked_min_scatter(update, labels.irank, lmax.igroup, lmin.irank)
+    labels.irank = _masked_min_scatter(update, labels.irank, lmax.igroup, lmin.irank)
     # only update labels.igroup with links that point towards the same rank
     update = update & (labels[lmax.igroup].irank == lmin.irank)
-    labels.igroup = masked_min_scatter(update, labels.igroup, lmax.igroup, lmin.igroup)
+    labels.igroup = _masked_min_scatter(update, labels.igroup, lmax.igroup, lmin.igroup)
 
     # Dereference again, since labels may have changed
     labels = labels[igroup]
@@ -298,9 +278,9 @@ def link_distributed_step(igroup: jax.Array, labels: Label, links: Link, nlinks:
     )
 
     return igroup, labels, remaining_links, jnp.sum(valid & ~was_resolved)
-link_distributed_step.jit = jax.jit(link_distributed_step)
+_distr_link_step.jit = jax.jit(_distr_link_step)
 
-def contract_distributed(labels: Label, igroup: jax.Array, dev_spl: int):
+def _distr_contract(labels: Label, igroup: jax.Array, dev_spl: int):
     rank, ndev, axis_name = get_rank_info()
 
     igroup = igroup[igroup]
@@ -335,7 +315,7 @@ def contract_distributed(labels: Label, igroup: jax.Array, dev_spl: int):
         lambda c: c[2], contraction_step, (labels, mask, jnp.array(True))
     )[0]
 
-def link_distributed(
+def _distr_link(
         igroup: jax.Array,
         labels: jax.Array,
         links: Link,
@@ -350,33 +330,12 @@ def link_distributed(
     
     init_val = (igroup, labels, links, nlinks)
     igroup, labels, links, nlinks = jax.lax.while_loop(
-        condition, lambda c: link_distributed_step(*c), init_val
+        condition, lambda c: _distr_link_step(*c), init_val
     )
 
-    return contract_distributed(labels, igroup, dev_spl)
+    return _distr_contract(labels, igroup, dev_spl)
 
-def distr_local_to_global_label_change(igroup, igroup_new, label, dev_spl):
-    rank, ndev, axis_name = get_rank_info()
-    
-    valid = jnp.arange(len(igroup)) < dev_spl[-1]
-
-    # First update the global labels that our task knows about
-    label_new = get_min_label(valid, igroup_new, label)
-
-    # find globally relevant root nodes that became linked
-    was_root = jnp.arange(len(igroup)) == igroup
-    remote = (label_new.irank != rank) | (label.irank != rank)
-    mask = (label != label_new) & was_root & remote & valid
-    indices = jnp.where(mask, size=len(igroup))
-    num_links = jnp.sum(mask)
-    
-    links = Link(label[indices], label_new[indices])
-
-    label_new = link_distributed(igroup_new, label_new, links, dev_spl, num_links)
-
-    return label_new
-
-def distr_detect_new_cross_task_links(igroup, igroup_new, origin_group, dev_spl) -> Link:
+def _distr_detect_new_cross_task_links(igroup, igroup_new, origin_group, dev_spl) -> Link:
     rank, ndev, axis_name = get_rank_info()
     
     valid = jnp.arange(len(igroup)) < dev_spl[-1]
@@ -431,8 +390,8 @@ def distr_fof_top_level(num_local: int, size: int, alloc_fac_ilist: float
     
     return node_data, ilist
 
-def distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0., 
-                        alloc_fac_ilist = 32, size_links = None
+def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0., 
+                         alloc_fac_ilist = 32, size_links = None
                         ) -> Tuple[FofNodeData, InteractionList, PackedArray]:
     rank, ndev, axis_name = get_rank_info()
 
@@ -443,7 +402,7 @@ def distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     l2p = th.ispl_n2n.get(0, size+1)
 
     def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
-        igroup = node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink) 
+        igroup = _node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink) 
 
         poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
@@ -458,12 +417,12 @@ def distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         irank = inverse_of_splits(dev_spl, size)
         igroup = jnp.where(irank==rank, igroup, jnp.arange(size))
 
-        igroup_new, ilist = fof_node2node(
+        igroup_new, ilist = _fof_node2node(
             ilist, spl, poslvl, igroup, rlink=rlink, boxsize=boxsize
         )
         ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # save the node origins in ilist
 
-        links, num_links = distr_detect_new_cross_task_links(igroup, igroup_new, pid, dev_spl)
+        links, num_links = _distr_detect_new_cross_task_links(igroup, igroup_new, pid, dev_spl)
         link_data = link_data.append(links.stacked(axis=-1), num_links)
 
         # Simplify interaction list (reduces unnecessary remote requests)
@@ -489,8 +448,8 @@ def distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     node_data, ilist, link_data = jax.lax.fori_loop(0, th.num_planes(), loop_body, (node_data, ilist, link_data))
 
     return node_data, ilist, link_data
-distr_fof_hierarchy.jit = jax.jit(
-    distr_fof_hierarchy, static_argnames=("alloc_fac_ilist", "boxsize", "rlink", "size_links")
+_distr_fof_hierarchy.jit = jax.jit(
+    _distr_fof_hierarchy, static_argnames=("alloc_fac_ilist", "boxsize", "rlink", "size_links")
 )
 
 def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList, 
@@ -503,7 +462,7 @@ def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
     rank, ndev, axis_name = get_rank_info()
     size = len(posz)
 
-    iseg = node_to_child_label(
+    iseg = _node_to_child_label(
         node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink, size_child=size
     )
 
@@ -522,7 +481,7 @@ def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
     )[0]
 
     # insert new links
-    links, num_links = distr_detect_new_cross_task_links(iseg, iseg_new, pids, dev_spl)
+    links, num_links = _distr_detect_new_cross_task_links(iseg, iseg_new, pids, dev_spl)
     link_data = link_data.append(links.stacked(axis=-1), num_links)
 
     link_data.ispl = link_data.ispl + raise_if(link_data.nfilled() > link_data.size(),
@@ -536,9 +495,9 @@ def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
 
     # Infer global labels
     labels = Label(jnp.full(iseg.shape, rank, dtype=jnp.int32), iseg)
-    labels = link_distributed(iseg_new, labels, links, dev_spl, link_data.ispl[-1])
+    labels = _distr_link(iseg_new, labels, links, dev_spl, link_data.ispl[-1])
     
-    labels = tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
+    labels = _tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
     labels.ilocal_segment = iseg_new
 
     return labels
@@ -580,7 +539,7 @@ def distr_fof_order(label: Label, part: ParticleData, size_out: int | None = Non
     size = len(label.igroup)
 
     if label.ilocal_segment is None:
-        iseg = global_label_to_local_segment(label)
+        iseg = _global_label_to_local_segment(label)
     else:
         iseg = label.ilocal_segment
 
@@ -802,10 +761,10 @@ fof_catalogue_from_groups.smap = shard_map_constructor(fof_catalogue_from_groups
 
 def fof_labels_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
     th = build_tree_hierarchy(posz, cfg_tree=cfg.tree)
-    node_data, ilist = fof_hierarchy(
+    node_data, ilist = _fof_hierarchy(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
-    return fof_leaf2leaf(
+    return _fof_leaf2leaf(
         node_data, ilist, posz, rlink=rlink, boxsize=boxsize
     )
 fof_labels_z.jit = jax.jit(fof_labels_z, static_argnames=["rlink", "boxsize", "cfg"])
@@ -821,7 +780,7 @@ def fof_labels(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig
     return igroup
 fof_labels.jit = jax.jit(fof_labels, static_argnames=["rlink", "boxsize", "cfg"])
 
-def distr_fof_z_with_tree(
+def distr_fof_labels_z_with_tree(
         posz: jax.Array, th: TreeHierarchy, rlink: float, 
         boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False
     ) -> Label:
@@ -831,7 +790,7 @@ def distr_fof_z_with_tree(
     """
     rank, ndev, axis_name = get_rank_info()
 
-    node_data, ilist, link_data = distr_fof_hierarchy(
+    node_data, ilist, link_data = _distr_fof_hierarchy(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist,
         size_links=int(cfg.alloc_fac_distr_links * len(posz))
     )
@@ -846,18 +805,18 @@ def distr_fof_z_with_tree(
         return igroup
     else:
         return labels
-distr_fof_z_with_tree.jit = jax.jit(
-    distr_fof_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
+distr_fof_labels_z_with_tree.jit = jax.jit(
+    distr_fof_labels_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
 )
 
-def distr_fof(part: Pos, rlink: float, boxsize: float = 0., 
+def distr_fof_labels(part: Pos, rlink: float, boxsize: float = 0., 
               cfg: FofConfig = FofConfig):
     partz, th = distr_zsort_and_tree(part, cfg.tree)
 
-    labels = distr_fof_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
+    labels = distr_fof_labels_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
 
     return partz, labels
-distr_fof.smap = shard_map_constructor(distr_fof,
+distr_fof_labels.smap = shard_map_constructor(distr_fof_labels,
     in_specs=(P(-1), None, None, None), static_argnums=(1,2,3)
 )
 
@@ -889,7 +848,6 @@ fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
     static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
 )
 
-from jax.sharding import PartitionSpec as P
 def distr_fof_and_catalogue(
         part: ParticleData,
         rlink: float,
@@ -906,7 +864,7 @@ def distr_fof_and_catalogue(
         assert th is not None, "To skip sort, provide tree (jztree.tree.distr_zsort_and_tree)"
     else:
         partz, th = distr_zsort_and_tree(part, cfg.tree)
-    labels = distr_fof_z_with_tree(partz.pos, th, rlink=rlink, boxsize=boxsize, cfg=cfg)
+    labels = distr_fof_labels_z_with_tree(partz.pos, th, rlink=rlink, boxsize=boxsize, cfg=cfg)
     partf, counts = distr_fof_order(labels, partz)
     catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 

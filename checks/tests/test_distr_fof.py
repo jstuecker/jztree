@@ -9,7 +9,7 @@ from jztree.tools import cumsum_starting_with_zero, multi_to_dense
 from jztree.data import ParticleData, Link, Label, flatten_particles, pad_particles
 from jztree.data import squeeze_particles, expand_particles, squeeze_catalogue, sort_catalogue
 from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
-from jztree.fof import link_distributed, insert_links, distr_fof_z_with_tree, fof_labels_z
+from jztree.fof import _distr_link, _insert_links, distr_fof_labels_z_with_tree, fof_labels_z
 from jztree.fof import fof_and_catalogue, distr_fof_and_catalogue
 from jztree_utils import ics
 import importlib
@@ -45,14 +45,14 @@ def test_distributed_links(nperdev):
 
         dev_spl = (jnp.zeros(ndev+1, dtype=jnp.int32)).at[rank+1].set(len(igroup))
 
-        labels = link_distributed(
+        labels = _distr_link(
             igroup, labels, links, dev_spl, len(igroup) + rank*0,
         )
         
         # convert back to global indices
         return labels.igroup + labels.irank * len(igroup)
     
-    igroup_a = insert_links(iA, iA, iB, num_links=len(iA)) # fully local operation
+    igroup_a = _insert_links(iA, iA, iB, num_links=len(iA)) # fully local operation
     igroup_b = my_distr_links(links)[:ndev*nperdev] # distributed linking
 
     assert jnp.all(igroup_a == igroup_b)
@@ -62,7 +62,7 @@ def distr_fof_labels(seed):
     cfg = FofConfig(alloc_fac_distr_links=0.1)
     part = ics.gaussian_particles(1024*1024, npad=1024*256, seed=seed)
     partz, th = distr_zsort_and_tree(part, cfg.tree)
-    igroup = distr_fof_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True, cfg=cfg)
+    igroup = distr_fof_labels_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True, cfg=cfg)
 
     return partz, igroup
 distr_fof_labels.smapped = expanding_shard_map(distr_fof_labels, 
@@ -107,6 +107,7 @@ def test_catalogue_vs_single(seed):
     assert cata1.com_pos == pytest.approx(cata2.com_pos, abs=0.01)
     assert cata1.com_inertia_radius == pytest.approx(cata2.com_inertia_radius, abs=0.01)
 
+@pytest.mark.skip_in_quick
 @pytest.mark.skipif(not has_discodj, reason="requires discodj module installed")
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def test_discodj_fof():

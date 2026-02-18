@@ -42,6 +42,7 @@ def def_run(ndev, self_prob=0., copy_self=True, Nperdev=256**3, pytree = False, 
         return x
     return jax.jit(run)
 
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_all_to_all(jax_bench, ndev):
@@ -55,6 +56,7 @@ def bench_all_to_all(jax_bench, ndev):
         jb.measure(fn_jit=def_run(ndev, 0.99, copy_self), tag=f"{prefix}p0.99")
         jb.measure(fn_jit=def_run(ndev, 1.0, copy_self), tag=f"{prefix}p1.0")
 
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_permute_all_to_all(jax_bench, ndev):
@@ -66,6 +68,7 @@ def bench_permute_all_to_all(jax_bench, ndev):
     jb.measure(fn_jit=def_run(ndev, 0.99, permute=True), tag=f"{prefix}p0.99")
     jb.measure(fn_jit=def_run(ndev, 1.0, permute=True), tag=f"{prefix}p1.0")
 
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_pytree(jax_bench, ndev):
@@ -207,7 +210,7 @@ def bench_indirect_mesh(jax_bench, MB):
     assert p0(r3) == pytest.approx(p0(r1), rel=1e-4)
     assert p0(r4) == pytest.approx(p0(r1), rel=1e-4)
 
-# @pytest.mark.shrink_in_quick(keep_index=0)
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple")
 def bench_a2a_ndev(jax_bench, ndev):

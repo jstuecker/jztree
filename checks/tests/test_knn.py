@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 from scipy.spatial import cKDTree
 from jztree.config import KNNConfig
-from jztree.knn import knn_z, segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z_new, evaluate_knn, knn
+from jztree.knn import knn_z, _segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z_new, evaluate_knn, knn
 from jztree.tree import pos_zorder_sort
 
 def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
@@ -22,7 +22,7 @@ def test_segment_sort():
     r = jax.random.uniform(jax.random.PRNGKey(1), (spl[-1],), minval=0, maxval=1)
 
     ikey  = jnp.arange(len(r))
-    rnew, inew = segment_sort(spl, r, ikey, smem_size=64)
+    rnew, inew = _segment_sort(spl, r, ikey, smem_size=64)
 
     # for this test, we can emulate a segmented sort through a lexsort in jax
     # (it takes a factor 10 longer though)

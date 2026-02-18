@@ -90,6 +90,22 @@ def masked_prefix_sum(mask):
     off_masked = jnp.where(mask, off, len(mask))
     return off_masked, n
 
+def masked_to_dense(arr: jax.Array, mask, get_inverse=False, get_indices=False, fill_value=0):
+    pref, num = offset_sum(mask)
+    size = pytree_len(arr)
+    pref = jnp.where(mask, pref, size)
+    def upd(x):
+        return jnp.full(x.shape, fill_value, x.dtype).at[pref].set(x)
+
+    new_arr = jax.tree.map(upd, arr)
+    res = [new_arr, num]
+    if get_inverse:
+        res.append(pref)
+    if get_indices:
+        ind = jnp.full(size, size, pref.dtype).at[pref].set(jnp.arange(size))
+        res.append(ind)
+    return res
+
 def inverse_of_splits(ispl, size):
     """given [0, 4, 7] returns [0,0,0,0,1,1,1] for size=7"""
     mask = jnp.zeros(size, dtype=jnp.int32).at[ispl].add(1)

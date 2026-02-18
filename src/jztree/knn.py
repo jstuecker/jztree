@@ -17,7 +17,7 @@ jax.ffi.register_ffi_target("SegmentSort", ffi_knn.SegmentSort(), platform="CUDA
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
-def knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, boxsize=0.):
+def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, boxsize=0.):
     """Finds the k nearest neighbors of xfind in the z-sorted positions xzsort
     """
     if xQ is None: xQ = xT
@@ -42,9 +42,9 @@ def knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, bo
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)
  
     return rknn, iknn
-knn_leaf2leaf.jit = jax.jit(knn_leaf2leaf, static_argnames=("k", "boxsize"))
+_knn_leaf2leaf.jit = jax.jit(_knn_leaf2leaf, static_argnames=("k", "boxsize"))
 
-def knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvlNum,
+def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvlNum,
                   k: int = 32, boxsize: float = 0., rfac_maxbin: float = 16.) -> InteractionList:
     boxsize = 0. if boxsize is None else boxsize
 
@@ -75,9 +75,9 @@ def knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data
     )
 
     return InteractionList(ispl, il, rad2=ilr2)
-knn_node2node_ilist.jit = jax.jit(knn_node2node_ilist, static_argnames=["k", "boxsize", "rfac_maxbin"])
+_knn_node2node_ilist.jit = jax.jit(_knn_node2node_ilist, static_argnames=["k", "boxsize", "rfac_maxbin"])
 
-def segment_sort(spl, key, val, smem_size=512):
+def _segment_sort(spl, key, val, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
     assert key.dtype == jnp.float32
     assert val.dtype == jnp.int32
@@ -108,7 +108,7 @@ def evaluate_knn_z(d : KNNData, posz_query=None):
     else:
         posz_query, spl_query = None, None
     
-    rnnz, innz = knn_leaf2leaf(
+    rnnz, innz = _knn_leaf2leaf(
         d.ilist, d.spl, d.partz.pos, k=d.k, boxsize=d.boxsize, splQ=spl_query, xQ=posz_query
     )
     
@@ -164,7 +164,7 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
         node_pos_lvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         node_data = PosLvlNum(node_pos_lvl, npart=th.npart(level, size))
 
-        return knn_node2node_ilist(ilist, spl_parent, node_data, k=k, boxsize=boxsize)
+        return _knn_node2node_ilist(ilist, spl_parent, node_data, k=k, boxsize=boxsize)
     
     ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
 

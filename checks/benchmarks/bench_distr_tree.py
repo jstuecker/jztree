@@ -53,6 +53,7 @@ def bench_multi_zsort(jax_bench, ndev):
     partz.pos = partz.pos + 1e-2 * part.pos
     jb.measure(fn_jit=fzs, part=partz, tag="displaced")
 
+@pytest.mark.shrink_in_quick(keep_index=0)
 @pytest.mark.parametrize("ndev", NDEVS)
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_multi_tree(jax_bench, ndev):
