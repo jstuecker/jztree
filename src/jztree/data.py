@@ -254,8 +254,13 @@ class PackedArray:
             new_fill_vals = self.fill_values
         return PackedArray(new_data, new_spl, new_fill_vals, jnp.reshape(level+1, (1,)))
     
-    def append(self, values, num=None, fill_value=None):
-        return self.set(self.levels_filled[0], values, num, fill_value)
+    def append(self, values, num=None, fill_value=None, resize=False):
+        if resize:
+            arr =  self.resize_levels(self.nlevels()+1)
+        else:
+            arr = self
+        
+        return arr.set(self.levels_filled[0], values, num, fill_value)
     
     def resize_levels(self, levels):
         ispl_new = jnp.full(levels+1, fill_value=self.ispl[-1], dtype=self.ispl.dtype)

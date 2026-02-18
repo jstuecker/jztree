@@ -108,31 +108,35 @@ node_to_child_label.jit = jax.jit(node_to_child_label, static_argnames=("size_ch
 def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
                   ) -> Tuple[FofNodeData, InteractionList]:
     nplanes = th.num_planes()
+    size = th.base_size()
 
     # initialize top-level interaction list
     spl, ilist, nsup = grouped_dense_interaction_list(
-        th.lvl.num(nplanes-1), size_ilist=int(th.plane_sizes[nplanes-1]*alloc_fac_ilist), ngroup=32
+        th.lvl.num(nplanes-1), size_ilist=int(size*alloc_fac_ilist), ngroup=32, size_super=size
     )
+    # Define super-node data
+    igroup = jnp.arange(size, dtype=jnp.int32)
+    spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+    nlvl = th.lvl.append(jnp.full_like(igroup, 388), nsup, 388, resize=True)
 
-    # Get coarsest plane data
-    igroup = jnp.arange(len(spl)-1, dtype=jnp.int32)
+    def handle_level(i, carry):
+        igroup, ilist = carry
+        level = nplanes - 1 - i
+        spl = spl_n2n.get(level+1, size+1)
 
-    node_lvl = jnp.full_like(igroup, 388)
-
-    for level in reversed(range(nplanes)):
-        size = th.plane_sizes[level]
-        igroup = node_to_child_label(igroup, node_lvl, spl, size, rlink=rlink)
-        child_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
+        igroup = node_to_child_label(igroup, nlvl.get(level+1, size), spl, size, rlink=rlink)
+        child_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=nlvl.get(level, size))
 
         igroup, ilist = node_fof_and_ilist(
             ilist, spl, child_data, igroup,
             rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
         )
 
-        spl = th.ispl_n2n.get(level, size+1)
-        node_lvl = child_data.lvl
+        return igroup, ilist
+
+    igroup, ilist = jax.lax.fori_loop(0, nplanes, handle_level, init_val=(igroup, ilist))
     
-    node_data = FofNodeData(node_lvl, igroup, spl)
+    node_data = FofNodeData(nlvl.get(0, size), igroup, spl_n2n.get(0, size+1))
 
     return node_data, ilist
 node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])

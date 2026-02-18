@@ -71,6 +71,6 @@ def bench_fof_cosmo(jax_bench, pos, ngrid):
     boxsize = 100.
     pos = dj_sim.jit(ngrid, boxsize)[0].reshape(-1,3)
 
-    cfg = FofConfig(alloc_fac_ilist=64)
+    cfg = FofConfig(alloc_fac_ilist=16)
 
     jb.measure(fn_jit=fof_labels.jit, pos=pos, rlink=0.2*boxsize/ngrid, boxsize=boxsize, cfg=cfg)
