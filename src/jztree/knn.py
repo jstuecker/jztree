@@ -46,6 +46,8 @@ ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"
 
 def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits, k=32, boxsize=0., 
                     alloc_fac=128, rfac_maxbin=16.):
+    boxsize = 0. if boxsize is None else boxsize
+
     assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
 
     assert node_ilist.shape == node_ir2list.shape, "node_ilist and node_ir2list must have the same shape"
@@ -140,26 +142,27 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     if idz is given it is assumed that posz = pos0[idz] for some original pos0
     and output indices will be mapped back to original indices
     """
-    boxsize = 0. if boxsize is None else boxsize
-
     th = build_tree_hierarchy(posz, cfg.tree)
     
-    nplanes = th.num_planes()
-    valid = jnp.arange(th.plane_sizes[-1], dtype=jnp.int32) < th.lvl.num(nplanes-1)
-
-    size = th.plane_sizes[0]
-    size_ilist = int(size*cfg.alloc_fac_ilist)
+    nlevels = th.num_planes()
+    size = th.base_size()
 
     # initialize top-level interaction list
     spl, ilist, nsup = grouped_dense_interaction_list(
-        th.lvl.num(nplanes-1), size_ilist, ngroup=32
+        th.lvl.num(nlevels-1), int(size*cfg.alloc_fac_ilist), ngroup=32, size_super=size
     )
+    # Define super-node data
+    spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+
     il, ispl = ilist.iother, ilist.ispl
     ir2l = jnp.zeros(il.shape, dtype=jnp.float32)
     
     def handle_level(i, carry):
-        level = nplanes - i - 1 # have to do manual reversed loop with jax
-        spl, il, ir2l, ispl = carry
+        level = nlevels - i - 1 # have to do manual reversed loop with jax
+        il, ir2l, ispl = carry
+        
+        spl = spl_n2n.get(level+1, size+1)
+
         node_x = th.geom_cent.get(level, size)
         node_lvl = th.lvl.get(level, size)
         node_npart = th.npart(level, size)
@@ -167,24 +170,18 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
             node_x, node_lvl, node_npart,
             spl, il, ir2l, ispl, k=k, boxsize=boxsize, alloc_fac=cfg.alloc_fac_ilist
         )
-        spl = th.ispl_n2n.get(level, size+1)
-        return spl, il, ir2l, ispl
+        return il, ir2l, ispl
     
-    # This works, but it seemed to be slightly slower in tests...
-    # Probably, because it requires us to use a larger list at the lowest level
-    # spl, il, ir2l, ispl = jax.lax.fori_loop(
-    #     0, nplanes, handle_level, (spl, il, ir2l, ispl)
-    # )
-
-    for i in range(nplanes):
-        spl, il, ir2l, ispl = handle_level(i, (spl, il, ir2l, ispl))
+    il, ir2l, ispl = jax.lax.fori_loop(
+        0, nlevels, handle_level, (il, ir2l, ispl)
+    )
 
     data = KNNData(
         k=k,
         boxsize=boxsize,
         posz=posz,
         idz=idz,
-        spl=spl,
+        spl=spl_n2n.get(0, size+1),
         ilist=il,
         ir2list=ir2l,
         ilist_spl=ispl
