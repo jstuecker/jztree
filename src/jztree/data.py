@@ -566,10 +566,11 @@ def squeeze_catalogue(
         if offset_mode == "rank":
             cata_sq.offset_rank = irank
         elif offset_mode == "global":
-            assert nparts is not None, "Require particle numbers for 'global' offset mode"
-            assert jnp.size(nparts) == cata.count.shape[0], "please provide npart for each device"
-            spl = jnp.astype(cumsum_starting_with_zero(nparts), jnp.int64)
-            cata_sq.offset = jnp.astype(cata_sq.offset, jnp.int64) + spl[irank]
+            with jax.enable_x64():
+                assert nparts is not None, "Require particle numbers for 'global' offset mode"
+                assert jnp.size(nparts) == cata.count.shape[0], "please provide npart for each device"
+                spl = jnp.astype(cumsum_starting_with_zero(nparts), jnp.int64)
+                cata_sq.offset = jnp.astype(cata_sq.offset, jnp.int64) + spl[irank]
         
         return cata_sq
 squeeze_catalogue.jit = jax.jit(squeeze_catalogue, static_argnames=("size_out", "offset_mode"))

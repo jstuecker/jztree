@@ -130,7 +130,8 @@ def _pack_pytree(x: Pytree, N: int) -> Tuple[jax.Array, PackingSpec]:
 
     arrs = [l.reshape((N, -1)).view(jnp.uint8) for l in data_leaves]
     num = [a.shape[-1] for a in arrs]
-    offsets = np.pad(np.cumsum(num), (1, 0)).astype(np.int64)
+    with jax.enable_x64():
+        offsets = np.pad(np.cumsum(num), (1, 0)).astype(np.int64)
 
     spec = PackingSpec(treedef, shapes, dtypes, offsets, keep_mask)
     return jnp.concatenate(arrs, axis=-1), spec

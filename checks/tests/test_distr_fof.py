@@ -102,7 +102,7 @@ def test_catalogue_vs_single(seed):
     cata2 = sort_catalogue(squeeze_catalogue(cata2))
 
     assert jnp.all(cata1.count == cata2.count)
-    assert jnp.all(cata1.offset == cata2.offset)
+    assert jnp.all(cata1.offset.astype(jnp.int32) == cata2.offset)
     assert cata1.mass == pytest.approx(cata2.mass, abs=0.1)
     assert cata1.com_pos == pytest.approx(cata2.com_pos, abs=0.01)
     assert cata1.com_inertia_radius == pytest.approx(cata2.com_inertia_radius, abs=0.01)
