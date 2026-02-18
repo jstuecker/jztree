@@ -12,7 +12,6 @@ from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div
 from .tools import bucket_prefix_sum
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, dense_interaction_list, distr_zsort_and_tree
-from .tree import TreeWalkFunctions, dual_tree_walk
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
 from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constructor, tree_map_by_len
@@ -29,33 +28,33 @@ jax.ffi.register_ffi_target("NodeToChildLabel", ffi_fof.NodeToChildLabel(), plat
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
 
-def node_fof_and_ilist(
-        node_ilist: InteractionList, isplit: jax.Array, 
-        child_data: PosLvl, child_igroup: jax.Array, 
-        rlink: float, boxsize: float = 0., alloc_fac:float = 128., block_size:int = 32
+def fof_node2node(
+        ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvl, node_igroup: jax.Array, 
+        rlink: float, boxsize: float = 0., block_size:int = 32
     ) -> Tuple[jax.Array, InteractionList]:
-    assert node_ilist.ispl.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
-    assert len(child_data.lvl) == len(child_igroup), "Should both correspond to no. of childrne"
-    assert node_ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
+    assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
+    assert len(node_data.lvl) == len(node_igroup), "Should both correspond to no. of childrne"
+    assert ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
     
-    nchild = len(child_data.pos)
+    size = len(node_data.pos)
 
-    child_igroup_out = jax.ShapeDtypeStruct((nchild,), jnp.int32)
-    child_ilist_ispl = jax.ShapeDtypeStruct((nchild+1,), jnp.int32)
-    child_ilist = jax.ShapeDtypeStruct((int(alloc_fac * nchild),), jnp.int32)
-
-    outputs = (child_igroup_out, child_ilist_ispl, child_ilist)
+    outputs = (
+        jax.ShapeDtypeStruct((size,), jnp.int32), # node igroup
+        jax.ShapeDtypeStruct((size+1,), jnp.int32), # node ilist splits
+        jax.ShapeDtypeStruct((ilist.size(),), jnp.int32) # node-node ilist
+    )
 
     res = jax.ffi.ffi_call("NodeFofAndIlist", outputs)(
-        node_ilist.ispl, node_ilist.iother, isplit, child_data.pos_lvl(), child_igroup,
+        ilist.ispl, ilist.iother, spl_parent, node_data.pos_lvl(), node_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )
 
-    child_igroup_out, child_ilist_ispl, child_ilist = pcast_like(res, like=node_ilist.iother)
-    child_ilist = verify_ilist(InteractionList(child_ilist_ispl, child_ilist))
+    node_igroup, node_ilist_spl, node_ilist_ioth = pcast_like(res, like=ilist.iother)
 
-    n1, n2 = child_ilist.nfilled(), child_ilist.iother.shape[0]
-    child_igroup_out = child_igroup_out + raise_if(n1 > n2,
+    node_ilist = verify_ilist(InteractionList(node_ilist_spl, node_ilist_ioth))
+
+    n1, n2 = node_ilist.nfilled(), node_ilist.iother.shape[0]
+    node_igroup = node_igroup + raise_if(n1 > n2,
         "The interaction list allocation is too small. (need: {n1} have: {n2})\n"
         "Hint: Increase alloc_fac_ilist at least by a factor of {ratio:.1f}",
         n1=n1, n2=n2, ratio=n1/n2
@@ -63,9 +62,9 @@ def node_fof_and_ilist(
 
     stats_callback("allocation", AllocStats.record_filled_interactions, n1, n2)
 
-    return child_igroup_out, child_ilist
-node_fof_and_ilist.jit = jax.jit(
-    node_fof_and_ilist, static_argnames=["boxsize", "rlink", "alloc_fac", "block_size"]
+    return node_igroup, node_ilist
+fof_node2node.jit = jax.jit(
+    fof_node2node, static_argnames=["boxsize", "rlink", "block_size"]
 )
 
 def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=64):
@@ -80,8 +79,13 @@ def insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=
     return pcast_like(igr_out, like=igroup)
 
 def node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array, 
-                        size_child: int, rlink: float, flag_local: jax.Array | None = None,
+                        rlink: float, 
+                        size_child: int | None = None,
+                        flag_local: jax.Array | None = None,
                         block_size: int = 64) -> jax.Array:
+    if size_child is None:
+        size_child = igroup.size
+
     if flag_local is None:
         flag_local = jnp.ones(igroup.shape, dtype=jnp.bool)
 
@@ -105,7 +109,7 @@ node_to_child_label.jit = jax.jit(node_to_child_label, static_argnames=("size_ch
 #     else:
 #         return jnp.stack((dx, dy, dz), axis=-1)
 
-def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
+def fof_node2node(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
                   ) -> Tuple[FofNodeData, InteractionList]:
     nplanes = th.num_planes()
     size = th.base_size()
@@ -122,14 +126,13 @@ def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_
     def handle_level(i, carry):
         igroup, ilist = carry
         level = nplanes - 1 - i
-        spl = spl_n2n.get(level+1, size+1)
+        parent_spl = spl_n2n.get(level+1, size+1)
 
-        igroup = node_to_child_label(igroup, nlvl.get(level+1, size), spl, size, rlink=rlink)
-        child_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=nlvl.get(level, size))
+        igroup = node_to_child_label(igroup, nlvl.get(level+1, size), parent_spl, rlink=rlink)
+        node_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=nlvl.get(level, size))
 
-        igroup, ilist = node_fof_and_ilist(
-            ilist, spl, child_data, igroup,
-            rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
+        igroup, ilist = fof_node2node(
+            ilist, parent_spl, node_data, igroup, rlink=rlink, boxsize=boxsize
         )
 
         return igroup, ilist
@@ -139,21 +142,21 @@ def node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_
     node_data = FofNodeData(nlvl.get(0, size), igroup, spl_n2n.get(0, size+1))
 
     return node_data, ilist
-node_node_fof.jit = jax.jit(node_node_fof, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
+fof_node2node.jit = jax.jit(fof_node2node, static_argnames=["rlink", "boxsize", "alloc_fac_ilist"])
 
-def particle_particle_fof(node_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
+def fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                           rlink: float, boxsize: float = 0., block_size=32):
     part_igroup = node_to_child_label(
-        node_data.igroup, node_data.lvl, node_data.spl, len(posz), rlink=rlink
+        leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz)
     )
 
     igroup = jax.ffi.ffi_call("ParticleFof", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
-        ilist.ispl, ilist.iother, node_data.spl, posz, part_igroup,
+        ilist.ispl, ilist.iother, leaf_data.spl, posz, part_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
     return igroup
-particle_particle_fof.jit = jax.jit(particle_particle_fof, static_argnames=["rlink", "boxsize", "block_size"])
+fof_leaf2leaf.jit = jax.jit(fof_leaf2leaf, static_argnames=["rlink", "boxsize", "block_size"])
 
 # ------------------------------------------------------------------------------------------------ #
 #                                         Helper Functions                                         #
@@ -440,7 +443,7 @@ def distr_node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     l2p = th.ispl_n2n.get(0, size+1)
 
     def handle_plane(level: int, node_data: FofNodeData, ilist: InteractionList, link_data: PackedArray):
-        igroup = node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, size, rlink=rlink) 
+        igroup = node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink) 
 
         poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         pid = l2p[th.ispl_n2l.get(level, size)] # first particle id in each node
@@ -455,9 +458,8 @@ def distr_node_node_fof(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         irank = inverse_of_splits(dev_spl, size)
         igroup = jnp.where(irank==rank, igroup, jnp.arange(size))
 
-        igroup_new, ilist = node_fof_and_ilist(
-            ilist, spl, poslvl, igroup,
-            rlink=rlink, boxsize=boxsize, alloc_fac=alloc_fac_ilist
+        igroup_new, ilist = fof_node2node(
+            ilist, spl, poslvl, igroup, rlink=rlink, boxsize=boxsize
         )
         ilist = replace(ilist, ids=ids, dev_spl=dev_spl) # save the node origins in ilist
 
@@ -501,7 +503,9 @@ def distr_particle_particle_fof(node_data: FofNodeData, ilist: InteractionList,
     rank, ndev, axis_name = get_rank_info()
     size = len(posz)
 
-    iseg = node_to_child_label(node_data.igroup, node_data.lvl, node_data.spl, size, rlink=rlink)
+    iseg = node_to_child_label(
+        node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink, size_child=size
+    )
 
     numpart = node_data.spl[-1]
     (posz, pids), spl, dev_spl = all_to_all_request_children(
@@ -798,10 +802,10 @@ fof_catalogue_from_groups.smap = shard_map_constructor(fof_catalogue_from_groups
 
 def fof_labels_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
     th = build_tree_hierarchy(posz, cfg_tree=cfg.tree)
-    node_data, ilist = node_node_fof(
+    node_data, ilist = fof_node2node(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
-    return particle_particle_fof(
+    return fof_leaf2leaf(
         node_data, ilist, posz, rlink=rlink, boxsize=boxsize
     )
 fof_labels_z.jit = jax.jit(fof_labels_z, static_argnames=["rlink", "boxsize", "cfg"])
