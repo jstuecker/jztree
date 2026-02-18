@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from .config import KNNConfig
-from .data import KNNData, PosLvl, PosLvlNum
+from .data import KNNData, PosLvl, PosLvlNum, InteractionList
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .tools import inverse_indices
 from .jax_ext import raise_if
@@ -44,14 +44,13 @@ def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  ispli
     return rknn, iknn
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
 
-def build_ilist_knn(child_data: PosLvlNum,
-                    isplit, node_ilist, node_ir2list, node_ilist_splits, k=32, boxsize=0., 
-                    alloc_fac=128, rfac_maxbin=16.):
+def build_ilist_knn(ilist: InteractionList, spl: jax.Array, child_data: PosLvlNum,
+                    k: int = 32, boxsize: float = 0., alloc_fac: float = 128, 
+                    rfac_maxbin: float = 16.) -> InteractionList:
     boxsize = 0. if boxsize is None else boxsize
 
-    assert node_ilist_splits.shape[0] == isplit.shape[0], "Should both correspond to no. of nodes+1"
-
-    assert node_ilist.shape == node_ir2list.shape, "node_ilist and node_ir2list must have the same shape"
+    assert ilist.ispl.shape[0] == spl.shape[0], "Should both correspond to no. of nodes+1"
+    assert ilist.iother.shape == ilist.rad2.shape, "node_ilist and node_ir2list must have the same shape"
 
     size = len(child_data.poslvl.pos)
     x4leaf = child_data.poslvl.pos_lvl()
@@ -64,7 +63,7 @@ def build_ilist_knn(child_data: PosLvlNum,
     assert leaf_ilist.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
 
     radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
-        x4leaf, child_data.npart, isplit, node_ilist, node_ir2list, node_ilist_splits,
+        x4leaf, child_data.npart, spl, ilist.iother, ilist.rad2, ilist.ispl,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
         rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize)
     )
@@ -75,7 +74,7 @@ def build_ilist_knn(child_data: PosLvlNum,
         n1=ispl[-1], n2=il.size, ratio=ispl[-1]/il.size
     )
 
-    return il, ir2l, ispl
+    return InteractionList(ispl, il, rad2=ir2l)
 build_ilist_knn.jit = jax.jit(build_ilist_knn, static_argnames=["k", "boxsize", "alloc_fac"])
 
 def segment_sort(key, val, isplit, smem_size=512):
@@ -155,28 +154,22 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     )
     # Define super-node data
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+    ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
 
-    il, ispl = ilist.iother, ilist.ispl
-    ir2l = jnp.zeros(il.shape, dtype=jnp.float32)
-    
-    def handle_level(i, carry):
+    def handle_level(i, ilist: InteractionList):
         level = nlevels - i - 1
-        il, ir2l, ispl = carry
         
         spl = spl_n2n.get(level+1, size+1)
 
         node_pos_lvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
         node_data = PosLvlNum(node_pos_lvl, npart=th.npart(level, size))
 
-        il, ir2l, ispl = build_ilist_knn(
-            node_data,
-            spl, il, ir2l, ispl, k=k, boxsize=boxsize, alloc_fac=cfg.alloc_fac_ilist
+        ilist = build_ilist_knn(
+            ilist, spl, node_data, k=k, boxsize=boxsize, alloc_fac=cfg.alloc_fac_ilist
         )
-        return il, ir2l, ispl
+        return ilist
     
-    il, ir2l, ispl = jax.lax.fori_loop(
-        0, nlevels, handle_level, (il, ir2l, ispl)
-    )
+    ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
 
     data = KNNData(
         k=k,
@@ -184,9 +177,9 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
         posz=posz,
         idz=idz,
         spl=spl_n2n.get(0, size+1),
-        ilist=il,
-        ir2list=ir2l,
-        ilist_spl=ispl
+        ilist=ilist.iother,
+        ir2list=ilist.rad2,
+        ilist_spl=ilist.ispl
     )
     
     return data

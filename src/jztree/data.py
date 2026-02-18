@@ -382,11 +382,14 @@ class TreeHierarchy():
 # ------------------------------------------------------------------------------------------------ #
 
 @jax.tree_util.register_dataclass
-@dataclass
+@dataclass(slots=True)
 class InteractionList:
     """Node i0 will interact with all indices iother[ispl[i0]:ispl[i0+1]]"""
     ispl: jax.Array
     iother: jax.Array
+
+    # Optional: interaction radii (can be useful for pruning)
+    rad2: jax.Array | None = None
 
     # Multi-GPU specific: origin ids and device offets
     ids: jax.Array | None = None
