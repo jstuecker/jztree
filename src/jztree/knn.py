@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 
 from .config import KNNConfig
-from .data import KNNData
+from .data import KNNData, PosLvl, PosLvlNum
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .tools import inverse_indices
 from .jax_ext import raise_if
@@ -44,7 +44,8 @@ def ilist_knn_search(xT, isplitT, ilist, ir2list, ilist_splitsB, xQ=None,  ispli
     return rknn, iknn
 ilist_knn_search.jit = jax.jit(ilist_knn_search, static_argnames=("k", "boxsize"))
 
-def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits, k=32, boxsize=0., 
+def build_ilist_knn(child_data: PosLvlNum,
+                    isplit, node_ilist, node_ir2list, node_ilist_splits, k=32, boxsize=0., 
                     alloc_fac=128, rfac_maxbin=16.):
     boxsize = 0. if boxsize is None else boxsize
 
@@ -52,17 +53,18 @@ def build_ilist_knn(xleaf, lvl_leaf, npart_leaf, isplit, node_ilist, node_ir2lis
 
     assert node_ilist.shape == node_ir2list.shape, "node_ilist and node_ir2list must have the same shape"
 
-    x4leaf = jnp.concatenate((xleaf, lvl_leaf.view(jnp.float32)[...,None]), axis=-1)
+    size = len(child_data.poslvl.pos)
+    x4leaf = child_data.poslvl.pos_lvl()
 
-    rbuf = jax.ShapeDtypeStruct((len(xleaf),), jnp.float32)
-    leaf_ilist = jax.ShapeDtypeStruct((int(alloc_fac * len(xleaf)),), jnp.int32)
-    leaf_ilist_splits = jax.ShapeDtypeStruct((len(xleaf)+1,), jnp.int32)
+    rbuf = jax.ShapeDtypeStruct((size,), jnp.float32)
+    leaf_ilist = jax.ShapeDtypeStruct((int(alloc_fac * size),), jnp.int32)
+    leaf_ilist_splits = jax.ShapeDtypeStruct((size+1,), jnp.int32)
     leaf_ilist_rad = jax.ShapeDtypeStruct(leaf_ilist.shape, jnp.float32)
 
     assert leaf_ilist.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
 
     radii, il, ir2l, ispl = jax.ffi.ffi_call("ConstructIlist", (rbuf, leaf_ilist, leaf_ilist_rad, leaf_ilist_splits))(
-        x4leaf, npart_leaf, isplit, node_ilist, node_ir2list, node_ilist_splits,
+        x4leaf, child_data.npart, isplit, node_ilist, node_ir2list, node_ilist_splits,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
         rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize)
     )
@@ -158,16 +160,16 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     ir2l = jnp.zeros(il.shape, dtype=jnp.float32)
     
     def handle_level(i, carry):
-        level = nlevels - i - 1 # have to do manual reversed loop with jax
+        level = nlevels - i - 1
         il, ir2l, ispl = carry
         
         spl = spl_n2n.get(level+1, size+1)
 
-        node_x = th.geom_cent.get(level, size)
-        node_lvl = th.lvl.get(level, size)
-        node_npart = th.npart(level, size)
+        node_pos_lvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
+        node_data = PosLvlNum(node_pos_lvl, npart=th.npart(level, size))
+
         il, ir2l, ispl = build_ilist_knn(
-            node_x, node_lvl, node_npart,
+            node_data,
             spl, il, ir2l, ispl, k=k, boxsize=boxsize, alloc_fac=cfg.alloc_fac_ilist
         )
         return il, ir2l, ispl

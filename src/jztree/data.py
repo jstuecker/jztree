@@ -186,6 +186,11 @@ class PosLvl():
     def pos_lvl(self):
         return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
     
+@dataclass
+class PosLvlNum():
+    poslvl: PosLvl
+    npart: jax.Array
+
 @jax.tree_util.register_dataclass
 @dataclass
 class PosLvlId(PosLvl):
