@@ -83,6 +83,8 @@ def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
                          size_child: int | None = None,
                          flag_local: jax.Array | None = None,
                          block_size: int = 64) -> jax.Array:
+    assert len(spl) == len(igroup) + 1 == len(lvl) + 1
+
     if size_child is None:
         size_child = igroup.size
 
@@ -150,6 +152,8 @@ _fof_hierarchy.jit = jax.jit(_fof_hierarchy, static_argnames=["rlink", "boxsize"
 
 def _fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                    rlink: float, boxsize: float = 0., block_size=32):
+    assert len(leaf_data.spl) == len(ilist.ispl) == len(leaf_data.igroup)+1 == len(leaf_data.lvl)+1
+
     part_igroup = _node_to_child_label(
         leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz),
         num=leaf_data.spl[-1]
@@ -427,7 +431,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         0, th.num_planes(), handle_plane, (igroup, ilist, link_data)
     )
 
-    node_data = FofNodeData(th.lvl.get(0, size), igroup, spl_n2n.get(0, size))
+    node_data = FofNodeData(th.lvl.get(0, size), igroup, spl_n2n.get(0, size+1))
 
     return node_data, ilist, link_data
 _distr_fof_hierarchy.jit = jax.jit(
