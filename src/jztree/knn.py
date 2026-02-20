@@ -2,13 +2,14 @@ from dataclasses import replace
 import numpy as np
 import jax
 import jax.numpy as jnp
+from jax.sharding import PartitionSpec as P
 
 from .config import KNNConfig
 from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierarchy, PackedArray
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list
 from .tools import inverse_indices
-from .jax_ext import raise_if, pcast_vma
+from .jax_ext import raise_if, pcast_vma, shard_map_constructor
 from .comm import get_rank_info, all_to_all_request_children
 
 from jztree_cuda import ffi_knn
@@ -55,8 +56,8 @@ def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_dat
     assert ilist.iother.shape == ilist.rad2.shape, "node_ilist and node_ir2list must have the same shape"
     assert ilist.size() < 2**31, f"Ilist allocation is in overflow danger {ilist.size()/2**31}"
 
-    size = len(node_data.poslvl.pos)
-    poslvl = node_data.poslvl.pos_lvl()
+    size = len(node_data.pos)
+    poslvl = node_data.pos_lvl()
 
     outputs = (
         jax.ShapeDtypeStruct((size,), jnp.float32), # radii buffer (temporary)
@@ -164,11 +165,14 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
         
         spl_parent = spl_n2n.get(level+1, size+1)
 
-        node_pos_lvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
-        node_data = PosLvlNum(node_pos_lvl, npart=th.npart(level, size))
+        node_data = PosLvlNum(
+            pos=th.geom_cent.get(level, size),
+            lvl=th.lvl.get(level, size),
+            npart=th.npart(level, size)
+        )
 
         return _knn_node2node_ilist(ilist, spl_parent, node_data, k=k, boxsize=boxsize)
-    
+
     ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
 
     data = KNNData(
@@ -235,13 +239,16 @@ def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0.,
 
         parent_spl = spl_n2n.get(level+1, size+1)
 
-        node_pos_lvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
-        node_data = PosLvlNum(node_pos_lvl, npart=th.npart(level, size))
+        node_data = PosLvlNum(
+            pos = th.geom_cent.get(level, size),
+            lvl = th.lvl.get(level, size),
+            npart = th.npart(level, size)
+        )
 
         # Request the remote node children that we need to interact with
         (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
             ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
-            axis_name=axis_name
+            axis_name=axis_name, err_hint="\nHint: increase alloc_fac_nodes"
         )
 
         ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
@@ -250,6 +257,8 @@ def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0.,
         ilist = replace(ilist, ids=ids, dev_spl=dev_spl)
         is_local = (jnp.arange(size) >= dev_spl[rank]) & (jnp.arange(size) < dev_spl[rank+1])
         ilist = simplify_interaction_list(ilist, always_keep=is_local)
+
+        # jax.debug.log("rank {} il-dev-spl {}", rank, ilist.dev_spl)
 
         return ilist
 
@@ -261,6 +270,11 @@ def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0.,
     # )
 
     return ilist
+_distr_knn_dual_walk.smap = shard_map_constructor(_distr_knn_dual_walk,
+    in_specs=(P(-1), None, None, None),
+    static_argnames=("k", "boxsize", "alloc_fac_ilist")
+)
+
 # _distr_knn_dual_walk.jit = jax.jit(
 #     _distr_knn_dual_walk, static_argnames=("k", "alloc_fac_ilist", "boxsize")
 # )

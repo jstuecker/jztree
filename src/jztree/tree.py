@@ -645,7 +645,10 @@ def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | N
 
     # change the label and the offsets of the interaction list
     ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
-    ilist = InteractionList(ispl, prefix[ilist.iother], ids=reduced_ids, dev_spl=reduced_dev_spl)
+
+    ilist = InteractionList(
+        ispl, prefix[ilist.iother], rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
+    )
     
     return verify_ilist(ilist)
 
