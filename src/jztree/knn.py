@@ -149,7 +149,7 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
     th = build_tree_hierarchy(posz, cfg.tree)
     
     nlevels = th.num_planes()
-    size = th.base_size()
+    size = th.size()
 
     # initialize top-level interaction list
     spl, ilist, nsup = grouped_dense_interaction_list(
@@ -220,7 +220,7 @@ def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0.,
                         ): #-> Tuple[FofNodeData, InteractionList, PackedArray]:
     rank, ndev, axis_name = get_rank_info()
 
-    size = th.base_size()
+    size = th.size()
 
     spl, ilist, nsup = distr_grouped_dense_interaction_list(
         th.num(th.num_planes()-1), size, int(th.size_leaves*alloc_fac_ilist)

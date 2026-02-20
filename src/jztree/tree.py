@@ -670,7 +670,7 @@ def dual_tree_walk(
 ):
     nplanes = th.num_planes()
 
-    size = th.base_size()
+    size = th.size()
 
     spl, ilist, nsup = grouped_dense_interaction_list(
         th.num(nplanes-1), size_ilist=size_ilist, ngroup=32, size_super=size

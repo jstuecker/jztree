@@ -361,7 +361,7 @@ class TreeHierarchy():
     
     def npart(self, level: int, size=None) -> jax.Array:
         if size is None:
-            size = self.base_size()
+            size = self.size()
         ispl_n2p = self.ispl_n2n.get(0)[self.ispl_n2l.get(level, size+1)]
         return ispl_n2p[1:] - ispl_n2p[:-1]
 
@@ -377,7 +377,7 @@ class TreeHierarchy():
     def num(self, level) -> int:
         return self.lvl.num(level)
     
-    def base_size(self) -> int:
+    def size(self) -> int:
         """The recommended allocation size at the leaf level"""
         # Could choose something smaller here later...
         return self.ispl_n2n.size() - 1

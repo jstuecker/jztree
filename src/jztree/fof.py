@@ -117,7 +117,7 @@ _node_to_child_label.jit = jax.jit(_node_to_child_label, static_argnames=("size_
 def _fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac_ilist: int = 128
                   ) -> Tuple[FofNodeData, InteractionList]:
     nplanes = th.num_planes()
-    size = th.base_size()
+    size = th.size()
 
     # initialize top-level interaction list
     spl, ilist, nsup = grouped_dense_interaction_list(
@@ -372,7 +372,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
                         ) -> Tuple[FofNodeData, InteractionList, PackedArray]:
     rank, ndev, axis_name = get_rank_info()
 
-    size = th.base_size()
+    size = th.size()
     if size_links is  None:
         size_links = size
 
