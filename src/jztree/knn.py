@@ -153,7 +153,7 @@ def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=
 
     # initialize top-level interaction list
     spl, ilist, nsup = grouped_dense_interaction_list(
-        th.lvl.num(nlevels-1), int(size*cfg.alloc_fac_ilist), ngroup=32, size_super=size
+        th.lvl.num(nlevels-1), int(th.size_leaves*cfg.alloc_fac_ilist), ngroup=32, size_super=size
     )
     # Define super-node data
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
@@ -223,7 +223,7 @@ def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0.,
     size = th.base_size()
 
     spl, ilist, nsup = distr_grouped_dense_interaction_list(
-        th.num(th.num_planes()-1), size, int(size*alloc_fac_ilist)
+        th.num(th.num_planes()-1), size, int(th.size_leaves*alloc_fac_ilist)
     )
     ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
 

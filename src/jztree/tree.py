@@ -490,21 +490,10 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
         nmass_cent, nmass = get_tree_mass_centers(part, ispl_n2n)
     else:
         nmass_cent, nmass = None, None
-        
-    # Predict maximum plane (at compile time) and check whether the prediction was large enough
-    # Note: This step can probably be skipped after I adapt the code to use fixed size arrays
-    plane_sizes = [estimate_node_number(npart_loc, node_sizes[i], alloc_fac=cfg_tree.alloc_fac_nodes)
-                   for i in range(0, nlevels)]
 
-    nsizes = ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1
-    ispl_n2l.ispl = ispl_n2l.ispl + raise_if(jnp.any(nsizes > jnp.array(plane_sizes)),
-        "Tree allocation too small:\n Planes filled: {num} sizes: {sizes}\n"
-        "Hint: Increase alloc_fac_nodes", num=nsizes, sizes=jnp.array(plane_sizes)
-    )
-
+    size_leaves = estimate_node_number(npart_loc, cfg_tree.max_leaf_size)
     th = TreeHierarchy(
-        ispl_n2n, ispl_n2l, lvl, geom_cent, mass = nmass, mass_cent = nmass_cent,
-        plane_sizes = plane_sizes
+        size_leaves, ispl_n2n, ispl_n2l, lvl, geom_cent, mass = nmass, mass_cent = nmass_cent
     )
     
     return th

@@ -121,7 +121,7 @@ def _fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac
 
     # initialize top-level interaction list
     spl, ilist, nsup = grouped_dense_interaction_list(
-        th.lvl.num(nplanes-1), size_ilist=int(size*alloc_fac_ilist), ngroup=32, size_super=size
+        th.lvl.num(nplanes-1), size_ilist=int(th.size_leaves*alloc_fac_ilist), ngroup=32, size_super=size
     )
     # Define super-node data
     igroup = jnp.arange(size, dtype=jnp.int32)
@@ -377,7 +377,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         size_links = size
 
     spl, ilist, nsup = distr_grouped_dense_interaction_list(
-        th.num(th.num_planes()-1), size, int(size*alloc_fac_ilist), only_geq=True
+        th.num(th.num_planes()-1), size, int(th.size_leaves*alloc_fac_ilist), only_geq=True
     )
     # Define arrays we need during tree-walk
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)

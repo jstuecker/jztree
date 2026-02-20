@@ -347,6 +347,8 @@ class TreePlane():
 @jax.tree_util.register_dataclass
 @dataclass
 class TreeHierarchy():
+    size_leaves: int = static_field()
+
     # Packed Arrays:
     ispl_n2n: PackedArray
     ispl_n2l: PackedArray
@@ -357,11 +359,9 @@ class TreeHierarchy():
     mass: PackedArray | None = None
     mass_cent: PackedArray | None = None
     
-    plane_sizes: List[int] = static_field(default_factory=list)
-
     def npart(self, level: int, size=None) -> jax.Array:
         if size is None:
-            size = self.plane_sizes[level]
+            size = self.base_size()
         ispl_n2p = self.ispl_n2n.get(0)[self.ispl_n2l.get(level, size+1)]
         return ispl_n2p[1:] - ispl_n2p[:-1]
 
