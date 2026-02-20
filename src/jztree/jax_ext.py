@@ -246,7 +246,7 @@ def shard_map_constructor(f, out_specs=None, in_specs=None, default_mesh=None,
         mesh = mesh or default_mesh
         assert mesh is not None, "Please specify a mesh"
 
-        key = (tuple(mesh.axis_names), mesh.devices.shape, jit)
+        key = (tuple(mesh.axis_names), tuple(mesh.axis_types), mesh.devices.shape, jit)
 
         if key in cache:
             return cache[key]
