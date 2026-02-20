@@ -54,13 +54,14 @@ __global__ void NodeToChildLabel(
     const int* __restrict__ parent_lvl,
     const int* __restrict__ parent_spl,
     int* __restrict__ node_igroup,
+    const int size_parent,
     const float r2link
 ) {
     int node = blockIdx.x;
-    if(!parent_is_local[node])
+    if(node >= size_parent || !parent_is_local[node])
         return;
     int node_root = parent_igroup[node];
-    if(!parent_is_local[node_root])
+    if(node_root >= size_parent || !parent_is_local[node_root])
         return;
     float L2 = norm2(LvlToExt(parent_lvl[node]));
 

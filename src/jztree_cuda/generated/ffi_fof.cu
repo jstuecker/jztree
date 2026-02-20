@@ -35,6 +35,7 @@ ffi::Error NodeToChildLabelFFIHost(
     float r2link,
     size_t block_size
 ) {
+    int size_parent = parent_igroup.element_count();
     dim3 blockDim(block_size);
     dim3 gridDim(parent_igroup.element_count());
     size_t smem = 0;
@@ -56,6 +57,7 @@ ffi::Error NodeToChildLabelFFIHost(
         &parent_lvl_val,
         &parent_spl_val,
         &node_igroup_val,
+        &size_parent,
         &r2link
     };
     cudaLaunchKernel((const void*)NodeToChildLabel, gridDim, blockDim, args, smem, stream);

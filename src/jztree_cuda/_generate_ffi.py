@@ -59,6 +59,7 @@ functions["InsertLinks"].par["size_groups"].expression = "igroup_in.element_coun
 
 functions["NodeToChildLabel"].init_outputs_zero = True
 functions["NodeToChildLabel"].grid_size_expression = "parent_igroup.element_count()"
+functions["NodeToChildLabel"].par["size_parent"].expression = "parent_igroup.element_count()"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_fof.cu"),
