@@ -97,6 +97,41 @@ def _segment_sort(spl, key, val, smem_size=512):
     return key_sorted, val_sorted
 
 # ------------------------------------------------------------------------------------------------ #
+#                                          Dual Tree Walk                                          #
+# ------------------------------------------------------------------------------------------------ #
+
+def _knn_dual_walk(posz, th, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> InteractionList:
+    nlevels = th.num_planes()
+    size = th.size()
+
+    # initialize top-level interaction list
+    spl, ilist, nsup = grouped_dense_interaction_list(
+        th.lvl.num(nlevels-1), int(th.size_leaves*cfg.alloc_fac_ilist), ngroup=32, size_super=size
+    )
+    # Define super-node data
+    spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+    ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
+
+    def handle_level(i, ilist: InteractionList):
+        level = nlevels - i - 1
+        
+        spl_parent = spl_n2n.get(level+1, size+1)
+
+        node_data = PosLvlNum(
+            pos=th.geom_cent.get(level, size),
+            lvl=th.lvl.get(level, size),
+            npart=th.npart(level, size)
+        )
+
+        return _knn_node2node_ilist(ilist, spl_parent, node_data, k=k, boxsize=boxsize)
+
+    ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
+    
+    return ilist
+_knn_dual_walk.jit = jax.jit(_knn_dual_walk, static_argnames=["k", "boxsize", "cfg"])
+
+
+# ------------------------------------------------------------------------------------------------ #
 #                                      User Exposed Functions                                      #
 # ------------------------------------------------------------------------------------------------ #
 
@@ -140,51 +175,25 @@ def evaluate_knn(d : KNNData, pos_query=None):
         return rnn, inn
 evaluate_knn.jit = jax.jit(evaluate_knn)
 
-def prepare_knn_z_new(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
+def prepare_knn_z(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions posz
     posz is assumed to be sorted in z-order (use prepare_knn if it is not)
 
     if idz is given it is assumed that posz = pos0[idz] for some original pos0
     and output indices will be mapped back to original indices
     """
-    th = build_tree_hierarchy(posz, cfg.tree)
+    th: TreeHierarchy = build_tree_hierarchy(posz, cfg.tree)
     
-    nlevels = th.num_planes()
-    size = th.size()
+    ilist = _knn_dual_walk(posz, th, k, boxsize=boxsize, cfg=cfg)
 
-    # initialize top-level interaction list
-    spl, ilist, nsup = grouped_dense_interaction_list(
-        th.lvl.num(nlevels-1), int(th.size_leaves*cfg.alloc_fac_ilist), ngroup=32, size_super=size
-    )
-    # Define super-node data
-    spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
-    ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
-
-    def handle_level(i, ilist: InteractionList):
-        level = nlevels - i - 1
-        
-        spl_parent = spl_n2n.get(level+1, size+1)
-
-        node_data = PosLvlNum(
-            pos=th.geom_cent.get(level, size),
-            lvl=th.lvl.get(level, size),
-            npart=th.npart(level, size)
-        )
-
-        return _knn_node2node_ilist(ilist, spl_parent, node_data, k=k, boxsize=boxsize)
-
-    ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
-
-    data = KNNData(
+    return KNNData(
         k=k,
         boxsize=boxsize,
         partz=PosId(pos=posz, id=idz),
-        spl=spl_n2n.get(0, size+1),
+        spl=th.ispl_n2n.get(0, th.size()+1),
         ilist=ilist
     )
-    
-    return data
-prepare_knn_z_new.jit = jax.jit(prepare_knn_z_new, static_argnames=["k", "boxsize", "cfg"])
+prepare_knn_z.jit = jax.jit(prepare_knn_z, static_argnames=["k", "boxsize", "cfg"])
 
 def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions pos0
@@ -194,7 +203,7 @@ def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData
 
     posz, idz = pos_zorder_sort(pos0)
 
-    data = prepare_knn_z_new(posz, k, boxsize=boxsize, cfg=cfg, idz=idz)
+    data = prepare_knn_z(posz, k, boxsize=boxsize, cfg=cfg, idz=idz)
 
     return data
 prepare_knn.jit = jax.jit(prepare_knn, static_argnames=["k", "boxsize", "cfg"])
@@ -203,7 +212,7 @@ def knn_z(posz, k=16, boxsize=0., cfg : KNNConfig = KNNConfig(), posz_query=None
     """Finds the k nearest neighbors of posz using a kNN search with interaction list
     posz is assumed to be sorted in z-order (use "knn" if it is not)
     """
-    data = prepare_knn_z_new(posz, k, boxsize=boxsize, cfg=cfg)
+    data = prepare_knn_z(posz, k, boxsize=boxsize, cfg=cfg)
     rknn, iknn = evaluate_knn_z(data, posz_query=posz_query)
     return rknn, iknn
 knn_z.jit = jax.jit(knn_z, static_argnames=["k", "boxsize", "cfg"])
@@ -264,9 +273,18 @@ def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0.,
 
     ilist = jax.lax.fori_loop(0, th.num_planes(), handle_plane, ilist)
 
-    # (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
-    #     ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
+    # spl = spl_n2n.get(0, size+1)
+    # (node_data, ids), spl, dev_spl = all_to_all_request_children(
+    #     ilist.dev_spl, ilist.ids, spl, (node_data, jnp.arange(size)),
     #     axis_name=axis_name
+    # )
+
+    # data = KNNData(
+    #     k=k,
+    #     boxsize=boxsize,
+    #     partz=PosId(pos=posz, id=idz),
+    #     spl=spl_n2n.get(0, size+1),
+    #     ilist=ilist
     # )
 
     return ilist

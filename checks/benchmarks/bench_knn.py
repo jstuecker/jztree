@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from dataclasses import replace
 from jztree.tree import pos_zorder_sort
-from jztree.knn import prepare_knn, prepare_knn_z_new, evaluate_knn, evaluate_knn_z, knn, knn_z
+from jztree.knn import prepare_knn, prepare_knn_z, evaluate_knn, evaluate_knn_z, knn, knn_z
 
 import importlib
 has_jaxkd = (importlib.util.find_spec("jaxkd") is not None) and (importlib.util.find_spec("jaxkd_cuda") is not None)
@@ -18,7 +18,7 @@ def bench_knn_steps(jax_bench, pos):
     posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
 
     data = jb.measure(fn_jit=prepare_knn.jit, pos0=pos, k=k, tag="prepare")[1]
-    data2 = jb.measure(fn_jit=prepare_knn_z_new.jit, posz=posz, k=k, tag="prepare_z_new")[1]
+    data2 = jb.measure(fn_jit=prepare_knn_z.jit, posz=posz, k=k, tag="prepare_z_new")[1]
 
     jb.measure(fn_jit=evaluate_knn.jit, d=data, tag="eval")
         

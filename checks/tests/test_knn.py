@@ -4,7 +4,7 @@ import pytest
 import numpy as np
 from scipy.spatial import cKDTree
 from jztree.config import KNNConfig
-from jztree.knn import knn_z, _segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z_new, evaluate_knn, knn
+from jztree.knn import knn_z, _segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z, evaluate_knn, knn
 from jztree.tree import pos_zorder_sort
 
 def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
@@ -94,7 +94,7 @@ def test_io_order():
     posz, idz = pos_zorder_sort.jit(pos0)
 
     data = prepare_knn.jit(pos0, k=16)
-    dataz = prepare_knn_z_new.jit(posz, k=16)
+    dataz = prepare_knn_z.jit(posz, k=16)
 
     rnn00, inn00 = evaluate_knn.jit(data)    # ids and outputs in original order
     rnn0z, inn0z = evaluate_knn_z.jit(data)   # ids original order, outputs in z-order
