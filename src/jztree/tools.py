@@ -97,7 +97,7 @@ def masked_to_dense(arr: jax.Array, mask, get_inverse=False, get_indices=False, 
     def upd(x):
         return jnp.full(x.shape, fill_value, x.dtype).at[pref].set(x)
 
-    new_arr = jax.tree.map(upd, arr)
+    new_arr = tree_map_by_len(upd, arr, len(mask))
     res = [new_arr, num]
     if get_inverse:
         res.append(pref)

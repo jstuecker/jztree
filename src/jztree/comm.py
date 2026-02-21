@@ -529,7 +529,7 @@ def all_to_all_request_children(
     child_inode = inverse_of_splits(out_node_spl, size)
     child_inode_offset = jnp.arange(size) - out_node_spl[child_inode]
     child_id = spl[indices[child_inode]] + child_inode_offset
-    child_data = jax.tree.map(lambda xi: xi[child_id],  data)
+    child_data = tree_map_by_len(lambda xi: xi[child_id],  data, pytree_len(data))
     child_dev_spl = out_node_spl[dev_spl]
 
     # send back the node_sizes so the receiver knows where each node starts

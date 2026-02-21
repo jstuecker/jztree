@@ -601,6 +601,11 @@ def catalogues_equal(c1: FofCatalogue, c2: FofCatalogue):
 #                                     KNN Specific Data Classes                                    #
 # ------------------------------------------------------------------------------------------------ #
 
+@partial(jax.tree_util.register_dataclass)
+@dataclass(slots=True)
+class RankIdx:
+    rank: jax.Array
+    idx: jax.Array
 
 @partial(jax.tree_util.register_dataclass)
 @dataclass(slots=True)
@@ -611,3 +616,15 @@ class KNNData:
     partz: PosId
     spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
     ilist: InteractionList
+
+@partial(jax.tree_util.register_dataclass)
+@dataclass(slots=True)
+class DistrKNNData:
+    k : int = static_field()
+    boxsize : float = static_field()
+
+    partz: PosId
+    spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
+    ilist: InteractionList
+
+    origin: RankIdx

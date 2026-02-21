@@ -1,15 +1,18 @@
 from dataclasses import replace
 import numpy as np
+from typing import Any, Callable
+
 import jax
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 
 from .config import KNNConfig
-from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierarchy, PackedArray
+from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierarchy, DistrKNNData, RankIdx
+from .data import Pos, RankIdx, get_pos
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
-from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list
-from .tools import inverse_indices
-from .jax_ext import raise_if, pcast_vma, pcast_like, shard_map_constructor
+from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list, distr_zsort_and_tree
+from .tools import inverse_indices, inverse_of_splits, masked_to_dense
+from .jax_ext import raise_if, pcast_vma, pcast_like, shard_map_constructor, tree_map_by_len
 from .comm import get_rank_info, all_to_all_request_children
 
 from jztree_cuda import ffi_knn
@@ -189,6 +192,7 @@ def evaluate_knn_z(d : KNNData, posz_query=None):
     
     return rnnz, innz
 evaluate_knn_z.jit = jax.jit(evaluate_knn_z)
+evaluate_knn_z.smap = shard_map_constructor(evaluate_knn_z)
 
 def evaluate_knn(d : KNNData, pos_query=None):
     """Evaluates the kNN for a given set of positions and precomputed interaction list
@@ -227,6 +231,32 @@ def prepare_knn_z(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None
     )
 prepare_knn_z.jit = jax.jit(prepare_knn_z, static_argnames=["k", "boxsize", "cfg"])
 
+def distr_prepare_knn_z(posz, th: TreeHierarchy, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
+    rank, ndev, axis_name = get_rank_info()
+
+    ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
+
+    pdata = PosId(pos=posz, id=idz)
+
+    spl = th.ispl_n2n.get(0, th.size()+1)
+    (pdata, ids), spl, dev_spl = all_to_all_request_children(
+        ilist.dev_spl, ilist.ids, spl, (pdata, jnp.arange(len(posz))),
+        axis_name=axis_name, err_hint="\nHint: increase padding."
+    )
+
+    return DistrKNNData(
+        k=k,
+        boxsize=boxsize,
+        partz=pdata,
+        spl=spl,
+        ilist=ilist,
+        origin = RankIdx(rank=inverse_of_splits(dev_spl, len(posz)), idx=ids)
+    )
+distr_prepare_knn_z.smap = shard_map_constructor(distr_prepare_knn_z,
+    in_specs=(P(-1), P(-1), None, None, None, P(-1)),
+    static_argnames=("k", "boxsize", "cfg")
+)
+
 def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions pos0
     pos0 is NOT assumed to be sorted in z-order (use prepare_knnz to skip sorting)
@@ -259,3 +289,88 @@ knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "cfg"])
 # ------------------------------------------------------------------------------------------------ #
 #                                          Distributed KNN                                         #
 # ------------------------------------------------------------------------------------------------ #
+
+def distr_knn(
+        part: jax.Array | Pos,
+        k: int,
+        boxsize: float | None = None,
+        th: TreeHierarchy | None = None,
+        result: str | jax.Array | Any = "rad_origin",
+        reduce_func: Callable | None = None,
+        output_order: str = "input",
+        cfg: KNNConfig = KNNConfig()
+    ):
+    assert output_order in ("z", "remote")
+
+    rank, ndev, axis_name = get_rank_info()
+
+    size = len(get_pos(part))
+
+    if th is None:
+        partz, th = distr_zsort_and_tree(part, cfg.tree)
+    else:
+        # put a sorted check here later !!!
+        partz = part
+
+    # Build Leaf-leaf interaction list through dual tree walk
+    ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
+
+    origin = RankIdx(jnp.full(size, rank, dtype=jnp.int32), jnp.arange(size, dtype=jnp.int32))
+
+    # Localize particle data
+    spl = th.ispl_n2n.get(0, th.size()+1)
+    (premote, origin), spl, dev_spl = all_to_all_request_children(
+        ilist.dev_spl, ilist.ids, spl, (partz, origin),
+        axis_name=axis_name, err_hint="\nHint: increase padding."
+    )
+
+    # Evaluate knn
+    rnnz, innz = _knn_leaf2leaf(ilist, spl, get_pos(premote), k=k, boxsize=boxsize)
+    
+    res = []
+    if type(result) == str:
+        res_keys = result.split("_")
+        for key in res_keys:
+            if key == "rad":
+                res.append(rnnz)
+            elif key == "drad": # Same as rad, but result will be differentible
+                x = get_pos(premote)
+                res.append(jnp.linalg.norm(x[:,None] - x[innz], axis=-1))
+            elif key == "origin":
+                nn_origin = jax.tree.map(lambda x: x[innz], origin)
+                res.append(nn_origin)
+            elif key == "part":
+                res.append(tree_map_by_len(lambda x: x[innz], premote, size))
+            elif key == "reduce":
+                assert reduce_func is not None, "Please provide reduce_func if using 'reduce'"
+                x = reduce_func(part=premote, rnn=rnnz, inn=innz, origin=origin)
+                assert len(x) == len(rnnz)
+                res.append(x)
+            elif hasattr(premote, key):
+                arr = getattr(premote, key)
+                res.append(tree_map_by_len(lambda x: x[innz], arr, size))
+            else:
+                raise ValueError(f"Invalid result key {key}")
+    else:
+        raise NotImplementedError()
+    
+    if len(res) == 1:
+        res = res[0]
+    else:
+        res = tuple(res)
+    
+    # Now put results in desired output order
+    if output_order == "remote":
+        return res
+    elif output_order == "z":
+        mask = (jnp.arange(size) >= dev_spl[rank]) & (jnp.arange(size) < dev_spl[rank+1])
+        res, num = masked_to_dense(res, mask)
+        return res
+    elif output_order == "input":
+        raise NotImplementedError()
+    else:
+        raise ValueError(f"Unknown output order {output_order}")
+distr_knn.smap = shard_map_constructor(distr_knn,
+    in_specs=(P(-1), None, None, P(-1), None, None, None, None),
+    static_argnames=("k", "boxsize", "result", "reduce_func", "output_order", "cfg")
+)
