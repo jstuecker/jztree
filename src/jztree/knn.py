@@ -9,7 +9,7 @@ from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierar
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list
 from .tools import inverse_indices
-from .jax_ext import raise_if, pcast_vma, shard_map_constructor
+from .jax_ext import raise_if, pcast_vma, pcast_like, shard_map_constructor
 from .comm import get_rank_info, all_to_all_request_children
 
 from jztree_cuda import ffi_knn
@@ -72,6 +72,11 @@ def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_dat
         rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize)
     )
 
+    # Mark as varying per process if input is varying
+    radii, ispl, il, ilr2 = jax.tree.map(
+        lambda x: pcast_like(x, spl_parent), (radii, ispl, il, ilr2)
+    )
+
     ispl = ispl + raise_if(ispl[-1] > il.size,
         "The interaction list allocation is too small. (need: {n1}, have: {n2})\n"
         "Hint: increase alloc_fac_ilist at least by a factor of {ratio:.1f}",
@@ -100,22 +105,32 @@ def _segment_sort(spl, key, val, smem_size=512):
 #                                          Dual Tree Walk                                          #
 # ------------------------------------------------------------------------------------------------ #
 
-def _knn_dual_walk(posz, th, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> InteractionList:
+def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None, 
+                   alloc_fac_ilist: float = 32.) -> InteractionList:
+    rank, ndev, axis_name = get_rank_info()
+
     nlevels = th.num_planes()
     size = th.size()
 
     # initialize top-level interaction list
-    spl, ilist, nsup = grouped_dense_interaction_list(
-        th.lvl.num(nlevels-1), int(th.size_leaves*cfg.alloc_fac_ilist), ngroup=32, size_super=size
-    )
-    # Define super-node data
+    if ndev > 1:
+        spl, ilist, nsup = distr_grouped_dense_interaction_list(
+            th.num(nlevels-1), size, size_ilist=int(th.size_leaves*alloc_fac_ilist)
+        )
+        ilist.rad2 = pcast_like(jnp.zeros(ilist.iother.shape, dtype=jnp.float32), ilist.iother)
+    else:
+        spl, ilist, nsup = grouped_dense_interaction_list(
+            th.lvl.num(nlevels-1), int(th.size_leaves*alloc_fac_ilist), ngroup=32, size_super=size
+        )
+        ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
+    
+    # include splitting points for top-level nodes
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
-    ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
 
     def handle_level(i, ilist: InteractionList):
         level = nlevels - i - 1
         
-        spl_parent = spl_n2n.get(level+1, size+1)
+        parent_spl = spl_n2n.get(level+1, size+1)
 
         node_data = PosLvlNum(
             pos=th.geom_cent.get(level, size),
@@ -123,13 +138,30 @@ def _knn_dual_walk(posz, th, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> 
             npart=th.npart(level, size)
         )
 
-        return _knn_node2node_ilist(ilist, spl_parent, node_data, k=k, boxsize=boxsize)
+        if ndev > 1:
+            # Request the remote node data that we need to interact with
+            (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
+                ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
+                axis_name=axis_name, err_hint="\nHint: increase alloc_fac_nodes"
+            )
+
+        ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
+
+        if ndev > 1:
+            # simplify interaction list to remove unused remotes
+            ilist = replace(ilist, ids=ids, dev_spl=dev_spl)
+            ilist = simplify_interaction_list(ilist)
+        
+        return ilist
 
     ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
     
     return ilist
-_knn_dual_walk.jit = jax.jit(_knn_dual_walk, static_argnames=["k", "boxsize", "cfg"])
-
+_knn_dual_walk.jit = jax.jit(_knn_dual_walk, static_argnames=["k", "boxsize", "alloc_fac_ilist"])
+_knn_dual_walk.smap = shard_map_constructor(_knn_dual_walk,
+    in_specs=(P(-1), None, None, None),
+    static_argnames=("k", "boxsize", "alloc_fac_ilist")
+)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                      User Exposed Functions                                      #
@@ -184,7 +216,7 @@ def prepare_knn_z(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None
     """
     th: TreeHierarchy = build_tree_hierarchy(posz, cfg.tree)
     
-    ilist = _knn_dual_walk(posz, th, k, boxsize=boxsize, cfg=cfg)
+    ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
 
     return KNNData(
         k=k,
@@ -227,72 +259,3 @@ knn.jit = jax.jit(knn, static_argnames=["k", "boxsize", "cfg"])
 # ------------------------------------------------------------------------------------------------ #
 #                                          Distributed KNN                                         #
 # ------------------------------------------------------------------------------------------------ #
-
-def _distr_knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float = 0., 
-                         alloc_fac_ilist = 32
-                        ): #-> Tuple[FofNodeData, InteractionList, PackedArray]:
-    rank, ndev, axis_name = get_rank_info()
-
-    size = th.size()
-
-    spl, ilist, nsup = distr_grouped_dense_interaction_list(
-        th.num(th.num_planes()-1), size, int(th.size_leaves*alloc_fac_ilist)
-    )
-    ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
-
-    # Define arrays we need during tree-walk
-    spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
-
-    def handle_plane(i: int, ilist: InteractionList):
-        level = th.num_planes() - 1 - i
-
-        parent_spl = spl_n2n.get(level+1, size+1)
-
-        node_data = PosLvlNum(
-            pos = th.geom_cent.get(level, size),
-            lvl = th.lvl.get(level, size),
-            npart = th.npart(level, size)
-        )
-
-        # Request the remote node children that we need to interact with
-        (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
-            ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
-            axis_name=axis_name, err_hint="\nHint: increase alloc_fac_nodes"
-        )
-
-        ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
-
-        # Remove 0 interaction nodes from interaction list (reduces unnecessary remote requests)
-        ilist = replace(ilist, ids=ids, dev_spl=dev_spl)
-        is_local = (jnp.arange(size) >= dev_spl[rank]) & (jnp.arange(size) < dev_spl[rank+1])
-        ilist = simplify_interaction_list(ilist, always_keep=is_local)
-
-        # jax.debug.log("rank {} il-dev-spl {}", rank, ilist.dev_spl)
-
-        return ilist
-
-    ilist = jax.lax.fori_loop(0, th.num_planes(), handle_plane, ilist)
-
-    # spl = spl_n2n.get(0, size+1)
-    # (node_data, ids), spl, dev_spl = all_to_all_request_children(
-    #     ilist.dev_spl, ilist.ids, spl, (node_data, jnp.arange(size)),
-    #     axis_name=axis_name
-    # )
-
-    # data = KNNData(
-    #     k=k,
-    #     boxsize=boxsize,
-    #     partz=PosId(pos=posz, id=idz),
-    #     spl=spl_n2n.get(0, size+1),
-    #     ilist=ilist
-    # )
-
-    return ilist
-_distr_knn_dual_walk.smap = shard_map_constructor(_distr_knn_dual_walk,
-    in_specs=(P(-1), None, None, None),
-    static_argnames=("k", "boxsize", "alloc_fac_ilist")
-)
-
-# _distr_knn_dual_walk.jit = jax.jit(
-#     _distr_knn_dual_walk, static_argnames=("k", "alloc_fac_ilist", "boxsize")
-# )
