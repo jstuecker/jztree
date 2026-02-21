@@ -22,7 +22,7 @@ def _distr_zsort():
 
     part = Pos(pos=pos, num=4096, num_total=4096*ndev)
 
-    partz = distr_zsort(part)
+    partz = distr_zsort(part)[0]
     return part, partz
 _distr_zsort.smapped = expanding_shard_map(_distr_zsort, jit=True, mesh=mesh)
 
@@ -37,7 +37,7 @@ def test_mutli_zsort():
     assert partz_mult.pos == pytest.approx(partz_sing.pos, abs=1e-5)
 
 def _distr_coarsen(partz: jnp.ndarray):
-    partz, lvl_bound = adjust_domain_for_nodesize(partz, 256)
+    partz, dataz, lvl_bound = adjust_domain_for_nodesize(partz, 256)
     ispl = detect_leaf_boundaries(partz.pos, leaf_size=256, lvl_bound=lvl_bound)
 
     # Convert splits to global splits

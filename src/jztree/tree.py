@@ -2,7 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
-from typing import Tuple
+from typing import Tuple, Any
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .data import get_num_total, get_pos, get_num, verify_ilist
@@ -206,18 +206,22 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
 
     return ext_ll, ext_lr, ext_rl, ext_rr
 
-def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig) -> Tuple[Pos, TreeHierarchy]:
+def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: Any | None = None
+                         ) -> Tuple[Pos, TreeHierarchy]:
     npart_tot = get_num_total(part)
-    partz = distr_zsort(part, nsamp=cfg_tree.nsamp)
+    partz, dataz = distr_zsort(part, data=data, nsamp=cfg_tree.nsamp)
 
     top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
-    partz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size)
+    partz, dataz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, dataz=dataz)
 
     th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
-    return partz, th
+    if dataz is None:
+        return partz, th
+    else:
+        return partz, dataz, th
 distr_zsort_and_tree.smap = shard_map_constructor(
-    distr_zsort_and_tree, in_specs=(P(-1), None), static_argnames="cfg_tree"
+    distr_zsort_and_tree, in_specs=(P(-1), None, P(-1)), static_argnames="cfg_tree"
 )
 
 def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True, block_size=32
@@ -254,11 +258,11 @@ def determine_npart(x):
     return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
 
     
-def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
+def distr_zsort(part: Pos, data: Any | None = None, nsamp: int = 1024, equalize: bool = True):
     rank, ndev, axis_name = get_rank_info()
 
-    if ndev == 1:
-        return pos_zorder_sort(part)[0]
+    # if ndev == 1:
+    #     return pos_zorder_sort(part)[0]
 
     pos = get_pos(part)
     numtot = get_num_total(part)
@@ -275,11 +279,12 @@ def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
 
     # Now organize and determine which chunks need to be send to each rank
     irank = search_sorted_z(xpivot, part.pos)-1
-    part, dev_spl = all_to_all_with_irank(irank, part, num=part.num)
+    (part, data), dev_spl = all_to_all_with_irank(irank, (part, data), num=part.num)
     
     part.num = dev_spl[-1]
 
     partz, idz = pos_zorder_sort(part)
+    dataz = tree_map_by_len(lambda x: x[idz], data, len(get_pos(partz)))
 
     stats_callback("allocation", AllocStats.record_filled_sort, dev_spl[-1], len(part.pos))
 
@@ -291,17 +296,17 @@ def distr_zsort(part: Pos, nsamp: int = 1024, equalize=True):
             spl_target = (jnp.arange(0, ndev+1, dtype=jnp.int64) * (numtot // ndev)).at[-1].set(numtot)
             spl_send = jnp.clip(spl_target - spl_have[rank], 0, partz.num).astype(jnp.int32)
 
-        partz, dev_spl = all_to_all_with_splits(
-            partz, spl_send, err_hint="\nHint: Increase padding of positions",
+        (partz, dataz), dev_spl = all_to_all_with_splits(
+            (partz, dataz), spl_send, err_hint="\nHint: Increase padding of positions",
         )
         partz.num = dev_spl[-1]
 
-    return partz
+    return partz, dataz
 distr_zsort.smap = shard_map_constructor(
-    distr_zsort, in_specs=(P(-1), None, None), static_argnames=("nsamp", "equalize")
+    distr_zsort, in_specs=(P(-1), P(-1), None, None), static_argnames=("nsamp", "equalize")
 )
 
-def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
+def adjust_domain_for_nodesize(partz: Pos, max_node_size: int, dataz: Any | None = None):
     """Shifts particles so that nodes with size <= max_node_size always lie on a single GPU"""
     rank, ndev, axis_name = get_rank_info()
 
@@ -319,7 +324,9 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
 
     npshift = ext_lr[ilvl_max]
 
-    partz, npart = shift_particles_left(partz, npshift, max_send=max_node_size, npart=npart)
+    (partz, dataz), npart = shift_particles_left(
+        (partz, dataz), npshift, max_send=max_node_size, npart=npart
+    )
     partz.num = npart
 
     stats_callback("allocation", AllocStats.record_filled_domain, partz.num, len(partz.pos))
@@ -335,7 +342,7 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int):
         lbound=jnp.array([0,2]), rbound=jnp.array([2,4]), num=2
     )[0]
 
-    return partz, lvl_bound
+    return partz, dataz, lvl_bound
 adjust_domain_for_nodesize.jit = jax.jit(adjust_domain_for_nodesize, static_argnames="max_node_size")
 
 # ------------------------------------------------------------------------------------------------ #

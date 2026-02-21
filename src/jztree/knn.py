@@ -11,9 +11,9 @@ from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierar
 from .data import Pos, RankIdx, get_pos
 from .tree import pos_zorder_sort, search_sorted_z, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list, distr_zsort_and_tree
-from .tools import inverse_indices, inverse_of_splits, masked_to_dense
+from .tools import inverse_indices, inverse_of_splits, masked_to_dense, masked_scatter, masked_inverse
 from .jax_ext import raise_if, pcast_vma, pcast_like, shard_map_constructor, tree_map_by_len
-from .comm import get_rank_info, all_to_all_request_children
+from .comm import get_rank_info, all_to_all_request_children, all_to_all_with_irank
 
 from jztree_cuda import ffi_knn
 jax.ffi.register_ffi_target("KnnLeaf2Leaf", ffi_knn.KnnLeaf2Leaf(), platform="CUDA")
@@ -300,26 +300,33 @@ def distr_knn(
         output_order: str = "input",
         cfg: KNNConfig = KNNConfig()
     ):
-    assert output_order in ("z", "remote")
+    assert output_order in ("z", "input", "remote")
 
     rank, ndev, axis_name = get_rank_info()
 
     size = len(get_pos(part))
 
+    origin = RankIdx(jnp.full(size, rank, dtype=jnp.int32), jnp.arange(size, dtype=jnp.int32))
+
     if th is None:
-        partz, th = distr_zsort_and_tree(part, cfg.tree)
+        if output_order == "input": # keep track of pre-sort origin
+            partz, origin, th = distr_zsort_and_tree(part, cfg.tree, data=origin)
+            origin_cts = jax.lax.all_gather(part.num, axis_name=axis_name)
+        else:
+            partz, th = distr_zsort_and_tree(part, cfg.tree)
+            origin_cts = jax.lax.all_gather(partz.num, axis_name=axis_name)
     else:
+        # particles must already be sorted
         # put a sorted check here later !!!
         partz = part
+        origin_cts = jax.lax.all_gather(part.num, axis_name=axis_name)
 
     # Build Leaf-leaf interaction list through dual tree walk
     ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
 
-    origin = RankIdx(jnp.full(size, rank, dtype=jnp.int32), jnp.arange(size, dtype=jnp.int32))
-
     # Localize particle data
     spl = th.ispl_n2n.get(0, th.size()+1)
-    (premote, origin), spl, dev_spl = all_to_all_request_children(
+    (premote, origin_rem), spl, dev_spl = all_to_all_request_children(
         ilist.dev_spl, ilist.ids, spl, (partz, origin),
         axis_name=axis_name, err_hint="\nHint: increase padding."
     )
@@ -336,9 +343,15 @@ def distr_knn(
             elif key == "drad": # Same as rad, but result will be differentible
                 x = get_pos(premote)
                 res.append(jnp.linalg.norm(x[:,None] - x[innz], axis=-1))
-            elif key == "origin":
-                nn_origin = jax.tree.map(lambda x: x[innz], origin)
+            elif key == "rankidx":
+                nn_origin = jax.tree.map(lambda x: x[innz], origin_rem)
                 res.append(nn_origin)
+            elif key == "globalidx":
+                dtype = jnp.int64 if ndev > 1 else jnp.int32
+                with jax.enable_x64():
+                    dev_offsets = jnp.cumsum(origin_cts, dtype=dtype) - origin_cts.astype(dtype)
+                    gidx = dev_offsets[origin_rem.rank].astype(dtype) + origin_rem.idx.astype(dtype)
+                    res.append(gidx[innz])
             elif key == "part":
                 res.append(tree_map_by_len(lambda x: x[innz], premote, size))
             elif key == "reduce":
@@ -362,12 +375,20 @@ def distr_knn(
     # Now put results in desired output order
     if output_order == "remote":
         return res
-    elif output_order == "z":
-        mask = (jnp.arange(size) >= dev_spl[rank]) & (jnp.arange(size) < dev_spl[rank+1])
-        res, num = masked_to_dense(res, mask)
+
+    mask = (jnp.arange(size) >= dev_spl[rank]) & (jnp.arange(size) < dev_spl[rank+1])
+    res, num = masked_to_dense(res, mask)
+
+    if output_order == "z":
         return res
     elif output_order == "input":
-        raise NotImplementedError()
+        (res, idx), dev_spl = all_to_all_with_irank(
+            origin.rank, (res, origin.idx), num=num, axis_name=axis_name,
+            err_hint="\nThis should never fail..."
+        )
+        inverse = masked_inverse(idx, mask=jnp.arange(len(idx)) < dev_spl[-1])
+
+        return tree_map_by_len(lambda x: x[inverse], res, size)
     else:
         raise ValueError(f"Unknown output order {output_order}")
 distr_knn.smap = shard_map_constructor(distr_knn,

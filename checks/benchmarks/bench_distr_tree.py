@@ -48,7 +48,7 @@ def bench_multi_zsort(jax_bench, ndev):
 
     jb = jax_bench(jit_rounds=5, jit_warmup=1, eager_rounds=0, eager_warmup=0)
     
-    partz = jb.measure(fn_jit=fzs, part=part, tag="random")[1]
+    partz = jb.measure(fn_jit=fzs, part=part, tag="random")[1][0]
     jb.measure(fn_jit=fzs, part=partz, tag="sorted")
     partz.pos = partz.pos + 1e-2 * part.pos
     jb.measure(fn_jit=fzs, part=partz, tag="displaced")

@@ -117,6 +117,13 @@ def inverse_indices(iargsort):
     iunsort = iunsort.at[iargsort].set(jnp.arange(len(iargsort), dtype=iargsort.dtype))
     return iunsort
 
+def masked_inverse(indices, mask):
+    """Given the indices that would sort an array, return the indices that would unsort it"""
+    inverse = jnp.full_like(indices, len(indices))
+    imask = jnp.where(mask, indices, len(indices))
+    inverse = inverse.at[imask].set(jnp.arange(len(indices), dtype=indices.dtype))
+    return inverse
+
 def bucket_prefix_sum(key, count=None, num=None):
     """A prefix sum per key: result = sum(count[key[:i] == key[i]]), but jittable
     i.e. the prefix-sum of points with the same index"""
