@@ -36,11 +36,11 @@ class AllocStats:
 
     def record_filled_interactions(self, nfilled, size):
         self.max_ilist_frac_fof = max_allow_None(self.max_ilist_frac_fof, float(nfilled/size))
-    
+
     def record_filled_links(self, nfilled, size):
         self.max_links_frac = max_allow_None(self.max_links_frac, float(nfilled/size))
 
-    def suggestions(self, cfg: FofConfig):
+    def print_suggestions(self, cfg: FofConfig):
         print("--- Allocation Info ---")
         fill_frac = max_allow_None(self.max_part_frac_sort, self.max_part_frac_domain)
         if fill_frac is not None:
@@ -50,7 +50,7 @@ class AllocStats:
                   f"at most from {cfg.tree.alloc_fac_nodes} "
                   f"to {cfg.tree.alloc_fac_nodes * self.max_node_frac:.2f}")
         if self.max_ilist_frac_fof is not None:
-            print(f"At most filled {self.max_ilist_frac_fof:.1%} of interaction list. Could decrease "
+            print(f"Filled at most {self.max_ilist_frac_fof:.1%} of interaction list. Could decrease "
                   f"alloc_fac_ilist at most from {cfg.alloc_fac_ilist} to "
                   f"{cfg.alloc_fac_ilist * self.max_ilist_frac_fof:.2f}")
         if self.max_links_frac is not None:
@@ -66,6 +66,15 @@ class InteractionStats:
     leaf2leaf: int | None = None
     num_open: int | None = None
 
+    largest_interaction_count: int | None = None
+
+    def record_largest_interaction(self, num):
+        self.largest_interaction_count = max_allow_None(self.largest_interaction_count, num)
+
+    def print_info(self):
+        if self.largest_interaction_count is not None:
+            print(f"Largest interaction of any node: {self.largest_interaction_count}")
+
 @jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class Statistics:
@@ -78,7 +87,12 @@ class Statistics:
     )
 
     def print_suggestions(self, cfg):
-        self.allocation.suggestions(cfg)
+        self.allocation.print_suggestions(cfg)
+
+        self.print_info()
+
+    def print_info(self):
+        self.interaction.print_info()
 
 # ContextVar doesn't work well with callbacks and shardmap...
 # That's why we simply set a single global variable

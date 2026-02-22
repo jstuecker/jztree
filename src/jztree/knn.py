@@ -14,6 +14,7 @@ from .tree import distr_grouped_dense_interaction_list, simplify_interaction_lis
 from .tools import inverse_indices, inverse_of_splits, masked_to_dense, masked_scatter, masked_inverse
 from .jax_ext import raise_if, pcast_vma, pcast_like, shard_map_constructor, tree_map_by_len
 from .comm import get_rank_info, all_to_all_request_children, all_to_all_with_irank
+from .stats import stats_callback, AllocStats, InteractionStats
 
 from jztree_cuda import ffi_knn
 jax.ffi.register_ffi_target("KnnLeaf2Leaf", ffi_knn.KnnLeaf2Leaf(), platform="CUDA")
@@ -84,6 +85,11 @@ def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_dat
         "The interaction list allocation is too small. (need: {n1}, have: {n2})\n"
         "Hint: increase alloc_fac_ilist at least by a factor of {ratio:.1f}",
         n1=ispl[-1], n2=il.size, ratio=ispl[-1]/il.size
+    )
+
+    stats_callback("allocation", AllocStats.record_filled_interactions, ispl[-1], il.size)
+    stats_callback(
+        "interaction", InteractionStats.record_largest_interaction, jnp.max(ispl[1:] - ispl[:-1])
     )
 
     return InteractionList(ispl, il, rad2=ilr2)
