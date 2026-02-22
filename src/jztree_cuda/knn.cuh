@@ -386,13 +386,14 @@ __global__ void KnnNode2NodeFindRmaxOld(
     }
 }
 
-template <int k>
+template <int kmax>
 __global__ void KnnNode2NodeFindRmax(
     ConstInteractionList par_ilist,
     const int* parent_spl,
     const Node* nodes,
     const int* nodes_npart,
     float* rmax_out,
+    int k,
     float boxsize
 ) {
     // Finds the minimal radius at which we are guaranteed to have at least k neighbors for any
@@ -410,7 +411,7 @@ __global__ void KnnNode2NodeFindRmax(
         float3 xQ = nodeQ.center;
         float3 extQ = LvlToHalfExt(nodeQ.level);
 
-        SortedNearestKWithCounts<k> nearestK(INFINITY);
+        SortedNearestKWithCounts<kmax> nearestK(INFINITY);
 
         PrefetchList2<int,float> pf_ilist(
             par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
@@ -590,11 +591,24 @@ ffi::Error KnnNode2Node(
         );
     }
     else {
-        KnnNode2NodeFindRmax<16><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-            par_ilist, parent_spl, nodes, nodes_npart,
-            node_rmax2, 
-            boxsize
-        );
+        if(k <= 4) {
+            KnnNode2NodeFindRmax<4><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+                par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
+            );
+        }
+        if(k <= 16) {
+            KnnNode2NodeFindRmax<16><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+                par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
+            );
+        }
+        else if(k <= 64) {
+            KnnNode2NodeFindRmax<64><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+                par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
+            );
+        }
+        else {
+            return ffi::Error(ffi::ErrorCode::kOutOfRange, "Only supporting k up to 64 for now");
+        }
     }
 
     smem_alloc_size = blocksize_fill * 2*sizeof(float3);

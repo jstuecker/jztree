@@ -150,10 +150,10 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
             )
 
         ilist_in = ilist
-        ilist = _knn_node2node_ilist(ilist_in, parent_spl, node_data, k=k, boxsize=boxsize, mode=0)
+        # ilist = _knn_node2node_ilist(ilist_in, parent_spl, node_data, k=k, boxsize=boxsize, mode=0)
 
-        # ilist = _knn_node2node_ilist(ilist_in, parent_spl, node_data, k=k, boxsize=boxsize, mode=1)
-        jax.debug.log("{}", ilist.ispl)
+        ilist = _knn_node2node_ilist(ilist_in, parent_spl, node_data, k=k, boxsize=boxsize, mode=1)
+        # jax.debug.log("{}", ilist.ispl)
         # jax.debug.log("{} {}", ilist.ispl, ilist2.ispl)
 
         if ndev > 1:
