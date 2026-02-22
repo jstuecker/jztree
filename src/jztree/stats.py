@@ -37,7 +37,6 @@ class AllocStats:
         self.max_node_frac = max_allow_None(self.max_node_frac, float(num/size))
 
     def record_regularization(self, lvl, nleaves_pre, nleaves_post):
-        print(nleaves_pre, nleaves_post)
         self.max_reg_frac = max_allow_None(self.max_reg_frac, float(nleaves_post/nleaves_pre))
         self.max_reg_leaf_lvl = max_allow_None(self.max_reg_leaf_lvl, lvl)
 

@@ -54,5 +54,6 @@ class KNNConfig:
         coarse_fac = 8.,
         alloc_fac_nodes = 1.,
         stop_coarsen = 2048,
-        mass_centered = False
+        mass_centered = False,
+        regularization=RegularizationConfig()
     )

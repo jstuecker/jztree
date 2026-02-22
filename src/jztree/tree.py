@@ -146,6 +146,9 @@ def detect_leaf_boundaries(
         leaf_npart = splits[1:] - splits[:-1]
         leaf_lvl = jnp.minimum(lvl[splits[1:]], lvl[splits[:-1]]) - 1
 
+        # Note !!! Currently the regularization will not guarantee results that are independent
+        # of the number of tasks for the tree structure. Later, I should think of a way to get
+        # the percentile in a distribute way or so...
         lvl_percentile = weighted_percentile(leaf_lvl, leaf_npart, cfg_reg.percentile)
 
         # adjust flags to not exceed target level
