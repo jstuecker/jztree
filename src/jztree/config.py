@@ -6,11 +6,17 @@ class LoggingConfig():
     show_loc : bool = True
 
 @dataclass(unsafe_hash=True)
+class RegularizationConfig():
+    percentile: float = 90.
+    max_extent_fac: float = 2.
+
+@dataclass(unsafe_hash=True)
 class TreeConfig():
     # structure:
     max_leaf_size: int = 32
     coarse_fac: float = 6.0
     stop_coarsen: int = 1024
+    regularization: RegularizationConfig | None = None
 
     # memory usage:
     alloc_fac_nodes: float = 1.0

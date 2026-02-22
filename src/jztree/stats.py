@@ -22,6 +22,8 @@ class AllocStats:
     max_part_frac_sort: float | None = None
     max_part_frac_domain: float | None = None
     max_node_frac: float | None = None
+    max_reg_frac: float | None = None
+    max_reg_leaf_lvl: int | None = None
     max_ilist_frac_fof: float | None = None
     max_links_frac: float | None = None
 
@@ -31,8 +33,13 @@ class AllocStats:
     def record_filled_domain(self, npart, size):
         self.max_part_frac_domain = max_allow_None(self.max_part_frac_domain, float(npart/size))
     
-    def record_filled_nodes(self, npart, size):
-        self.max_node_frac = max_allow_None(self.max_node_frac, float(npart/size))
+    def record_filled_nodes(self, num, size):
+        self.max_node_frac = max_allow_None(self.max_node_frac, float(num/size))
+
+    def record_regularization(self, lvl, nleaves_pre, nleaves_post):
+        print(nleaves_pre, nleaves_post)
+        self.max_reg_frac = max_allow_None(self.max_reg_frac, float(nleaves_post/nleaves_pre))
+        self.max_reg_leaf_lvl = max_allow_None(self.max_reg_leaf_lvl, lvl)
 
     def record_filled_interactions(self, nfilled, size):
         self.max_ilist_frac_fof = max_allow_None(self.max_ilist_frac_fof, float(nfilled/size))
@@ -57,6 +64,8 @@ class AllocStats:
             print(f"Filled at most {self.max_links_frac*100.:.2g}% of cross-task link data. Could "
                   f"decrease alloc_fac_distr_links at most from {cfg.alloc_fac_distr_links} to"
                   f"{cfg.alloc_fac_distr_links*self.max_links_frac:.2g}")
+        if self.max_reg_frac is not None:
+            print(f"Regularization increased number of leaves by {self.max_reg_frac- 1.:.2%}")
         print("-------")
 
 @jax.tree_util.register_dataclass

@@ -6,8 +6,8 @@ from typing import Tuple, Any
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
 from .data import get_num_total, get_pos, get_num, verify_ilist
-from .config import TreeConfig
-from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits
+from .config import TreeConfig, RegularizationConfig
+from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, masked_to_dense
 from .comm import send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
@@ -113,7 +113,8 @@ search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "l
 
 def detect_leaf_boundaries(
         posz: jax.Array, leaf_size: int = 32, npart: int | None = None, lvl_bound = (388, 388),
-        block_size: int = 64, alloc_size: int | None = None
+        block_size: int = 64, alloc_size: int | None = None,
+        cfg_reg: RegularizationConfig | None = None
     ) -> jax.Array:
     if alloc_size is None:
         alloc_size = int(div_ceil(len(posz), np.maximum(leaf_size//2, 1))) + 1
@@ -130,18 +131,44 @@ def detect_leaf_boundaries(
         block_size=np.uint64(block_size), scan_size=np.int32(leaf_size+1)
     )
 
+    if cfg_reg is not None:
+        splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
+
+        # Determine percentile of the particle-weighted leaf-size distribution:
+        leaf_npart = splits[1:] - splits[:-1]
+        leaf_lvl = jnp.minimum(lvl[splits[1:]], lvl[splits[:-1]]) - 1
+
+        isort = jnp.argsort(leaf_lvl)
+        ncum = jnp.cumsum(leaf_npart[isort])
+
+        iperc = jnp.searchsorted(ncum, npart*0.01*cfg_reg.percentile, side="left")
+
+        # define flags based on this
+        num_pre = jnp.sum(flag_split)
+        lvl_percentile = leaf_lvl[isort[iperc]]
+        max_lvl = lvl_percentile + int(3 * np.log2(cfg_reg.max_extent_fac))
+        flag_split = flag_split | (lvl > max_lvl)
+
+        stats_callback(
+            "allocation", AllocStats.record_regularization, max_lvl, num_pre, jnp.sum(flag_split)
+        )
+    else:
+        lvl_percentile = None
+
     nfilled = jnp.sum(flag_split)
+
     flag_split = flag_split + raise_if(nfilled > alloc_size,
         "Tree-Leaf allocation too small: filled={filled} size={size}.\n"
         "Hint: Increase alloc_fac_nodes or max_leaf_size",
         filled=nfilled, size=alloc_size, max_trace_depth=5
     )
-    stats_callback("allocation", AllocStats.record_filled_nodes, nfilled, alloc_size)
-    
+
     splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
 
-    return splits
-detect_leaf_boundaries.jit = jax.jit(detect_leaf_boundaries, static_argnames=("leaf_size", "block_size"))
+    return splits, lvl_percentile
+detect_leaf_boundaries.jit = jax.jit(detect_leaf_boundaries,
+    static_argnames=("leaf_size", "block_size", "cfg_reg")
+)
 
 def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: jnp.array = None) -> Tuple[jax.Array, jax.Array, jax.Array]:
     """Builds a Z-order tree from positions"""
@@ -374,7 +401,8 @@ def define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
     return node_sizes
 
 def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: int, 
-                           npart: int | None = None, lvl_bound = (388,388)
+                           npart: int | None = None, lvl_bound = (388,388),
+                           cfg_reg: RegularizationConfig | None = None
                            ) -> Tuple[jax.Array, PackedArray, PackedArray]:
     """Finds the splitting point of the tree hierarchy
 
@@ -385,8 +413,9 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
     """
     nlevels = len(node_sizes)
     
-    ispl =  detect_leaf_boundaries(
-        posz, leaf_size=node_sizes[0], npart=npart, alloc_size=alloc_size, lvl_bound=lvl_bound
+    ispl, lvl_percentile =  detect_leaf_boundaries(
+        posz, leaf_size=node_sizes[0], npart=npart, alloc_size=alloc_size, lvl_bound=lvl_bound,
+        cfg_reg=cfg_reg
     )
 
     nleaves = jnp.argmax(ispl)
@@ -482,7 +511,8 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
     alloc_size = estimate_node_number(np_per_dev, cfg_tree.max_leaf_size, cfg_tree.alloc_fac_nodes)
 
     ispl, ispl_n2l, ispl_n2n = define_split_hierarchy(
-        posz, node_sizes, alloc_size, npart=npart, lvl_bound=lvl_bound
+        posz, node_sizes, alloc_size, npart=npart, lvl_bound=lvl_bound,
+        cfg_reg=cfg_tree.regularization
     )
 
     # We can handle all levels at once for node geometry:
