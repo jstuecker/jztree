@@ -52,7 +52,7 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
 _knn_leaf2leaf.jit = jax.jit(_knn_leaf2leaf, static_argnames=("k", "boxsize"))
 
 def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvlNum,
-                  k: int = 32, boxsize: float = 0., rfac_maxbin: float = 16., mode: int = 0) -> InteractionList:
+                         k: int = 32, boxsize: float = 0.) -> InteractionList:
     boxsize = 0. if boxsize is None else boxsize
 
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
@@ -72,8 +72,7 @@ def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_dat
     radii, ispl, il, ilr2 = jax.ffi.ffi_call("KnnNode2Node", outputs)(
         ilist.ispl, ilist.iother, ilist.rad2, spl_parent, poslvl, node_data.npart,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
-        rfac_maxbin=np.float32(rfac_maxbin), boxsize=np.float32(boxsize),
-        mode=np.int32(mode)
+        boxsize=np.float32(boxsize)
     )
 
     # Mark as varying per process if input is varying
@@ -88,7 +87,7 @@ def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_dat
     )
 
     return InteractionList(ispl, il, rad2=ilr2)
-_knn_node2node_ilist.jit = jax.jit(_knn_node2node_ilist, static_argnames=["k", "boxsize", "rfac_maxbin"])
+_knn_node2node_ilist.jit = jax.jit(_knn_node2node_ilist, static_argnames=["k", "boxsize"])
 
 def _segment_sort(spl, key, val, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
@@ -149,12 +148,7 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
                 axis_name=axis_name, err_hint="\nHint: increase alloc_fac_nodes"
             )
 
-        ilist_in = ilist
-        # ilist = _knn_node2node_ilist(ilist_in, parent_spl, node_data, k=k, boxsize=boxsize, mode=0)
-
-        ilist = _knn_node2node_ilist(ilist_in, parent_spl, node_data, k=k, boxsize=boxsize, mode=1)
-        # jax.debug.log("{}", ilist.ispl)
-        # jax.debug.log("{} {}", ilist.ispl, ilist2.ispl)
+        ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
 
         if ndev > 1:
             # simplify interaction list to remove unused remotes

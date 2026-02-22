@@ -294,98 +294,6 @@ struct LogBinMap {
 /*                                    Interaction list Building                                   */
 /* ---------------------------------------------------------------------------------------------- */
 
-#define INTERACTION_BINS 16
-
-__global__ void KnnNode2NodeFindRmaxOld(
-    ConstInteractionList par_ilist,
-    const int* parent_spl,
-    const Node* nodes,
-    const int* nodes_npart,
-    float* rmax_out,
-    int k,
-    float bins_per_log2,
-    float boxsize
-) {
-
-    // Finds the minimal radius at which we are guaranteed to have at least k neighbors for any
-    // point inside each a node and counts the number of other nodes that are needed to interact 
-    // at that distance
-
-    // This is done in 2 steps:
-    // (1) We make a histogram of the number of particles that are guaranteed to be included at
-    //     a distance r. (Note that this depends on the upper bound of the distance between nodes)
-    // (2) We find the radius at which we have at least k particles
-
-    extern __shared__ unsigned char smem[];
-
-    int parentQ = blockIdx.x;
-    int inodeQ_start = parent_spl[parentQ], inodeQ_end = parent_spl[parentQ + 1];
-    for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
-        // we set overhead threads to the last node to avoid adding many conditionals
-        int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
-        Node nodeQ = nodes[inodeQ];
-        float3 xQ = nodeQ.center;
-        float3 extQ = LvlToHalfExt(nodeQ.level);
-
-        // We will define bins in units of the diagonal size of nodeQ
-        // This is the radius at which every point in Q would include every other point in Q
-        float rbase2 = 4.0f*dotf3(extQ, extQ); // factor 4, since ext is half the node size
-        
-        LogBinMap<INTERACTION_BINS> binmap(rbase2, bins_per_log2);
-        CumHist<INTERACTION_BINS> rhist;
-
-        PrefetchList2<int,float> pf_ilist(
-            par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
-        );
-
-        float rmax2 = INFINITY;
-
-        while(!pf_ilist.finished()) {
-            Pair<int,float> interaction = pf_ilist.next();
-            int parentT = interaction.first;
-            float r2T = interaction.second;
-
-            bool any_accept = syncthreads_or(r2T <= rmax2);
-            if(!any_accept) break;
-
-            int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
-
-            float3* xT = reinterpret_cast<float3*>(smem);
-            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
-            int* npartT = reinterpret_cast<int*>(extT + blockDim.x);
-
-            for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
-                int ilT = itoff + threadIdx.x;
-                if(ilT < inodeT_end) {
-                    Node nodeT = nodes[ilT];
-                    xT[threadIdx.x] = nodeT.center;
-                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
-                    npartT[threadIdx.x] = nodes_npart[ilT];
-                }
-                __syncthreads();
-                
-                for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
-                    float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
-
-                    int bin = binmap.r2_to_bin(r2);
-                    rhist.insert(bin, npartT[j]);
-                }
-                __syncthreads();
-
-                int ibin = rhist.find(k);
-                // add a small safety margin, since our floating point operations might not
-                // be exactly invertible
-                rmax2 = binmap.bin_end(ibin) * (1.f + 1e-6f); 
-            }
-        }
-
-        // Output our results:
-        if(iqoff + threadIdx.x < inodeQ_end) {
-            rmax_out[inodeQ] = rmax2;
-        }
-    }
-}
-
 template <int kmax>
 __global__ void KnnNode2NodeFindRmax(
     ConstInteractionList par_ilist,
@@ -461,8 +369,8 @@ __global__ void KnnNode2NodeFindRmax(
     }
 }
 
-template<int pass=0>
-__global__ void KernelCountInsertInteractions(
+template<int pass>
+__global__ void KnnNode2NodeCountInsert(
     ConstInteractionList par_ilist,
     const int* parent_spl,
     const Node* nodes,
@@ -472,6 +380,10 @@ __global__ void KernelCountInsertInteractions(
     int nmax,
     float boxsize
 ) {
+    // pass 0: Count node-node interactions that intersect node_rmax2
+    //   in-between: calculate offsets
+    // pass 1: Insert the interactions into the interaction list
+
     extern __shared__ unsigned char smem[];
 
     int parentQ = blockIdx.x;
@@ -565,9 +477,7 @@ ffi::Error KnnNode2Node(
     const int k,
     const size_t blocksize_fill,
     const size_t blocksize_sort,
-    const float rfac_maxbin,
     float boxsize,
-    int mode,
     // parameters that can be infered inside ffi:
     const int size_parents,
     const int size_nodes,
@@ -578,41 +488,29 @@ ffi::Error KnnNode2Node(
 
     cudaMemsetAsync(node_ilist.spl, 0, sizeof(int32_t)*(size_nodes+1), stream);
 
-    constexpr int BINS = INTERACTION_BINS;
-    float bins_per_log2 = BINS / log2f(rfac_maxbin);
-
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
-    if(mode == 0) {
-        KnnNode2NodeFindRmaxOld<<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-            par_ilist, parent_spl, nodes, nodes_npart,
-            node_rmax2,
-            k, bins_per_log2, boxsize
+    if(k <= 4) {
+        KnnNode2NodeFindRmax<4><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+            par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
+        );
+    }
+    if(k <= 16) {
+        KnnNode2NodeFindRmax<16><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+            par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
+        );
+    }
+    else if(k <= 64) {
+        KnnNode2NodeFindRmax<64><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+            par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
     }
     else {
-        if(k <= 4) {
-            KnnNode2NodeFindRmax<4><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-                par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
-            );
-        }
-        if(k <= 16) {
-            KnnNode2NodeFindRmax<16><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-                par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
-            );
-        }
-        else if(k <= 64) {
-            KnnNode2NodeFindRmax<64><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-                par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
-            );
-        }
-        else {
-            return ffi::Error(ffi::ErrorCode::kOutOfRange, "Only supporting k up to 64 for now");
-        }
+        return ffi::Error(ffi::ErrorCode::kOutOfRange, "Only supporting k up to 64 for now");
     }
 
     smem_alloc_size = blocksize_fill * 2*sizeof(float3);
-    KernelCountInsertInteractions<0><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+    KnnNode2NodeCountInsert<0><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         par_ilist, parent_spl, nodes, node_rmax2,
         node_ilist.spl + 1, node_ilist, // output
         node_ilist_size, boxsize    // parameters
@@ -637,7 +535,7 @@ ffi::Error KnnNode2Node(
 
     // Now insert the interactions
     smem_alloc_size = blocksize_fill * 2*sizeof(float3);
-    KernelCountInsertInteractions<1><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+    KnnNode2NodeCountInsert<1><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         par_ilist, parent_spl, nodes, node_rmax2,
         nullptr, node_ilist, // output
         node_ilist_size, boxsize    // parameters

@@ -135,9 +135,7 @@ ffi::Error KnnNode2NodeFFIHost(
     int k,
     size_t blocksize_fill,
     size_t blocksize_sort,
-    float rfac_maxbin,
-    float boxsize,
-    int mode
+    float boxsize
 ) {
     int size_parents = parent_spl.element_count() - 1;
     int size_nodes = nodes_npart.element_count();
@@ -159,9 +157,7 @@ ffi::Error KnnNode2NodeFFIHost(
         k,
         blocksize_fill,
         blocksize_sort,
-        rfac_maxbin,
         boxsize,
-        mode,
         size_parents,
         size_nodes,
         node_ilist_size
@@ -191,9 +187,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int>("k")
         .Attr<size_t>("blocksize_fill")
         .Attr<size_t>("blocksize_sort")
-        .Attr<float>("rfac_maxbin")
-        .Attr<float>("boxsize")
-        .Attr<int>("mode"),
+        .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
