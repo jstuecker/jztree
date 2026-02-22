@@ -36,9 +36,9 @@ def test_mutli_zsort():
     assert len(partz_sing.pos) == len(partz_mult.pos) == partz_sing.num == partz_mult.num
     assert partz_mult.pos == pytest.approx(partz_sing.pos, abs=1e-5)
 
-def _distr_coarsen(partz: jnp.ndarray):
+def _distr_coarsen(partz: Pos):
     partz, dataz, lvl_bound = adjust_domain_for_nodesize(partz, 256)
-    ispl = detect_leaf_boundaries(partz.pos, leaf_size=256, lvl_bound=lvl_bound)
+    ispl = detect_leaf_boundaries(partz.pos, leaf_size=256, lvl_bound=lvl_bound, npart=partz.num)
 
     # Convert splits to global splits
     rank, ndev, axis_name = get_rank_info()

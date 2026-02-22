@@ -15,6 +15,7 @@ __global__ void FlagLeafBoundaries(
     const int* lvl_bound,
     const int* npart,
     int8_t* split_flags,
+    int* lvl,
     int max_size,
     int size_part,
     int scan_size
@@ -74,6 +75,7 @@ __global__ void FlagLeafBoundaries(
 
     if (node_idx < size_part + 1) {
         split_flags[node_idx] = is_split;
+        lvl[node_idx] = mylevel;
     }
 }
 

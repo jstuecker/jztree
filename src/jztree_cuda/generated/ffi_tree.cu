@@ -31,6 +31,7 @@ ffi::Error FlagLeafBoundariesFFIHost(
     ffi::AnyBuffer lvl_bound,
     ffi::AnyBuffer npart,
     ffi::Result<ffi::AnyBuffer> split_flags,
+    ffi::Result<ffi::AnyBuffer> lvl,
     int max_size,
     int scan_size,
     size_t block_size
@@ -46,12 +47,14 @@ ffi::Error FlagLeafBoundariesFFIHost(
     int* lvl_bound_val = reinterpret_cast<int*>(lvl_bound.untyped_data());
     int* npart_val = reinterpret_cast<int*>(npart.untyped_data());
     int8_t* split_flags_val = reinterpret_cast<int8_t*>(split_flags->untyped_data());
+    int* lvl_val = reinterpret_cast<int*>(lvl->untyped_data());
 
     void* args[] = {
         &posz_val,
         &lvl_bound_val,
         &npart_val,
         &split_flags_val,
+        &lvl_val,
         &max_size,
         &size_part,
         &scan_size
@@ -73,6 +76,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // lvl_bound
         .Arg<ffi::AnyBuffer>() // npart
         .Ret<ffi::AnyBuffer>() // split_flags
+        .Ret<ffi::AnyBuffer>() // lvl
         .Attr<int>("max_size")
         .Attr<int>("scan_size")
         .Attr<size_t>("block_size"),
