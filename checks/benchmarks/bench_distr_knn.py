@@ -11,7 +11,7 @@ from jztree import knn
 def get_mesh(ndev=-1):
     return jax.make_mesh((ndev,), ('gpus',), axis_types=(AxisType.Auto))
 
-@pytest.mark.shrink_in_quick(keep_index=1)
+# @pytest.mark.shrink_in_quick(keep_index=1)
 @pytest.mark.parametrize("N", (int(1e6), int(1e7), int(1e8)))
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_distr_knn(jax_bench, N):
@@ -27,7 +27,7 @@ def bench_distr_knn(jax_bench, N):
     part = ics.uniform_particles.smap(mesh, jit=True)(N, npad=int(N * 0.4))
 
     rnn = jb.measure(fn_jit=knn.distr_knn.smap(mesh, jit=True),
-        part=part, k=16, output_order="input", result="rad", tag=f"ndev{ndev}"
+        part=part, k=16, output_order="z", result="rad", tag=f"ndev{ndev}"
     )
 
 @pytest.mark.shrink_in_quick(keep_index=1)

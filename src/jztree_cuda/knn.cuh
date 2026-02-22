@@ -90,6 +90,58 @@ struct SortedNearestK {
     }
 };
 
+
+template<int K>
+struct SortedNearestKWithCounts {
+    // Keeps track of the nearest K neighbor radii in ascending order of r2.
+    // Allows to insert multiple entries with the same radius
+
+    float r2s[K];
+    int cts[K];
+
+    __device__ __forceinline__ SortedNearestKWithCounts(float r2=INFINITY){
+        #pragma unroll
+        for (int i=0; i<K; i++){ 
+            r2s[i] = r2;
+            cts[i] = 0;
+        }
+    }
+
+    __device__ __forceinline__ float max_r2(int count) const {
+        bool active = true;
+        int sum = 0;
+        float r2 = INFINITY;
+        #pragma unroll
+        for(int i=0; i<K; i++) {
+            sum += cts[i];
+            r2 = (active && (sum >= count)) ? r2s[i] : r2;
+            active = sum < count;
+        }
+        return r2;
+    }
+
+
+    __device__ __forceinline__ void consider_num(float r2, int num) {
+        if (r2 > r2s[K-1]) return;
+
+        bool active = true;  // true until we've placed the item
+
+        #pragma unroll
+        for (int i = K-2; i >= 0; i--) {
+            bool take = active && (r2 < r2s[i]);
+
+            r2s[i+1] = active ? (take ? r2s[i] : r2) : r2s[i+1];
+            cts[i+1] = active ? (take ? cts[i] : num) : cts[i+1];
+
+            active = take;
+        }
+
+        // If we never placed, item belongs at slot 0
+        r2s[0] = active ? r2 : r2s[0];
+        cts[0] = active ? num : cts[0];
+    }
+};
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                     Ilist based KNN kernel                                     */
 /* ---------------------------------------------------------------------------------------------- */
@@ -376,6 +428,121 @@ __global__ void KernelCountInteractions(
     }
 }
 
+template <int k>
+__global__ void KnnNode2NodeInteractionRmaxAndCount(
+    ConstInteractionList par_ilist,
+    const int* parent_spl,
+    const Node* nodes,
+    const int* nodes_npart,
+    int* node_icount,
+    float* rmax_out,
+    float boxsize
+) {
+    // Finds the minimal radius at which we are guaranteed to have at least k neighbors for any
+    // point inside of each node and counts the number of nodes that need to be checked
+    // This is done in two steps:
+    // (1) We go through all interactions and keep track of the maximal needed radius for each k
+    // (2) We go through all again and count the number of nodes that need to be checked
+    extern __shared__ unsigned char smem[];
+
+    int parentQ = blockIdx.x;
+    int inodeQ_start = parent_spl[parentQ], inodeQ_end = parent_spl[parentQ + 1];
+    for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
+        // we set overhead threads to the last node to avoid adding many conditionals
+        int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
+        Node nodeQ = nodes[inodeQ];
+        float3 xQ = nodeQ.center;
+        float3 extQ = LvlToHalfExt(nodeQ.level);
+
+        SortedNearestKWithCounts<k> nearestK(INFINITY);
+
+        PrefetchList2<int,float> pf_ilist(
+            par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
+        );
+
+        float rmax2 = INFINITY;
+
+        while(!pf_ilist.finished()) {
+            Pair<int,float> interaction = pf_ilist.next();
+            int parentT = interaction.first;
+            float r2T = interaction.second;
+
+            bool any_accept = syncthreads_or(r2T <= rmax2);
+            if(!any_accept) break;
+
+            int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
+
+            float3* xT = reinterpret_cast<float3*>(smem);
+            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
+            int* npartT = reinterpret_cast<int*>(extT + blockDim.x);
+
+            for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
+                int ilT = itoff + threadIdx.x;
+                if(ilT < inodeT_end) {
+                    Node nodeT = nodes[ilT];
+                    xT[threadIdx.x] = nodeT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
+                    npartT[threadIdx.x] = nodes_npart[ilT];
+                }
+                __syncthreads();
+                
+                for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
+                    float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+
+                    nearestK.consider_num(r2, npartT[j]);
+                }
+                __syncthreads();
+            }
+
+            rmax2 = nearestK.max_r2(k) * (1.f + 1e-6f);
+        }
+
+        // Now we have to go again through all nodes and count how many we need to interact with
+        // Note that here we need to use the minimal distance, not the maximal one
+        // since we need to include any node that may contain particles within rmax
+        int ncount = 0;
+
+        pf_ilist.restart(par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]);
+
+        while(!pf_ilist.finished()) {
+            Pair<int,float> interaction = pf_ilist.next();
+            int parentT = interaction.first;
+            float r2T = interaction.second;
+
+            bool any_accept = syncthreads_or(r2T <= rmax2);
+            if(!any_accept) break;
+
+            int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
+
+            float3* xT = reinterpret_cast<float3*>(smem);
+            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
+
+            for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
+                int ilT = itoff + threadIdx.x;
+                if(ilT < inodeT_end) {
+                    Node nodeT = nodes[ilT];
+                    xT[threadIdx.x] = nodeT.center;
+                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
+                }
+                __syncthreads();
+                
+                for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
+                    float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+
+                    ncount += (r2 <= rmax2);
+                }
+                __syncthreads();
+            }
+        }
+
+        // Output our results:
+        if(iqoff + threadIdx.x < inodeQ_end) {
+            rmax_out[inodeQ] = rmax2;
+            node_icount[inodeQ] = ncount;
+        }
+    }
+}
+
 __global__ void KernelInsertInteractions(
     ConstInteractionList par_ilist,
     const int* parent_spl,
@@ -474,6 +641,7 @@ ffi::Error KnnNode2Node(
     const size_t blocksize_sort,
     const float rfac_maxbin,
     float boxsize,
+    int mode,
     // parameters that can be infered inside ffi:
     const int size_parents,
     const int size_nodes,
@@ -489,11 +657,20 @@ ffi::Error KnnNode2Node(
 
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
 
-    KernelCountInteractions<<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
-        par_ilist, parent_spl, nodes, nodes_npart,
-        node_ilist.spl + 1, node_rmax2,
-        k, bins_per_log2, boxsize
-    );
+    if(mode == 0) {
+        KernelCountInteractions<<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+            par_ilist, parent_spl, nodes, nodes_npart,
+            node_ilist.spl + 1, node_rmax2,
+            k, bins_per_log2, boxsize
+        );
+    }
+    else {
+        KnnNode2NodeInteractionRmaxAndCount<16><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+            par_ilist, parent_spl, nodes, nodes_npart,
+            node_ilist.spl + 1, node_rmax2, 
+            boxsize
+        );
+    }
 
     // Get the prefix sum with CUB
     // We can use the interaction list array as a temporary stoarge
