@@ -111,6 +111,14 @@ def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
     return inds
 search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "leaf_search"))
 
+def weighted_percentile(x, weights, percentile):
+    # Determine percentile of the particle-weighted leaf-size distribution:
+    isort = jnp.argsort(x)
+    ncum = jnp.cumsum(weights[isort])
+
+    iperc = jnp.searchsorted(ncum, ncum[-1]*0.01*percentile, side="left")
+    return x[isort[iperc]]
+
 def detect_leaf_boundaries(
         posz: jax.Array, leaf_size: int = 32, npart: int | None = None, lvl_bound = (388, 388),
         block_size: int = 64, alloc_size: int | None = None,
@@ -138,15 +146,11 @@ def detect_leaf_boundaries(
         leaf_npart = splits[1:] - splits[:-1]
         leaf_lvl = jnp.minimum(lvl[splits[1:]], lvl[splits[:-1]]) - 1
 
-        isort = jnp.argsort(leaf_lvl)
-        ncum = jnp.cumsum(leaf_npart[isort])
+        lvl_percentile = weighted_percentile(leaf_lvl, leaf_npart, cfg_reg.percentile)
 
-        iperc = jnp.searchsorted(ncum, npart*0.01*cfg_reg.percentile, side="left")
-
-        # define flags based on this
+        # adjust flags to not exceed target level
         num_pre = jnp.sum(flag_split)
-        lvl_percentile = leaf_lvl[isort[iperc]]
-        max_lvl = lvl_percentile + int(3 * np.log2(cfg_reg.max_extent_fac))
+        max_lvl = lvl_percentile + int(np.ceil(3 * np.log2(cfg_reg.max_extent_fac)))
         flag_split = flag_split | (lvl > max_lvl)
 
         stats_callback(
@@ -421,21 +425,39 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
     nleaves = jnp.argmax(ispl)
     lvl, lbound, rbound = determine_znode_boundaries(posz[ispl[:-1]], nleaves=nleaves)
 
-    npart_node = ispl[rbound] - ispl[lbound]
+    npart_if_not_split = ispl[rbound] - ispl[lbound]
 
     # At each level of the hierarchy, the active nodes are determined by the node sizes
-    active_on_level = npart_node[None,:] > jnp.array(node_sizes, dtype=jnp.int32)[:,None]
+    is_spl_on_level = npart_if_not_split[None,:] > jnp.array(node_sizes, dtype=jnp.int32)[:,None]
     # Additionally we need to activate domain boundary nodes that lie above the boudary level
-    active_on_level = active_on_level | ((lbound <= 0) & (lvl > lvl_bound[0]))
-    active_on_level = active_on_level | ((rbound >= nleaves) & (lvl > lvl_bound[1]))
+    is_spl_on_level = is_spl_on_level | ((lbound <= 0) & (lvl > lvl_bound[0]))
+    is_spl_on_level = is_spl_on_level | ((rbound >= nleaves) & (lvl > lvl_bound[1]))
+
+    if cfg_reg is not None: # optionally regularize nodes by a maximum extent per level
+        # leaves were already regularized, so let's keep them all:
+        new_is_spl = [(npart_if_not_split > 0) | is_spl_on_level[0]] 
+
+        for i in range(1, nlevels):
+            is_node = (~is_spl_on_level[i]) & is_spl_on_level[i,lbound] & is_spl_on_level[i,rbound]
+            np_node = npart_if_not_split*is_node
+
+            lvl_percentile = weighted_percentile(lvl, np_node, cfg_reg.percentile)
+            lvl_max = lvl_percentile + int(np.ceil(3 * np.log2(cfg_reg.max_extent_fac)))
+            
+            new_is_spl.append(is_spl_on_level[i] | (lvl > lvl_max))
+
+            # jax.debug.log("perc, {} {} {} {} {}", i, jnp.sum(np_node), npart, 
+            #               jnp.sum(is_spl_on_level[i]), jnp.sum(new_is_spl[i]))
+        is_spl_on_level = jnp.array(new_is_spl)
+
     # Calculate a prefix accross hierarchy levels to densly stack the nodes later
-    offsets = jnp.cumsum(active_on_level.flatten()).reshape(active_on_level.shape)
+    offsets = jnp.cumsum(is_spl_on_level.flatten()).reshape(is_spl_on_level.shape)
     level_spl = jnp.pad(offsets[:,-1], (1,0), constant_values=0) # save level start/end points
     nnodes_on_level = level_spl[1:] - level_spl[:-1] - 1 # -1 since splits are always 1 larger than nodes
 
     # Check that the allocation is big enough
     level_spl = level_spl + raise_if(level_spl[-1] > alloc_size,
-        "Tree-Leaf allocation too small: filled={filled} size={size}.\n"
+        "Tree-node allocation too small: filled={filled} size={size}.\n"
         "Hint: Increase alloc_fac_nodes, max_leaf_size or coarse_fac",
         filled=level_spl[-1], size=alloc_size
     )
@@ -443,7 +465,7 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
     stats_callback("allocation", AllocStats.record_filled_nodes, level_spl[-1], alloc_size)
 
     # correct offsets to exclude the element at hand and invalidate inactive elements:
-    offsets = jnp.where(active_on_level, offsets - active_on_level, alloc_size)
+    offsets = jnp.where(is_spl_on_level, offsets - is_spl_on_level, alloc_size)
     
     # node-to-leaf relation is given by the leaf that is active at the node location
     ispl_n2l = jnp.zeros(alloc_size, dtype=jnp.int32).at[offsets].set(offsets[0:1,:])
@@ -504,7 +526,7 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
     posz = get_pos(part)
     npart_tot = get_num_total(part, default_to_length=(ndev==1))
     np_per_dev = npart_tot // ndev # static estimate of number of unpadded-particles
-    npart = get_num(part)
+    npart = get_num(part, default_to_nancount=True)
 
     node_sizes = define_tree_level_node_sizes(npart_tot, cfg_tree)
 

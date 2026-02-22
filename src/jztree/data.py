@@ -75,10 +75,12 @@ def get_pos_mass(part: PosMass):
     mass = jnp.broadcast_to(part.mass, part.pos.shape[:-1])
     return jnp.concatenate([part.pos, mass[..., None]], axis=-1)
 
-def get_num(part: Pos, default_to_length=False):
+def get_num(part: Pos, default_to_length=False, default_to_nancount=True):
     if getattr(part, "num", None) is None:
         if default_to_length:
-            return len(part.pos)
+            return len(get_pos(part))
+        if default_to_nancount:
+            return jnp.sum(~jnp.isnan(get_pos(part)[:,0]))
         raise ValueError("Need .num attribute in particle structure for distributed mode")
     return jnp.sum(part.num) # Summing here, to be correct if sharding changed
 
