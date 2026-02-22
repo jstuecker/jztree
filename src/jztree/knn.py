@@ -347,11 +347,12 @@ def distr_knn(
                 nn_origin = jax.tree.map(lambda x: x[innz], origin_rem)
                 res.append(nn_origin)
             elif key == "globalidx":
-                dtype = jnp.int64 if ndev > 1 else jnp.int32
-                with jax.enable_x64():
-                    dev_offsets = jnp.cumsum(origin_cts, dtype=dtype) - origin_cts.astype(dtype)
-                    gidx = dev_offsets[origin_rem.rank].astype(dtype) + origin_rem.idx.astype(dtype)
-                    res.append(gidx[innz])
+                # dtype = jnp.int64 if ndev > 1 else jnp.int32  !!! address this later
+                dtype = jnp.int32
+                # with jax.enable_x64():
+                dev_offsets = jnp.cumsum(origin_cts, dtype=dtype) - origin_cts.astype(dtype)
+                gidx = dev_offsets[origin_rem.rank].astype(dtype) + origin_rem.idx.astype(dtype)
+                res.append(gidx[innz])
             elif key == "part":
                 res.append(tree_map_by_len(lambda x: x[innz], premote, size))
             elif key == "reduce":
@@ -376,7 +377,9 @@ def distr_knn(
     if output_order == "remote":
         return res
 
-    mask = (jnp.arange(size) >= dev_spl[rank]) & (jnp.arange(size) < dev_spl[rank+1])
+    # with jax.enable_x64():
+    idx = jnp.arange(size, dtype=jnp.int32)
+    mask = (idx >= dev_spl[rank]) & (idx < dev_spl[rank+1])
     res, num = masked_to_dense(res, mask)
 
     if output_order == "z":

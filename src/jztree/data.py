@@ -137,6 +137,17 @@ def pad_particles(part: Pos, num: int,  float_val:float = jnp.nan, int_val: int 
 
     return tree_map_by_len(pad, part, len(part.pos))
 
+def squeeze_any(data, size, num, ntot):
+    with jax.enable_x64():
+        spl = cumsum_starting_with_zero(num)
+        idx = jnp.arange(ntot, dtype=jnp.int64)
+        irank = jnp.cumsum(jnp.zeros_like(idx).at[spl].set(1)) - 1
+        ipart = idx - spl[irank]
+
+        data_sq = tree_map_by_len(lambda x: x[irank, ipart], data, size, axis=1)
+        
+    return data_sq
+
 def squeeze_particles(part: Pos):
     """Squeezes multi-gpu output particles (Ndev,N) into a dense form (Ntot)"""
     if part.pos.ndim == 2:
