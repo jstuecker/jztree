@@ -154,7 +154,7 @@ def detect_leaf_boundaries(
         # adjust flags to not exceed target level
         num_pre = jnp.sum(flag_split)
         max_lvl = lvl_percentile + int(np.ceil(3 * np.log2(cfg_reg.max_extent_fac)))
-        flag_split = flag_split | (lvl > max_lvl)
+        flag_split = flag_split | ((lvl > max_lvl) & (jnp.arange(len(posz)+1) < npart+1))
 
         stats_callback(
             "allocation", AllocStats.record_regularization, max_lvl, num_pre, jnp.sum(flag_split)

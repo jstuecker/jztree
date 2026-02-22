@@ -21,6 +21,7 @@ def max_allow_None(a, b):
 class AllocStats:
     max_part_frac_sort: float | None = None
     max_part_frac_domain: float | None = None
+    max_part_frac_interaction: float | None = None
     max_node_frac: float | None = None
     max_reg_frac: float | None = None
     max_reg_leaf_lvl: int | None = None
@@ -31,12 +32,16 @@ class AllocStats:
         self.max_part_frac_sort = max_allow_None(self.max_part_frac_sort, float(npart/size))
 
     def record_filled_domain(self, npart, size):
+        self.max_part_frac_interaction = max_allow_None(self.max_part_frac_interaction, float(npart/size))
+
+    def record_filled_part_interactions(self, npart, size):
         self.max_part_frac_domain = max_allow_None(self.max_part_frac_domain, float(npart/size))
-    
+
     def record_filled_nodes(self, num, size):
         self.max_node_frac = max_allow_None(self.max_node_frac, float(num/size))
 
     def record_regularization(self, lvl, nleaves_pre, nleaves_post):
+        # print(f"reg: {lvl} {nleaves_pre}, {nleaves_post}")
         self.max_reg_frac = max_allow_None(self.max_reg_frac, float(nleaves_post/nleaves_pre))
         self.max_reg_leaf_lvl = max_allow_None(self.max_reg_leaf_lvl, lvl)
 
@@ -49,6 +54,7 @@ class AllocStats:
     def print_suggestions(self, cfg: FofConfig):
         print("--- Allocation Info ---")
         fill_frac = max_allow_None(self.max_part_frac_sort, self.max_part_frac_domain)
+        fill_frac = max_allow_None(fill_frac, self.max_part_frac_interaction)
         if fill_frac is not None:
             print(f"Filled at most {fill_frac:.1%} of particles. (Affected by padding.)")
         if self.max_node_frac is not None:

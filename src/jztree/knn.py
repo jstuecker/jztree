@@ -153,6 +153,7 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
                 ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
                 axis_name=axis_name, err_hint="\nHint: increase alloc_fac_nodes"
             )
+            stats_callback("allocation", AllocStats.record_filled_nodes, dev_spl[-1], size)
 
         ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
 
@@ -336,6 +337,8 @@ def distr_knn(
         ilist.dev_spl, ilist.ids, spl, (partz, origin),
         axis_name=axis_name, err_hint="\nHint: increase padding."
     )
+
+    stats_callback("allocation", AllocStats.record_filled_part_interactions, dev_spl[-1], size)
 
     # Evaluate knn
     rnnz, innz = _knn_leaf2leaf(ilist, spl, get_pos(premote), k=k, boxsize=boxsize)
