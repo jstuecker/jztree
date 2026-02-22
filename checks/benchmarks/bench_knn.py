@@ -39,7 +39,7 @@ def bench_knn_k(jax_bench, pos, k):
 
     jb.measure(fn_jit=knn.jit, pos0=pos, k=k)
 
-@pytest.mark.shrink_in_quick(keep_index=1)
+@pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("N", [1e5,3e5,1e6,3e6,1e7])
 def bench_knn_N(jax_bench, N):
     jb = jax_bench(jit_rounds=5, jit_loops=5, jit_warmup=1)
