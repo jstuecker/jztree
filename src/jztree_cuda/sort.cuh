@@ -16,15 +16,17 @@
 /* ---------------------------------------------------------------------------------------------- */
 
 // Wrapper of the z-order comparison function to use with CUB
+template <int dim=3>
 struct PosIdLess {
     __device__ __forceinline__
-    bool operator()(const PosId &a, const PosId &b) {
-        return z_pos_less(a.pos, b.pos);
+    bool operator()(const PosId<dim> &a, const PosId<dim> &b) {
+        return z_pos_less<dim>(a.pos, b.pos);
     }
 };
 
 // Prepare keys and ids for sorting
-__global__ void PosKeyArangeKernel(const float3* pos_in, PosId *keyid_out, size_t n) {
+template <int dim=3>
+__global__ void PosKeyArangeKernel(const Pos<dim>* pos_in, PosId<dim> *keyid_out, size_t n) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
         keyid_out[idx].pos = pos_in[idx];
@@ -34,15 +36,17 @@ __global__ void PosKeyArangeKernel(const float3* pos_in, PosId *keyid_out, size_
 
 std::string PosZorderSort(
     cudaStream_t stream, 
-    const float3* pos_in, 
-    PosId* pos_id_out,
+    const Pos<3>* pos_in, 
+    PosId<3>* pos_id_out,
     int* tmp_buffer,
     size_t size,
     size_t tmp_bytes,
     size_t block_size
 ) {
+    constexpr int dim = 3;
+
     // Initialize indices 0, 1, 2, ..., size-1
-    PosKeyArangeKernel<<< div_ceil(size, block_size), block_size, 0, stream>>>(pos_in, pos_id_out, size);
+    PosKeyArangeKernel<dim><<< div_ceil(size, block_size), block_size, 0, stream>>>(pos_in, pos_id_out, size);
 
     // We have an annoying problem here:
     // CUB requires a temporary storage buffer and it will usually tell us dynamically what the
@@ -56,7 +60,9 @@ std::string PosZorderSort(
 
     // find out the required storage size
     size_t required_storage_bytes = 0;
-    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(nullptr, required_storage_bytes, pos_id_out, size, PosIdLess());
+    cub::DeviceMergeSort::SortKeys<PosId<dim>*, int64_t, PosIdLess<dim>>(
+        nullptr, required_storage_bytes, pos_id_out, size, PosIdLess<dim>()
+    );
     
     // Check if the provided buffer is large enough
     if (tmp_bytes < required_storage_bytes) {
@@ -68,7 +74,9 @@ std::string PosZorderSort(
     }
 
     // Run the sort
-    cub::DeviceMergeSort::SortKeys<PosId*, int64_t, PosIdLess>(tmp_buffer, required_storage_bytes, pos_id_out, size, PosIdLess(), stream);
+    cub::DeviceMergeSort::SortKeys<PosId<dim>*, int64_t, PosIdLess<dim>>(
+        tmp_buffer, required_storage_bytes, pos_id_out, size, PosIdLess<dim>(), stream
+    );
     
     return std::string();
 }
@@ -96,7 +104,7 @@ __global__ void SearchSortedZ(
     int imin = 0, imax = n_have;
     while (imin+1 < imax) {
         int itest = (imin + imax) >> 1;
-        if (z_pos_less(posz_have[itest], xquery)) {
+        if (z_pos_less3(posz_have[itest], xquery)) {
             imin = itest;
         } else {
             imax = itest;
@@ -118,9 +126,9 @@ __global__ void SearchSortedZ(
         // If we are doing a normal binary search, the index is in general imin + 1
         // and we only need to take care of the boundary cases
         if(imin == 0)
-            iout = z_pos_less(posz_have[0], xquery) ? 1 : 0;
+            iout = z_pos_less3(posz_have[0], xquery) ? 1 : 0;
         else if(imin == n_have - 1)
-            iout = z_pos_less(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
+            iout = z_pos_less3(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
         else
             iout = imin + 1;
     }

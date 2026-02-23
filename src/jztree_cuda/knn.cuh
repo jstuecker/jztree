@@ -169,7 +169,7 @@ __global__ void KnnLeaf2Leaf(
 
         SortedNearestK<k> nearestK(INFINITY, -1);
 
-        extern __shared__ PosId particles[];
+        extern __shared__ PosIdOld particles[];
 
         PrefetchList2<int,float> pf_ilist(
             ilist, ilist_r2, ilist_spl[ileafQ], ilist_spl[ileafQ + 1]
@@ -198,7 +198,7 @@ __global__ void KnnLeaf2Leaf(
 
                 // Now search for the nearest neighbors in A
                 for (int j = 0; j < nload; j++) {
-                    PosId p = particles[j];
+                    PosIdOld p = particles[j];
                     float r2 = distance_squared(p.pos, posQ, boxsize);
                     nearestK.consider(r2, p.id);
                 }

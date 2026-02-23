@@ -26,8 +26,36 @@ struct __align__(16) PosMass {
     };
 };
 
-struct __align__(16) PosId {
+struct __align__(16) PosIdOld {
     float3 pos;
+    int32_t id;
+};
+
+// template<int dim> struct PosId {
+//     float pos[dim];
+//     int32_t id;
+// };
+
+template<int dim>
+struct Pos {
+  float v[dim];
+
+  __host__ __device__ __forceinline__
+  float& operator[](int i) { return v[i]; }
+
+  __host__ __device__ __forceinline__
+  const float& operator[](int i) const { return v[i]; }
+
+  __host__ __device__ __forceinline__
+  float* data() { return v; }
+
+  __host__ __device__ __forceinline__
+  const float* data() const { return v; }
+};
+
+template <int dim=3>
+struct PosId {
+    Pos<dim> pos;
     int32_t id;
 };
 

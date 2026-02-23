@@ -38,8 +38,8 @@ ffi::Error PosZorderSortFFIHost(
     // Now call our function
     std::string result = PosZorderSort(
         stream,
-        reinterpret_cast<float3*>(pos_in.untyped_data()),
-        reinterpret_cast<PosId*>(pos_id_out->untyped_data()),
+        reinterpret_cast<Pos<3>*>(pos_in.untyped_data()),
+        reinterpret_cast<PosId<3>*>(pos_id_out->untyped_data()),
         reinterpret_cast<int*>(tmp_buffer->untyped_data()),
         size,
         tmp_bytes,

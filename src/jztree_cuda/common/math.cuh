@@ -250,7 +250,7 @@ __device__ __forceinline__ float2 float_common_ext(float a, float b) {
 }
 
 // Whether pos1 should appear before pos2 in a z-curve ordering
-__device__ __forceinline__ bool z_pos_less(float3 pos1, float3 pos2)
+__device__ __forceinline__ bool z_pos_less3(float3 pos1, float3 pos2)
 {
     const bool nan1 = isnan(pos1.x) || isnan(pos1.y) || isnan(pos1.z);
     const bool nan2 = isnan(pos2.x) || isnan(pos2.y) || isnan(pos2.z);
@@ -266,6 +266,39 @@ __device__ __forceinline__ bool z_pos_less(float3 pos1, float3 pos2)
     if (ms_dim == 0) return pos1.x < pos2.x;
     if (ms_dim == 1) return pos1.y < pos2.y;
     return pos1.z < pos2.z;
+}
+
+template <int dim> __device__  __forceinline__ bool has_nan(Pos<dim> pos) {
+    bool any_nan = false;
+    #pragma unroll
+    for(int i=0; i<dim; i++) {
+        any_nan = any_nan | isnan(pos[i]);
+    }
+    return any_nan;
+}
+
+// Whether pos1 should appear before pos2 in a z-order
+template <int dim=3>
+__device__ __forceinline__ bool z_pos_less(Pos<dim> pos1, Pos<dim> pos2)
+{
+    if(has_nan<3>(pos1)) return false;
+    if(has_nan<3>(pos2)) return true;
+
+    int msb_dim = 0;
+    int msb = float_xor_msb(pos1[0], pos2[0]);
+    #pragma unroll
+    for(int i=1; i<dim; i++) {
+        int new_msb = float_xor_msb(pos1[i], pos2[i]);
+        msb_dim = new_msb > msb ? i : msb_dim;
+        msb = new_msb > msb ? new_msb : msb;
+    }
+
+    #pragma unroll
+    for(int i=0; i<dim-1; i++) {
+        if(msb_dim == i) return pos1[i] < pos2[i];
+    }
+
+    return pos1[dim-1] < pos2[dim-1];
 }
 
 __device__ __forceinline__ float round_float_pow2_cent(float x, int level)

@@ -40,7 +40,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
 ) {
     dim3 blockDim(32);
     dim3 gridDim(splQ.element_count() - 1);
-    size_t smem = blockDim.x * sizeof(PosId);
+    size_t smem = blockDim.x * sizeof(PosId<3>);
     
     // Build a bundled argument list for cudaLaunchKernel
     // For pointers we need to create a pointer to the pointer

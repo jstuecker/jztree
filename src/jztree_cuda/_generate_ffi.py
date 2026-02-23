@@ -21,7 +21,7 @@ functions = parse.get_functions_from_file(
 
 functions["KnnLeaf2Leaf"].template_par["k"].instances = k_instance_values
 functions["KnnLeaf2Leaf"].block_size_expression = 32
-functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId)"
+functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId<3>)"
 functions["KnnLeaf2Leaf"].grid_size_expression = "splQ.element_count() - 1"
 
 functions["KnnNode2Node"].par["size_parents"].expression = "parent_spl.element_count() - 1"
