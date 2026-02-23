@@ -34,17 +34,16 @@ __global__ void PosKeyArangeKernel(const Pos<dim>* pos_in, PosId<dim> *keyid_out
     }
 }
 
+template<int dim>
 std::string PosZorderSort(
     cudaStream_t stream, 
-    const Pos<3>* pos_in, 
-    PosId<3>* pos_id_out,
+    const Pos<dim>* pos_in, 
+    PosId<dim>* pos_id_out,
     int* tmp_buffer,
     size_t size,
     size_t tmp_bytes,
     size_t block_size
 ) {
-    constexpr int dim = 3;
-
     // Initialize indices 0, 1, 2, ..., size-1
     PosKeyArangeKernel<dim><<< div_ceil(size, block_size), block_size, 0, stream>>>(pos_in, pos_id_out, size);
 

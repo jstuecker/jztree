@@ -25,6 +25,7 @@ namespace ffi = xla::ffi;
 /*                             FFI call to CUDA kernel: FlagLeafBoundaries                        */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error FlagLeafBoundariesFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer posz,
@@ -42,24 +43,31 @@ ffi::Error FlagLeafBoundariesFFIHost(
     size_t smem = (block_size + 2*scan_size + 1) * sizeof(int32_t);
     
     // Build a bundled argument list for cudaLaunchKernel
-    // For pointers we need to create a pointer to the pointer
-    float3* posz_val = reinterpret_cast<float3*>(posz.untyped_data());
-    int* lvl_bound_val = reinterpret_cast<int*>(lvl_bound.untyped_data());
-    int* npart_val = reinterpret_cast<int*>(npart.untyped_data());
-    int8_t* split_flags_val = reinterpret_cast<int8_t*>(split_flags->untyped_data());
-    int* lvl_val = reinterpret_cast<int*>(lvl->untyped_data());
-
+    void* posz_arg = posz.untyped_data();
+    void* lvl_bound_arg = lvl_bound.untyped_data();
+    void* npart_arg = npart.untyped_data();
+    void* split_flags_arg = split_flags->untyped_data();
+    void* lvl_arg = lvl->untyped_data();
     void* args[] = {
-        &posz_val,
-        &lvl_bound_val,
-        &npart_val,
-        &split_flags_val,
-        &lvl_val,
+        &posz_arg,
+        &lvl_bound_arg,
+        &npart_arg,
+        &split_flags_arg,
+        &lvl_arg,
         &max_size,
         &size_part,
         &scan_size
     };
-    cudaLaunchKernel((const void*)FlagLeafBoundaries, gridDim, blockDim, args, smem, stream);
+    const void* instance = (const void*)FlagLeafBoundaries;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -87,6 +95,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: FindNodeBoundaries                        */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error FindNodeBoundariesFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer pos_in,
@@ -103,24 +112,31 @@ ffi::Error FindNodeBoundariesFFIHost(
     size_t smem = 0;
     
     // Build a bundled argument list for cudaLaunchKernel
-    // For pointers we need to create a pointer to the pointer
-    float3* pos_in_val = reinterpret_cast<float3*>(pos_in.untyped_data());
-    float3* pos_boundary_val = reinterpret_cast<float3*>(pos_boundary.untyped_data());
-    int* nleaves_val = reinterpret_cast<int*>(nleaves.untyped_data());
-    int32_t* nodes_levels_val = reinterpret_cast<int32_t*>(nodes_levels->untyped_data());
-    int32_t* nodes_lbound_val = reinterpret_cast<int32_t*>(nodes_lbound->untyped_data());
-    int32_t* nodes_rbound_val = reinterpret_cast<int32_t*>(nodes_rbound->untyped_data());
-
+    void* pos_in_arg = pos_in.untyped_data();
+    void* pos_boundary_arg = pos_boundary.untyped_data();
+    void* nleaves_arg = nleaves.untyped_data();
+    void* nodes_levels_arg = nodes_levels->untyped_data();
+    void* nodes_lbound_arg = nodes_lbound->untyped_data();
+    void* nodes_rbound_arg = nodes_rbound->untyped_data();
     void* args[] = {
-        &pos_in_val,
-        &pos_boundary_val,
-        &nleaves_val,
-        &nodes_levels_val,
-        &nodes_lbound_val,
-        &nodes_rbound_val,
+        &pos_in_arg,
+        &pos_boundary_arg,
+        &nleaves_arg,
+        &nodes_levels_arg,
+        &nodes_lbound_arg,
+        &nodes_rbound_arg,
         &size_nodes
     };
-    cudaLaunchKernel((const void*)FindNodeBoundaries, gridDim, blockDim, args, smem, stream);
+    const void* instance = (const void*)FindNodeBoundaries;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -147,6 +163,35 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: GetBoundaryExtendPerLevel                 */
 /* ---------------------------------------------------------------------------------------------- */
 
+
+using GetBoundaryExtendPerLevelDispatchFn = std::string (*) (cudaStream_t stream,
+    const void* pos_ref,
+    const void* irange,
+    const void* posz,
+    void* index_of_lvl,
+    int size,
+    size_t block_size
+);
+template<bool left>
+static std::string GetBoundaryExtendPerLevelDispatchWrapper(cudaStream_t stream,
+    const void* pos_ref,
+    const void* irange,
+    const void* posz,
+    void* index_of_lvl,
+    int size,
+    size_t block_size
+) {
+    return GetBoundaryExtendPerLevel<left> (stream,
+        reinterpret_cast<const float3*>(pos_ref),
+        reinterpret_cast<const int*>(irange),
+        reinterpret_cast<const float3*>(posz),
+        reinterpret_cast<int32_t*>(index_of_lvl),
+        size,
+        block_size
+    );
+}
+
+
 ffi::Error GetBoundaryExtendPerLevelFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer pos_ref,
@@ -158,34 +203,37 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
 ) {
     int size = posz.element_count()/3;
 
-    // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through a map
+    // We have template parameters, so we need to instantiate all valid templates.
+    // We select a function pointer through a map with a stable, type-erased signature.
     using TTuple = std::tuple<bool>;
-    using TFunctionType = decltype(GetBoundaryExtendPerLevel<true>);
 
-    std::map<TTuple, TFunctionType*> instance_map;
-    instance_map[{true}] = GetBoundaryExtendPerLevel<true>;
-    instance_map[{false}] = GetBoundaryExtendPerLevel<false>;
+    using TFunctionType =
+        GetBoundaryExtendPerLevelDispatchFn
+    ;
 
-    auto it = instance_map.find({left});
+    static const std::map<TTuple, TFunctionType> instance_map = {
+        { {true}, &GetBoundaryExtendPerLevelDispatchWrapper<true> },
+        { {false}, &GetBoundaryExtendPerLevelDispatchWrapper<false> }
+    };
 
-    if(it == instance_map.end()) {
+    const TTuple key = TTuple{left};
+
+    const auto it = instance_map.find(key);
+    if (it == instance_map.end()) {
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (left)"\
             " in GetBoundaryExtendPerLevelFFIHost -- Only supporting:\n"\
             "(true), (false)"
         );
     }
-
-    TFunctionType* instance = it->second;
+    GetBoundaryExtendPerLevelDispatchFn instance = it->second;
 
     // Now call our function
-    std::string result = instance(
-        stream,
-        reinterpret_cast<float3*>(pos_ref.untyped_data()),
-        reinterpret_cast<int*>(irange.untyped_data()),
-        reinterpret_cast<float3*>(posz.untyped_data()),
-        reinterpret_cast<int32_t*>(index_of_lvl->untyped_data()),
+    std::string result = instance(stream,
+        pos_ref.untyped_data(),
+        irange.untyped_data(),
+        posz.untyped_data(),
+        index_of_lvl->untyped_data(),
         size,
         block_size
     );
@@ -218,6 +266,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: GetNodeGeometry                           */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error GetNodeGeometryFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer pos,
@@ -236,27 +285,34 @@ ffi::Error GetNodeGeometryFFIHost(
     size_t smem = 0;
     
     // Build a bundled argument list for cudaLaunchKernel
-    // For pointers we need to create a pointer to the pointer
-    float3* pos_val = reinterpret_cast<float3*>(pos.untyped_data());
-    int* lbound_val = reinterpret_cast<int*>(lbound.untyped_data());
-    int* rbound_val = reinterpret_cast<int*>(rbound.untyped_data());
-    int* nnodes_val = reinterpret_cast<int*>(nnodes.untyped_data());
-    int32_t* level_val = reinterpret_cast<int32_t*>(level->untyped_data());
-    float3* center_val = reinterpret_cast<float3*>(center->untyped_data());
-    float3* extent_val = reinterpret_cast<float3*>(extent->untyped_data());
-
+    void* pos_arg = pos.untyped_data();
+    void* lbound_arg = lbound.untyped_data();
+    void* rbound_arg = rbound.untyped_data();
+    void* nnodes_arg = nnodes.untyped_data();
+    void* level_arg = level->untyped_data();
+    void* center_arg = center->untyped_data();
+    void* extent_arg = extent->untyped_data();
     void* args[] = {
-        &pos_val,
-        &lbound_val,
-        &rbound_val,
-        &nnodes_val,
-        &level_val,
-        &center_val,
-        &extent_val,
+        &pos_arg,
+        &lbound_arg,
+        &rbound_arg,
+        &nnodes_arg,
+        &level_arg,
+        &center_arg,
+        &extent_arg,
         &size_nodes,
         &size_part
     };
-    cudaLaunchKernel((const void*)GetNodeGeometry, gridDim, blockDim, args, smem, stream);
+    const void* instance = (const void*)GetNodeGeometry;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -284,6 +340,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: CenterOfMass                              */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error CenterOfMassFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer isplit,
@@ -299,21 +356,28 @@ ffi::Error CenterOfMassFFIHost(
     size_t smem = 0;
     
     // Build a bundled argument list for cudaLaunchKernel
-    // For pointers we need to create a pointer to the pointer
-    int* isplit_val = reinterpret_cast<int*>(isplit.untyped_data());
-    float3* pos_val = reinterpret_cast<float3*>(pos.untyped_data());
-    float* mass_val = reinterpret_cast<float*>(mass.untyped_data());
-    PosMass* com_out_val = reinterpret_cast<PosMass*>(com_out->untyped_data());
-
+    void* isplit_arg = isplit.untyped_data();
+    void* pos_arg = pos.untyped_data();
+    void* mass_arg = mass.untyped_data();
+    void* com_out_arg = com_out->untyped_data();
     void* args[] = {
-        &isplit_val,
-        &pos_val,
-        &mass_val,
-        &com_out_val,
+        &isplit_arg,
+        &pos_arg,
+        &mass_arg,
+        &com_out_arg,
         &nnodes,
         &kahan
     };
-    cudaLaunchKernel((const void*)CenterOfMass, gridDim, blockDim, args, smem, stream);
+    const void* instance = (const void*)CenterOfMass;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

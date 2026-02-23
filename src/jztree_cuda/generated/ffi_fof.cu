@@ -25,6 +25,7 @@ namespace ffi = xla::ffi;
 /*                             FFI call to CUDA kernel: NodeToChildLabel                          */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error NodeToChildLabelFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer parent_igroup,
@@ -44,23 +45,30 @@ ffi::Error NodeToChildLabelFFIHost(
     cudaMemsetAsync(node_igroup->untyped_data(), 0, node_igroup->size_bytes(), stream);
     
     // Build a bundled argument list for cudaLaunchKernel
-    // For pointers we need to create a pointer to the pointer
-    int* parent_igroup_val = reinterpret_cast<int*>(parent_igroup.untyped_data());
-    bool* parent_is_local_val = reinterpret_cast<bool*>(parent_is_local.untyped_data());
-    int* parent_lvl_val = reinterpret_cast<int*>(parent_lvl.untyped_data());
-    int* parent_spl_val = reinterpret_cast<int*>(parent_spl.untyped_data());
-    int* node_igroup_val = reinterpret_cast<int*>(node_igroup->untyped_data());
-
+    void* parent_igroup_arg = parent_igroup.untyped_data();
+    void* parent_is_local_arg = parent_is_local.untyped_data();
+    void* parent_lvl_arg = parent_lvl.untyped_data();
+    void* parent_spl_arg = parent_spl.untyped_data();
+    void* node_igroup_arg = node_igroup->untyped_data();
     void* args[] = {
-        &parent_igroup_val,
-        &parent_is_local_val,
-        &parent_lvl_val,
-        &parent_spl_val,
-        &node_igroup_val,
+        &parent_igroup_arg,
+        &parent_is_local_arg,
+        &parent_lvl_arg,
+        &parent_spl_arg,
+        &node_igroup_arg,
         &size_parent,
         &r2link
     };
-    cudaLaunchKernel((const void*)NodeToChildLabel, gridDim, blockDim, args, smem, stream);
+    const void* instance = (const void*)NodeToChildLabel;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -87,6 +95,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: FofNode2Node                              */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error FofNode2NodeFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer parent_ilist_spl,
@@ -106,13 +115,12 @@ ffi::Error FofNode2NodeFFIHost(
     size_t size_node_ilist = node_ilist->element_count();
 
     // Now call our function
-    ffi::Error result = FofNode2Node(
-        stream,
-        reinterpret_cast<int*>(parent_ilist_spl.untyped_data()),
-        reinterpret_cast<int*>(parent_ilist.untyped_data()),
-        reinterpret_cast<int*>(parent_spl.untyped_data()),
-        reinterpret_cast<Node*>(nodes.untyped_data()),
-        reinterpret_cast<int*>(node_igroup_in.untyped_data()),
+    ffi::Error result = FofNode2Node(stream,
+        reinterpret_cast<const int*>(parent_ilist_spl.untyped_data()),
+        reinterpret_cast<const int*>(parent_ilist.untyped_data()),
+        reinterpret_cast<const int*>(parent_spl.untyped_data()),
+        reinterpret_cast<const Node*>(nodes.untyped_data()),
+        reinterpret_cast<const int*>(node_igroup_in.untyped_data()),
         reinterpret_cast<int*>(node_igroup->untyped_data()),
         reinterpret_cast<int*>(node_ilist_spl->untyped_data()),
         reinterpret_cast<int*>(node_ilist->untyped_data()),
@@ -153,6 +161,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: FofLeaf2Leaf                              */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error FofLeaf2LeafFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer ilist_spl,
@@ -169,13 +178,12 @@ ffi::Error FofLeaf2LeafFFIHost(
     int size_part = part_igroup->element_count();
 
     // Now call our function
-    ffi::Error result = FofLeaf2Leaf(
-        stream,
-        reinterpret_cast<int*>(ilist_spl.untyped_data()),
-        reinterpret_cast<int*>(ilist.untyped_data()),
-        reinterpret_cast<int*>(spl.untyped_data()),
-        reinterpret_cast<float3*>(pos.untyped_data()),
-        reinterpret_cast<int*>(part_igroup_in.untyped_data()),
+    ffi::Error result = FofLeaf2Leaf(stream,
+        reinterpret_cast<const int*>(ilist_spl.untyped_data()),
+        reinterpret_cast<const int*>(ilist.untyped_data()),
+        reinterpret_cast<const int*>(spl.untyped_data()),
+        reinterpret_cast<const float3*>(pos.untyped_data()),
+        reinterpret_cast<const int*>(part_igroup_in.untyped_data()),
         reinterpret_cast<int*>(part_igroup->untyped_data()),
         r2link,
         boxsize,
@@ -211,6 +219,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: InsertLinks                               */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error InsertLinksFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer igroup_in,
@@ -224,12 +233,11 @@ ffi::Error InsertLinksFFIHost(
     int size_groups = igroup_in.element_count();
 
     // Now call our function
-    ffi::Error result = InsertLinks(
-        stream,
-        reinterpret_cast<int*>(igroup_in.untyped_data()),
-        reinterpret_cast<int*>(igroupLinkA.untyped_data()),
-        reinterpret_cast<int*>(igroupLinkB.untyped_data()),
-        reinterpret_cast<int*>(num_links.untyped_data()),
+    ffi::Error result = InsertLinks(stream,
+        reinterpret_cast<const int*>(igroup_in.untyped_data()),
+        reinterpret_cast<const int*>(igroupLinkA.untyped_data()),
+        reinterpret_cast<const int*>(igroupLinkB.untyped_data()),
+        reinterpret_cast<const int*>(num_links.untyped_data()),
         reinterpret_cast<int*>(igroup->untyped_data()),
         size_links,
         size_groups,

@@ -25,6 +25,7 @@ namespace ffi = xla::ffi;
 /*                             FFI call to CUDA kernel: RearangeSegments                          */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error RearangeSegmentsFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer data_in,
@@ -42,22 +43,29 @@ ffi::Error RearangeSegmentsFFIHost(
     size_t smem = 0;
     
     // Build a bundled argument list for cudaLaunchKernel
-    // For pointers we need to create a pointer to the pointer
-    uint8_t* data_in_val = reinterpret_cast<uint8_t*>(data_in.untyped_data());
-    int64_t* seg_spl_out_val = reinterpret_cast<int64_t*>(seg_spl_out.untyped_data());
-    int64_t* seg_offset_in_val = reinterpret_cast<int64_t*>(seg_offset_in.untyped_data());
-    uint8_t* data_out_val = reinterpret_cast<uint8_t*>(data_out->untyped_data());
-
+    void* data_in_arg = data_in.untyped_data();
+    void* seg_spl_out_arg = seg_spl_out.untyped_data();
+    void* seg_offset_in_arg = seg_offset_in.untyped_data();
+    void* data_out_arg = data_out->untyped_data();
     void* args[] = {
-        &data_in_val,
-        &seg_spl_out_val,
-        &seg_offset_in_val,
-        &data_out_val,
+        &data_in_arg,
+        &seg_spl_out_arg,
+        &seg_offset_in_arg,
+        &data_out_arg,
         &size,
         &size_seg,
         &dtype_bytes
     };
-    cudaLaunchKernel((const void*)RearangeSegments, gridDim, blockDim, args, smem, stream);
+    const void* instance = (const void*)RearangeSegments;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

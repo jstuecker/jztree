@@ -25,6 +25,7 @@ namespace ffi = xla::ffi;
 /*                             FFI call to CUDA kernel: KnnLeaf2Leaf                              */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error KnnLeaf2LeafFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer ilist_spl,
@@ -43,54 +44,63 @@ ffi::Error KnnLeaf2LeafFFIHost(
     size_t smem = blockDim.x * sizeof(PosId<3>);
     
     // Build a bundled argument list for cudaLaunchKernel
-    // For pointers we need to create a pointer to the pointer
-    int* ilist_spl_val = reinterpret_cast<int*>(ilist_spl.untyped_data());
-    int* ilist_val = reinterpret_cast<int*>(ilist.untyped_data());
-    float* ilist_r2_val = reinterpret_cast<float*>(ilist_r2.untyped_data());
-    int* splT_val = reinterpret_cast<int*>(splT.untyped_data());
-    PosR* xT_val = reinterpret_cast<PosR*>(xT.untyped_data());
-    int* splQ_val = reinterpret_cast<int*>(splQ.untyped_data());
-    PosR* xQ_val = reinterpret_cast<PosR*>(xQ.untyped_data());
-    Neighbor* knn_val = reinterpret_cast<Neighbor*>(knn->untyped_data());
-
+    void* ilist_spl_arg = ilist_spl.untyped_data();
+    void* ilist_arg = ilist.untyped_data();
+    void* ilist_r2_arg = ilist_r2.untyped_data();
+    void* splT_arg = splT.untyped_data();
+    void* xT_arg = xT.untyped_data();
+    void* splQ_arg = splQ.untyped_data();
+    void* xQ_arg = xQ.untyped_data();
+    void* knn_arg = knn->untyped_data();
     void* args[] = {
-        &ilist_spl_val,
-        &ilist_val,
-        &ilist_r2_val,
-        &splT_val,
-        &xT_val,
-        &splQ_val,
-        &xQ_val,
-        &knn_val,
+        &ilist_spl_arg,
+        &ilist_arg,
+        &ilist_r2_arg,
+        &splT_arg,
+        &xT_arg,
+        &splQ_arg,
+        &xQ_arg,
+        &knn_arg,
         &boxsize
     };
     
-    // We have template parameters, so we need to instantiate all valid templates
-    // For this we select a function pointer through a map
+    // We have template parameters, so we need to instantiate all valid templates.
+    // We select a function pointer through a map with a stable, type-erased signature.
     using TTuple = std::tuple<int>;
-    using TFunctionType = decltype(KnnLeaf2Leaf<4>);
 
-    std::map<TTuple, TFunctionType*> instance_map;
-    instance_map[{4}] = KnnLeaf2Leaf<4>;
-    instance_map[{8}] = KnnLeaf2Leaf<8>;
-    instance_map[{12}] = KnnLeaf2Leaf<12>;
-    instance_map[{16}] = KnnLeaf2Leaf<16>;
-    instance_map[{32}] = KnnLeaf2Leaf<32>;
-    instance_map[{64}] = KnnLeaf2Leaf<64>;
+    using TFunctionType =
+        const void*
+    ;
 
-    auto it = instance_map.find({k});
+    static const std::map<TTuple, TFunctionType> instance_map = {
+        { {4}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<4>) },
+        { {8}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<8>) },
+        { {12}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<12>) },
+        { {16}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<16>) },
+        { {32}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<32>) },
+        { {64}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<64>) }
+    };
 
-    if(it == instance_map.end()) {
+    const TTuple key = TTuple{k};
+
+    const auto it = instance_map.find(key);
+    if (it == instance_map.end()) {
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (k)"\
             " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
             "(4), (8), (12), (16), (32), (64)"
         );
     }
+    const void* instance = it->second;
 
-    TFunctionType* instance = it->second;
-    
-    cudaLaunchKernel((const void*)instance, gridDim, blockDim, args, smem, stream);
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -120,6 +130,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: KnnNode2Node                              */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error KnnNode2NodeFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer parent_ilist_spl,
@@ -142,14 +153,13 @@ ffi::Error KnnNode2NodeFFIHost(
     size_t node_ilist_size = node_ilist_ioth->element_count();
 
     // Now call our function
-    ffi::Error result = KnnNode2Node(
-        stream,
-        reinterpret_cast<int32_t*>(parent_ilist_spl.untyped_data()),
-        reinterpret_cast<int32_t*>(parent_ilist_ioth.untyped_data()),
-        reinterpret_cast<float*>(parent_ilist_r2.untyped_data()),
-        reinterpret_cast<int32_t*>(parent_spl.untyped_data()),
-        reinterpret_cast<Node*>(nodes.untyped_data()),
-        reinterpret_cast<int32_t*>(nodes_npart.untyped_data()),
+    ffi::Error result = KnnNode2Node(stream,
+        reinterpret_cast<const int32_t*>(parent_ilist_spl.untyped_data()),
+        reinterpret_cast<const int32_t*>(parent_ilist_ioth.untyped_data()),
+        reinterpret_cast<const float*>(parent_ilist_r2.untyped_data()),
+        reinterpret_cast<const int32_t*>(parent_spl.untyped_data()),
+        reinterpret_cast<const Node*>(nodes.untyped_data()),
+        reinterpret_cast<const int32_t*>(nodes_npart.untyped_data()),
         reinterpret_cast<float*>(node_rmax2->untyped_data()),
         reinterpret_cast<int32_t*>(node_ilist_spl->untyped_data()),
         reinterpret_cast<int32_t*>(node_ilist_ioth->untyped_data()),
@@ -195,6 +205,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /*                             FFI call to CUDA kernel: SegmentSort                               */
 /* ---------------------------------------------------------------------------------------------- */
 
+
 ffi::Error SegmentSortFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer spl,
@@ -208,11 +219,10 @@ ffi::Error SegmentSortFFIHost(
     int32_t size_keys = key.element_count();
 
     // Now call our function
-    ffi::Error result = SegmentSort(
-        stream,
-        reinterpret_cast<int32_t*>(spl.untyped_data()),
-        reinterpret_cast<float*>(key.untyped_data()),
-        reinterpret_cast<int32_t*>(val.untyped_data()),
+    ffi::Error result = SegmentSort(stream,
+        reinterpret_cast<const int32_t*>(spl.untyped_data()),
+        reinterpret_cast<const float*>(key.untyped_data()),
+        reinterpret_cast<const int32_t*>(val.untyped_data()),
         reinterpret_cast<float*>(key_out->untyped_data()),
         reinterpret_cast<int32_t*>(val_out->untyped_data()),
         size_segs,

@@ -281,8 +281,8 @@ template <int dim> __device__  __forceinline__ bool has_nan(Pos<dim> pos) {
 template <int dim=3>
 __device__ __forceinline__ bool z_pos_less(Pos<dim> pos1, Pos<dim> pos2)
 {
-    if(has_nan<3>(pos1)) return false;
-    if(has_nan<3>(pos2)) return true;
+    if(has_nan<dim>(pos1)) return false;
+    if(has_nan<dim>(pos2)) return true;
 
     int msb_dim = 0;
     int msb = float_xor_msb(pos1[0], pos2[0]);
