@@ -73,9 +73,18 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "sort.cuh"),
-    names=["PosZorderSort", "SearchSortedZ"],
+    names=["DtypeTest", "PosZorderSort", "SearchSortedZ"],
     only_kernels=False
 )
+
+# For DtypeTest: float_type is a dtype parameter that maps types to ffi::DataType enum values
+functions["DtypeTest"].template_par["in_type"].instances = ("float", "double")
+functions["DtypeTest"].template_par["in_type"].expression = "in.element_type()"
+functions["DtypeTest"].template_par["in_type"].dispatch_values = ("DT::F32", "DT::F64")
+functions["DtypeTest"].template_par["out_type"].instances = ("float", "double")
+functions["DtypeTest"].template_par["out_type"].expression = "out->element_type()"
+functions["DtypeTest"].template_par["out_type"].dispatch_values = ("DT::F32", "DT::F64")
+functions["DtypeTest"].template_par["offset"].instances = (0, 10)
 
 functions["PosZorderSort"].template_par["dim"].instances = (2,3)
 functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions()[1]"

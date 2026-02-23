@@ -21,6 +21,8 @@ nanobind::capsule EncapsulateFfiCall(T *fn) {
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
+using DT = ffi::DataType;
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: FlagLeafBoundaries                        */
 /* ---------------------------------------------------------------------------------------------- */
@@ -203,20 +205,18 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
 ) {
     int size = posz.element_count()/3;
 
+
     // We have template parameters, so we need to instantiate all valid templates.
     // We select a function pointer through a map with a stable, type-erased signature.
     using TTuple = std::tuple<bool>;
+    using TFunc = GetBoundaryExtendPerLevelDispatchFn;
 
-    using TFunctionType =
-        GetBoundaryExtendPerLevelDispatchFn
-    ;
-
-    static const std::map<TTuple, TFunctionType> instance_map = {
+    static const std::map<TTuple, TFunc> instance_map = {
         { {true}, &GetBoundaryExtendPerLevelDispatchWrapper<true> },
         { {false}, &GetBoundaryExtendPerLevelDispatchWrapper<false> }
     };
 
-    const TTuple key = TTuple{left};
+    const TTuple key = TTuple(left);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {

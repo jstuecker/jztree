@@ -11,6 +11,23 @@
 
 #define INFTY  INFINITY //__int_as_float(0x7f800000)
 
+template <bool mode, typename in_type, typename out_type, int offset>
+__global__ void DtypeTest(
+    const in_type* in,
+    out_type* out,
+    size_t size
+) {
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if(idx + offset < size) {
+        if(mode) {
+            out[idx] = in[idx + offset] * 2.;
+        } else {
+            out[idx] = in[idx + offset] * 3.;
+        }
+    }
+}
+
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                           Zorder Sort                                          */
 /* ---------------------------------------------------------------------------------------------- */

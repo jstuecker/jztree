@@ -14,7 +14,9 @@ from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard
 from .stats import statistics, stats_callback, AllocStats
 
 from jztree_cuda import ffi_tree, ffi_sort
+
 jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")
+jax.ffi.register_ffi_target("DtypeTest", ffi_sort.DtypeTest(), platform="CUDA")
 jax.ffi.register_ffi_target("SearchSortedZ", ffi_sort.SearchSortedZ(), platform="CUDA")
 jax.ffi.register_ffi_target("FlagLeafBoundaries", ffi_tree.FlagLeafBoundaries(), platform="CUDA")
 jax.ffi.register_ffi_target("FindNodeBoundaries", ffi_tree.FindNodeBoundaries(), platform="CUDA")
@@ -39,6 +41,14 @@ def get_node_box(x, level_binary):
 # ------------------------------------------------------------------------------------------------ #
 #                                             FFI Calls                                            #
 # ------------------------------------------------------------------------------------------------ #
+
+def dtype_test(x: jax.Array, offset: int, mode=True, dtype=jnp.float32):
+    assert x.dtype in (jnp.float32, jnp.float64)
+    out_type = jax.ShapeDtypeStruct(x.shape, dtype)
+    return jax.ffi.ffi_call("DtypeTest", (out_type,))(
+        x, block_size=np.uint64(32), grid_size=np.uint64((len(x) + 31) // 32),
+        size=np.uint64(len(x)), offset=np.int32(offset), mode=mode
+    )[0]
 
 def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
     assert x.dtype == jnp.float32

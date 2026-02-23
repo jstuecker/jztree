@@ -21,6 +21,8 @@ nanobind::capsule EncapsulateFfiCall(T *fn) {
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
+using DT = ffi::DataType;
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: KnnLeaf2Leaf                              */
 /* ---------------------------------------------------------------------------------------------- */
@@ -64,24 +66,22 @@ ffi::Error KnnLeaf2LeafFFIHost(
         &boxsize
     };
     
+
     // We have template parameters, so we need to instantiate all valid templates.
     // We select a function pointer through a map with a stable, type-erased signature.
     using TTuple = std::tuple<int>;
+    using TFunc = const void*;
 
-    using TFunctionType =
-        const void*
-    ;
-
-    static const std::map<TTuple, TFunctionType> instance_map = {
-        { {4}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<4>) },
-        { {8}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<8>) },
-        { {12}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<12>) },
-        { {16}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<16>) },
-        { {32}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<32>) },
-        { {64}, reinterpret_cast<const void*>(&KnnLeaf2Leaf<64>) }
+    static const std::map<TTuple, TFunc> instance_map = {
+        { {4}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4>) },
+        { {8}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8>) },
+        { {12}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12>) },
+        { {16}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16>) },
+        { {32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32>) },
+        { {64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64>) }
     };
 
-    const TTuple key = TTuple{k};
+    const TTuple key = TTuple(k);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {

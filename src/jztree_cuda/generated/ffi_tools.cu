@@ -21,6 +21,8 @@ nanobind::capsule EncapsulateFfiCall(T *fn) {
 namespace nb = nanobind;
 namespace ffi = xla::ffi;
 
+using DT = ffi::DataType;
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: RearangeSegments                          */
 /* ---------------------------------------------------------------------------------------------- */
