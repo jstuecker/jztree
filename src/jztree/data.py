@@ -66,7 +66,7 @@ def get_pos(part: Pos):
         assert (part.shape[-1] == 3) and (part.ndim == 2)
         return part
     elif hasattr(part, "pos"):
-        assert (part.pos.shape[-1] == 3) and (part.pos.ndim == 2)
+        assert part.pos.ndim == 2
         return part.pos
     else:
         raise ValueError("Invalid input particles")

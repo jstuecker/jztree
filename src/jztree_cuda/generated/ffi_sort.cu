@@ -61,7 +61,7 @@ ffi::Error PosZorderSortFFIHost(
     ffi::Result<ffi::AnyBuffer> tmp_buffer,
     size_t block_size
 ) {
-    size_t size = pos_in.element_count()/3;
+    size_t size = pos_in.dimensions()[0];
     size_t tmp_bytes = tmp_buffer->size_bytes();
     int dim = pos_in.dimensions()[1];
 
@@ -135,8 +135,8 @@ ffi::Error SearchSortedZFFIHost(
     bool leaf_search,
     size_t block_size
 ) {
-    size_t n_have = posz_have.element_count()/3;
-    size_t n_query = posz_query.element_count()/3;
+    size_t n_have = posz_have.dimensions()[0];
+    size_t n_query = posz_query.dimensions()[0];
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(n_query, block_size));
     size_t smem = 0;

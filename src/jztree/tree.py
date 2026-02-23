@@ -42,20 +42,22 @@ def get_node_box(x, level_binary):
 
 def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
     assert x.dtype == jnp.float32
-    assert x.shape[-1] == 3
+    assert x.ndim == 2
+    dim = x.shape[-1]
+    assert dim in (2,3)
 
     # To optimize memory layout, we bundle position and id together into a single array
     # We later need to reinterprete the output to extract positions and ids
-    out_type = jax.ShapeDtypeStruct((x.shape[0],4), jnp.int32)
+    out_type = jax.ShapeDtypeStruct((x.shape[0],dim+1), jnp.int32)
     # This is a guess, how much a temporary storage in cub::DeviceMergeSort::SortKeys requires
     # If we estimate too little, an error will be thrown from the C++ code:
-    tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), 4), jnp.int32)
+    tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), dim+1), jnp.int32)
     isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type), vmap_method="sequential")(
         x, block_size=np.uint64(block_size)
     )[0]
 
-    pos = isort[:, :3].view(jnp.float32)
-    ids = isort[:, 3].view(jnp.int32)
+    pos = isort[:, :dim].view(jnp.float32)
+    ids = isort[:, dim].view(jnp.int32)
 
     return pos, ids
 
