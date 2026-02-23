@@ -78,7 +78,7 @@ functions = parse.get_functions_from_file(
 )
 
 functions["PosZorderSort"].template_par["dim"].instances = (2,3)
-# functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions(1);"
+functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions()[1]"
 functions["PosZorderSort"].par["size"].expression = "pos_in.element_count()/3"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
 

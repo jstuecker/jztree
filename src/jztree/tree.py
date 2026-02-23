@@ -51,7 +51,7 @@ def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
     # If we estimate too little, an error will be thrown from the C++ code:
     tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), 4), jnp.int32)
     isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type), vmap_method="sequential")(
-        x, block_size=np.uint64(block_size), dim=np.int32(x.shape[-1])
+        x, block_size=np.uint64(block_size)
     )[0]
 
     pos = isort[:, :3].view(jnp.float32)

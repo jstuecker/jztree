@@ -59,11 +59,11 @@ ffi::Error PosZorderSortFFIHost(
     ffi::AnyBuffer pos_in,
     ffi::Result<ffi::AnyBuffer> pos_id_out,
     ffi::Result<ffi::AnyBuffer> tmp_buffer,
-    size_t block_size,
-    int dim
+    size_t block_size
 ) {
     size_t size = pos_in.element_count()/3;
     size_t tmp_bytes = tmp_buffer->size_bytes();
+    int dim = pos_in.dimensions()[1];
 
     // We have template parameters, so we need to instantiate all valid templates.
     // We select a function pointer through a map with a stable, type-erased signature.
@@ -118,8 +118,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // pos_in
         .Ret<ffi::AnyBuffer>() // pos_id_out
         .Ret<ffi::AnyBuffer>() // tmp_buffer
-        .Attr<size_t>("block_size")
-        .Attr<int>("dim"),
+        .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
