@@ -184,8 +184,8 @@ __device__ __forceinline__ int32_t msb_xor_float(float a, float b) {
     // If the exponent is the same, then we need to compare the mantissas. The (power of two) of the
     // difference is then given by the differing bit in the mantissa, offset by the exponent
 
-    if (signbit(a) != signbit(b)) {
-        return 128;  // The sign is the highest significant bit
+    if (isnan(a) || isnan(b) || (signbit(a) != signbit(b))) {
+        return 128;  // One higher than highest possible float diff (2**127)
     }
     uint32_t a_bits = (uint32_t)__float_as_int(fabsf(a));
     uint32_t b_bits = (uint32_t)__float_as_int(fabsf(b));
@@ -196,7 +196,10 @@ __device__ __forceinline__ int32_t msb_xor_float(float a, float b) {
     if (a_exp == b_exp) { // If both floats have the same exponent, we need to compare mantissas
         // clz counts bit-zeros from the left. There will be always 8 leading zeros due to the
         // exponent
-        return a_exp + (8 - __clz(a_bits ^ b_bits)); 
+        if(a_bits == b_bits)
+            return -151; // one smaller than the lowest possible float diff (-127 - 23)
+        else
+            return a_exp + (8 - __clz(a_bits ^ b_bits)); 
     }
     else { // If exponents differ, return the larger exponent
         return max(a_exp, b_exp);
@@ -214,9 +217,12 @@ __device__ __forceinline__ int32_t msb_xor_double(double a, double b) {
     int32_t b_exp = (int32_t)(b_bits >> 52) - 1023;
 
     if (a_exp == b_exp) {
-        return a_exp + (11 - __clzll(a_bits ^ b_bits));
+        if(a_bits == b_bits)
+            return -1076;
+        else
+            return a_exp + (11 - __clzll(a_bits ^ b_bits));
     }
-    else { // If exponents differ, return the larger exponent
+    else {
         return max(a_exp, b_exp);
     }
 }
@@ -363,9 +369,9 @@ __device__ __forceinline__ float round_float_pow2_cent(float x, int level)
     else {
         // the rounding is done by zeroing out mantissa bits
         int32_t keep_bits = x_exp - level; // how many mantissa bits to keep
-        int32_t mask = 0xFFFFFFFFu << (23 - keep_bits);
+        int32_t mask = 0xFFFFFFFFu << max(23 - keep_bits, 0);
         new_bits = x_bits & mask;
-        new_bits = new_bits | (1u << (22 - keep_bits)); // set next bit to one for center
+        new_bits = new_bits | (1u << max(22 - keep_bits, 0)); // set next bit to one for center
         return signbit(x) ? -__int_as_float(new_bits) : __int_as_float(new_bits);
     }
 }
@@ -401,7 +407,7 @@ __device__ __forceinline__ int3 lvl_xyz(const int level) {
     // CUDA's integer division does not what we want for negative numbers. 
     // e.g. -4/3 = -1 whereas what we want is python behaviour: -4//3 = -2
     // We add an offset to ensure that CUDA divides positive integers only:
-    int olvl = (level + 3000) / 3 - 1000;
+    int olvl = (level + 6000) / 3 - 2000;
     int omod = level - olvl * 3;
     int lx = olvl;
     int ly = olvl + (omod >= 2);

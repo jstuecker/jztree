@@ -24,7 +24,7 @@ def test_tree_hierarchy(tree_hierarchy : TreeHierarchy):
     for i in range(th.num_planes()):
         assert jnp.sum(th.npart(i)) == npart
         lvls = th.lvl.get(i, size=th.num(i))
-        assert jnp.all((lvls >= -100 ) & (lvls < 100))
+        assert jnp.all((lvls >= -450 ) & (lvls < 100))
 
 def test_node_geometry(pos_mass_z: PosMass):
     pos = pos_mass_z.pos
