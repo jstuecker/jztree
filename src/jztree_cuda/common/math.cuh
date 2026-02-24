@@ -4,6 +4,71 @@
 #include "data.cuh"
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                                 Data type specific definitions                                 */
+/* ---------------------------------------------------------------------------------------------- */
+
+template<typename tpos>
+__device__ __forceinline__ tpos invalid_val() {
+    if constexpr (std::is_same_v<tpos, float>) {
+        return __uint_as_float(0x7fc00000u); // quite NaN
+    }
+    else if constexpr (std::is_same_v<tpos, double>) {
+        return __longlong_as_double(0x7ff8000000000000ULL); // quite NaN
+    }
+    else if constexpr (std::is_same_v<tpos, int32_t>) {
+        return static_cast<int32_t>(0x7fffffff); // max int32
+    }
+    else if constexpr (std::is_same_v<tpos, int64_t>) {
+        return static_cast<int64_t>(0x7fffffffffffffffLL); // max int64
+    } 
+    else {
+        return tpos{};
+    }
+}
+
+template <typename tpos>
+__device__ __forceinline__ int min_node_lvl() {
+    if constexpr (std::is_same_v<tpos, float>) {
+        return -450;
+    } 
+    else if constexpr (std::is_same_v<tpos, double>) {
+        return -3225;
+    } 
+    else if constexpr (std::is_same_v<tpos, int32_t>) {
+        return 0;
+    } 
+    else if constexpr (std::is_same_v<tpos, int64_t>) {
+        return 0;
+    } 
+    else {
+        static_assert(std::is_same_v<tpos, void>, 
+            "min_node_lvl<T>: unsupported type. Add a branch for this T."
+        );
+    }
+}
+
+template <typename tpos>
+__host__ __device__ __forceinline__ int max_node_lvl() {
+    if constexpr (std::is_same_v<tpos, float>) {
+        return 388; // 128*3 + 3 + 1
+    } 
+    else if constexpr (std::is_same_v<tpos, double>) {
+        return 3075; // unsure about this
+    } 
+    else if constexpr (std::is_same_v<tpos, int32_t>) {
+        return 32;
+    } 
+    else if constexpr (std::is_same_v<tpos, int64_t>) {
+        return 64;
+    } 
+    else {
+        static_assert(std::is_same_v<tpos, void>, 
+            "max_node_lvl<T>: unsupported type. Add a branch for this T."
+        );
+    }
+}
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                                           Vector Math                                          */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -261,7 +326,7 @@ __device__ __forceinline__ int32_t msb_diff_level(
         msb = new_msb > msb ? new_msb : msb;
     }
 
-    return msb*(dim+1) - msb_dim;
+    return (msb+1)*dim - msb_dim;
 }
 
 __device__ __forceinline__ int32_t msb_diff_level_old(const float3 &p1, const float3 &p2) {
@@ -417,7 +482,26 @@ __device__ __forceinline__ float distance_squared(const float3 &a, const float3 
     return dx * dx + dy * dy + dz * dz;
 }
 
-__device__ __forceinline__ int3 lvl_xyz(const int level) {
+template<int dim>
+__device__ __forceinline__ Pos<dim,int32_t> lvl_vec(const int level) {
+    // Converts a node's or leaf's binary level to its level per dimension
+
+    // CUDA's integer division does not what we want for negative numbers. 
+    // e.g. -4/3 = -1 whereas what we want is python behaviour: -4//3 = -2
+    // We add an offset to ensure that CUDA divides positive integers only:
+    int olvl = (level + 2000*dim) / dim - 2000;
+    int omod = level - olvl * dim;
+
+    Pos<dim,int32_t> lvec;
+    #pragma unroll
+    for(int i=0; i<dim; i++) {
+        lvec[i] = olvl + (omod >= (dim-i));
+    }
+    
+    return lvec;
+}
+
+__device__ __forceinline__ int3 lvl_xyz_old(const int level) {
     // Converts a node's or leaf's binary level to its level per dimension
 
     // CUDA's integer division does not what we want for negative numbers. 
@@ -432,44 +516,86 @@ __device__ __forceinline__ int3 lvl_xyz(const int level) {
     return int3{lx, ly, lz};
 }
 
-__device__ __forceinline__ float3 LvlToExt(const int level) {
+template <typename tpos>
+__device__ __forceinline__ tpos pow2(tpos val, int pow) {
+    if constexpr (std::is_same_v<tpos, float>)
+        return ldexpf(val, pow);
+    else if constexpr (std::is_same_v<tpos, double>)
+        return ldexp(val, pow);
+    else if constexpr (std::is_same_v<tpos, int32_t>)
+        return pow >= 0 ? val << pow : val >> -pow;
+    else if constexpr (std::is_same_v<tpos, int64_t>)
+        return pow >= 0 ? val << pow : val >> -pow;
+}
+
+template <int dim, typename tpos>
+__device__ __forceinline__ Pos<dim, tpos> LvlToExt(const int level) {
     // Converts a node's or leaf's binary level to its extend per dimension
-    int3 l = lvl_xyz(level);
+    Pos<dim,int32_t> l = lvl_vec<dim>(level);
+    Pos<dim,tpos> ext;
+    
+    #pragma unroll
+    for(int i=0; i<dim; i++)
+        ext[i] = pow2(static_cast<tpos>(1.0), l[i]);
+        
+    return ext;
+}
+
+template <int dim, typename tpos>
+__device__ __forceinline__ Pos<dim, tpos> LvlToHalfExt(const int level) {
+    // Converts a node's or leaf's binary level to its extend per dimension
+    Pos<dim,int32_t> l = lvl_vec<dim>(level);
+    Pos<dim,tpos> ext;
+    
+    #pragma unroll
+    for(int i=0; i<dim; i++)
+        ext[i] = pow2(static_cast<tpos>(1.0), l[i]-1);
+        
+    return ext;
+}
+
+__device__ __forceinline__ float3 LvlToExtOld(const int level) {
+    // Converts a node's or leaf's binary level to its extend per dimension
+    int3 l = lvl_xyz_old(level);
     
     return make_float3(ldexpf(1.0f, l.x), ldexpf(1.0f, l.y), ldexpf(1.0f, l.z));
 }
 
-__device__ __forceinline__ float3 LvlToHalfExt(int level) {
+__device__ __forceinline__ float3 LvlToHalfExtOld(int level) {
     // Same as above, but with half-extends
-    int3 l = lvl_xyz(level);
+    int3 l = lvl_xyz_old(level);
     
     return make_float3(ldexpf(1.0f, l.x-1), ldexpf(1.0f, l.y-1), ldexpf(1.0f, l.z-1));
 }
 
-__device__ __forceinline__ NodeWithExt NodeLvlToHalfExt(Node node) {
-    NodeWithExt node_ext;
+__device__ __forceinline__ NodeWithExtOld NodeLvlToHalfExtOld(Node node) {
+    NodeWithExtOld node_ext;
     node_ext.center = node.center;
-    node_ext.extent = LvlToHalfExt(node.level);
+    node_ext.extent = LvlToHalfExtOld(node.level);
     return node_ext;
 }
 
-__device__ __forceinline__ float3 LvlToCenter(const float3 pos, const int level) {
+template<int dim, typename tpos>
+__device__ __forceinline__ Pos<dim,tpos> LvlToCenter(const Pos<dim,tpos> pos, const int level) {
     // Converts a node's or leaf's binary level to its extend per dimension
-    int3 l = lvl_xyz(level);
+    Pos<dim,int32_t> l = lvl_vec<dim>(level);
     
-    return make_float3(
-        round_float_pow2_cent(pos.x, l.x),
-        round_float_pow2_cent(pos.y, l.y),
-        round_float_pow2_cent(pos.z, l.z)
-    );
+    Pos<dim,tpos> res;
+    for(int i=0; i<dim; i++) {
+        res[i] = round_float_pow2_cent(pos[i], l[i]); // !!! need to generalize to non-float32
+    }
+    return res;
 }
 
-__device__ __forceinline__ NodeWithExt get_common_node(const float3 p1, const float3 p2) {
-    int lvl = msb_diff_level_old(p1, p2);
+template<int dim, typename tpos>
+__device__ __forceinline__ NodeWithExt<dim,tpos> get_common_node(
+    const Pos<dim,tpos> p1, const Pos<dim,tpos> p2
+) {
+    int lvl = msb_diff_level<dim,tpos>(p1, p2);
 
-    NodeWithExt node;
-    node.center = LvlToCenter(p1, lvl);
-    node.extent = LvlToExt(lvl);
+    NodeWithExt<dim,tpos> node;
+    node.center = LvlToCenter<dim,tpos>(p1, lvl);
+    node.extent = LvlToExt<dim,tpos>(lvl);
     return node;
 }
 
@@ -491,15 +617,15 @@ __device__ __forceinline__ float maxdist2(float3 x1, float3 x2, float3 width_hal
 
 __device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part, float boxsize=0.f) {
     // Minimum squared distance between a node and a particle
-    float3 half_ext = LvlToHalfExt(node.level);
+    float3 half_ext = LvlToHalfExtOld(node.level);
 
     return mindist2(part, node.center, half_ext, boxsize);
 }
 
 __device__ __forceinline__ float NodeNodeMinDist2(const Node& nodeA, const Node& nodeB, float boxsize=0.f) {
     // The distance between the closest points inside two nodes
-    float3 hA = LvlToHalfExt(nodeA.level);
-    float3 hB = LvlToHalfExt(nodeB.level);
+    float3 hA = LvlToHalfExtOld(nodeA.level);
+    float3 hB = LvlToHalfExtOld(nodeB.level);
     float3 half_ext = make_float3(hA.x + hB.x, hA.y + hB.y, hA.z + hB.z);
 
     return mindist2(nodeA.center, nodeB.center, half_ext, boxsize);
@@ -507,8 +633,8 @@ __device__ __forceinline__ float NodeNodeMinDist2(const Node& nodeA, const Node&
 
 __device__ __forceinline__ float NodeNodeMaxDist2(const Node& nodeA, const Node& nodeB, float boxsize=0.f) {
     // The distance between the closest points inside two nodes
-    float3 hA = LvlToHalfExt(nodeA.level);
-    float3 hB = LvlToHalfExt(nodeB.level);
+    float3 hA = LvlToHalfExtOld(nodeA.level);
+    float3 hB = LvlToHalfExtOld(nodeB.level);
     float3 half_ext = make_float3(hA.x + hB.x, hA.y + hB.y, hA.z + hB.z);
 
     return maxdist2(nodeA.center, nodeB.center, half_ext, boxsize);
@@ -518,8 +644,8 @@ __device__ __forceinline__ float NodeNodeMaxDist2(const Node& nodeA, const Node&
 /*                                     Warp and Group helpers                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<typename T>
-__device__ __forceinline__ T warp_reduce_sum(T v) {
+template<typename tpos>
+__device__ __forceinline__ tpos warp_reduce_sum(tpos v) {
     #pragma unroll
     for (int offset = 16; offset > 0; offset >>= 1)
         v += __shfl_down_sync(__activemask(), v, offset);

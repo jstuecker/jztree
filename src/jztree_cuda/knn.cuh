@@ -317,7 +317,7 @@ __global__ void KnnNode2NodeFindRmax(
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
         Node nodeQ = nodes[inodeQ];
         float3 xQ = nodeQ.center;
-        float3 extQ = LvlToHalfExt(nodeQ.level);
+        float3 extQ = LvlToHalfExtOld(nodeQ.level);
 
         SortedNearestKWithCounts<kmax> nearestK(INFINITY);
 
@@ -346,7 +346,7 @@ __global__ void KnnNode2NodeFindRmax(
                 if(ilT < inodeT_end) {
                     Node nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
-                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
+                    extT[threadIdx.x] = LvlToHalfExtOld(nodeT.level);
                     npartT[threadIdx.x] = nodes_npart[ilT];
                 }
                 __syncthreads();
@@ -393,7 +393,7 @@ __global__ void KnnNode2NodeCountInsert(
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1);
         Node nodeQ = nodes[inodeQ];
         float3 xQ = nodeQ.center;
-        float3 extQ = LvlToHalfExt(nodeQ.level);
+        float3 extQ = LvlToHalfExtOld(nodeQ.level);
         float rmaxQ2 = node_rmax2[inodeQ];
         int out_offset = node_ilist.spl[inodeQ];
 
@@ -421,7 +421,7 @@ __global__ void KnnNode2NodeCountInsert(
                 if(ilT < inodeT_end) {
                     Node nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
-                    extT[threadIdx.x] = LvlToHalfExt(nodeT.level);
+                    extT[threadIdx.x] = LvlToHalfExtOld(nodeT.level);
                 }
                 __syncthreads();
                 for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {

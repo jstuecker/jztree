@@ -63,7 +63,7 @@ __global__ void NodeToChildLabel(
     int node_root = parent_igroup[node];
     if(node_root >= size_parent || !parent_is_local[node_root])
         return;
-    float L2 = norm2(LvlToExt(parent_lvl[node]));
+    float L2 = norm2(LvlToExtOld(parent_lvl[node]));
 
     int inode_start = parent_spl[node], inode_end = parent_spl[node + 1];
     for(int inode = inode_start + threadIdx.x; inode < inode_end; inode += blockDim.x) {
@@ -110,7 +110,7 @@ __global__ void NodeFof_Link_Count_Insert(
         // we set overhead threads to the last node to avoid adding many conditionals
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
         bool valid = iqoff + threadIdx.x < inodeQ_end;
-        NodeWithExt nodeQ = NodeLvlToHalfExt(nodes[inodeQ]);
+        NodeWithExtOld nodeQ = NodeLvlToHalfExtOld(nodes[inodeQ]);
         
         PrefetchList<int> pf_ilist(parent_ilist, parent_ilist_splits[parentQ], parent_ilist_splits[parentQ + 1]);
 
@@ -130,14 +130,14 @@ __global__ void NodeFof_Link_Count_Insert(
 
             int inodeT_start = spl[parentT], inodeT_end = spl[parentT + 1];
 
-            NodeWithExt* nodeT = reinterpret_cast<NodeWithExt*>(smem);
+            NodeWithExtOld* nodeT = reinterpret_cast<NodeWithExtOld*>(smem);
             int* igroupT = reinterpret_cast<int*>(nodeT + blockDim.x);
 
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int inodeT = itoff + threadIdx.x;
 
                 if(inodeT < inodeT_end) {
-                    nodeT[threadIdx.x] = NodeLvlToHalfExt(nodes[inodeT]);
+                    nodeT[threadIdx.x] = NodeLvlToHalfExtOld(nodes[inodeT]);
                     igroupT[threadIdx.x] = node_igroup[inodeT];
                 }
                 __syncthreads();
@@ -161,7 +161,7 @@ __global__ void NodeFof_Link_Count_Insert(
                     // (3) The other node is outside the linking length -> do noting
 
                     // Upper and lower bound to the distance between any two particles in A and B:
-                    NodeWithExt lT = nodeT[j];
+                    NodeWithExtOld lT = nodeT[j];
                     float r2max = maxdist2(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
                     float r2min = mindist2(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
 
@@ -232,7 +232,7 @@ ffi::Error FofNode2Node(
     const size_t size_node_ilist,
     const int block_size
 ) {
-    size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt) + sizeof(int));
+    size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExtOld) + sizeof(int));
 
     cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(size_node+1), stream);
     cudaMemsetAsync(node_igroup, 0, sizeof(int)*(size_node), stream);

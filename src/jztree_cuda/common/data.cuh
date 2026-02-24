@@ -6,7 +6,7 @@ struct __align__(16) Node {
     int level;
 };
 
-struct NodeWithExt {
+struct NodeWithExtOld {
     float3 center;
     float3 extent;
 };
@@ -41,6 +41,14 @@ struct Pos {
   tpos v[dim];
 
   __host__ __device__ __forceinline__
+  static Pos constant(tpos val) {
+    Pos p;
+    #pragma unroll
+    for (int i = 0; i < dim; ++i) p.v[i] = val;
+    return p;
+  }
+
+  __host__ __device__ __forceinline__
   tpos& operator[](int i) { return v[i]; }
 
   __host__ __device__ __forceinline__
@@ -57,6 +65,12 @@ template <int dim, typename tpos>
 struct PosId {
     Pos<dim, tpos> pos;
     int32_t id;
+};
+
+template <int dim, typename tpos>
+struct NodeWithExt {
+    Pos<dim,tpos> center;
+    Pos<dim,tpos> extent;
 };
 
 struct __align__(16) ForcePot {
