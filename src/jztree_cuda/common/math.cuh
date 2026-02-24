@@ -457,6 +457,46 @@ __device__ __forceinline__ float round_float_pow2_cent(float x, int level)
     }
 }
 
+__device__ __forceinline__ double round_double_pow2_cent(double x, int level)
+{
+    int64_t x_bits = __double_as_longlong(fabs(x));
+    int32_t x_exp = (int32_t)(x_bits >> 52) - 1023;
+
+    int64_t new_bits = x_bits;
+
+    if(level >= 1024) {
+        return 0.0;
+    }
+    if (level > x_exp) {
+        return ldexp(signbit(x) ? -0.5 : 0.5, level);
+    }
+    else {
+        int32_t keep_bits = x_exp - level;
+        int64_t mask = 0xFFFFFFFFFFFFFFFFULL << max(52 - keep_bits, 0);
+        new_bits = x_bits & mask;
+        new_bits = new_bits | (1ULL << max(51 - keep_bits, 0));
+        return signbit(x) ? -__longlong_as_double(new_bits) : __longlong_as_double(new_bits);
+    }
+}
+
+template <typename tpos>
+__device__ __forceinline__ tpos round_pow2_cent(tpos x, int level) {
+    if constexpr (std::is_same_v<tpos, float>) {
+        return round_float_pow2_cent(x, level);
+    } 
+    else if constexpr (std::is_same_v<tpos, double>) {
+        return round_double_pow2_cent(x, level);
+    } 
+    else if constexpr (std::is_same_v<tpos, int32_t> || std::is_same_v<tpos, int64_t>) {
+        if (level <= 0) return x;
+        
+        tpos mask = (static_cast<tpos>(-1) << level);
+        tpos center_offset = (static_cast<tpos>(1) << (level - 1));
+        
+        return (x & mask) | center_offset;
+    }
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                            Node Math                                           */
 /* ---------------------------------------------------------------------------------------------- */
@@ -577,12 +617,11 @@ __device__ __forceinline__ NodeWithExtOld NodeLvlToHalfExtOld(Node node) {
 
 template<int dim, typename tpos>
 __device__ __forceinline__ Pos<dim,tpos> LvlToCenter(const Pos<dim,tpos> pos, const int level) {
-    // Converts a node's or leaf's binary level to its extend per dimension
     Pos<dim,int32_t> l = lvl_vec<dim>(level);
     
     Pos<dim,tpos> res;
     for(int i=0; i<dim; i++) {
-        res[i] = round_float_pow2_cent(pos[i], l[i]); // !!! need to generalize to non-float32
+        res[i] = round_pow2_cent<tpos>(pos[i], l[i]);
     }
     return res;
 }
