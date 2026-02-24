@@ -21,7 +21,7 @@ functions = parse.get_functions_from_file(
 
 functions["KnnLeaf2Leaf"].template_par["k"].instances = k_instance_values
 functions["KnnLeaf2Leaf"].block_size_expression = 32
-functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId<3>)"
+functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId<3,float>)"
 functions["KnnLeaf2Leaf"].grid_size_expression = "splQ.element_count() - 1"
 
 functions["KnnNode2Node"].par["size_parents"].expression = "parent_spl.element_count() - 1"
@@ -80,14 +80,14 @@ functions = parse.get_functions_from_file(
 # For DtypeTest: float_type is a dtype parameter that maps types to ffi::DataType enum values
 functions["DtypeTest"].template_par["in_type"].instances = ("float", "double")
 functions["DtypeTest"].template_par["in_type"].expression = "in.element_type()"
-functions["DtypeTest"].template_par["in_type"].dispatch_values = ("DT::F32", "DT::F64")
 functions["DtypeTest"].template_par["out_type"].instances = ("float", "double")
 functions["DtypeTest"].template_par["out_type"].expression = "out->element_type()"
-functions["DtypeTest"].template_par["out_type"].dispatch_values = ("DT::F32", "DT::F64")
 functions["DtypeTest"].template_par["offset"].instances = (0, 10)
 
 functions["PosZorderSort"].template_par["dim"].instances = (2,3)
 functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions()[1]"
+functions["PosZorderSort"].template_par["tpos"].instances = ("float", "double", "int32_t", "int64_t")
+functions["PosZorderSort"].template_par["tpos"].expression = "pos_in.element_type()"
 functions["PosZorderSort"].par["size"].expression = "pos_in.dimensions()[0]"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
 

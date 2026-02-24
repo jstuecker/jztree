@@ -36,26 +36,26 @@ struct __align__(16) PosIdOld {
 //     int32_t id;
 // };
 
-template<int dim>
+template<int dim, typename tpos>
 struct Pos {
-  float v[dim];
+  tpos v[dim];
 
   __host__ __device__ __forceinline__
-  float& operator[](int i) { return v[i]; }
+  tpos& operator[](int i) { return v[i]; }
 
   __host__ __device__ __forceinline__
-  const float& operator[](int i) const { return v[i]; }
+  const tpos& operator[](int i) const { return v[i]; }
 
   __host__ __device__ __forceinline__
-  float* data() { return v; }
+  tpos* data() { return v; }
 
   __host__ __device__ __forceinline__
-  const float* data() const { return v; }
+  const tpos* data() const { return v; }
 };
 
-template <int dim=3>
+template <int dim, typename tpos>
 struct PosId {
-    Pos<dim> pos;
+    Pos<dim, tpos> pos;
     int32_t id;
 };
 

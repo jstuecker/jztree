@@ -176,7 +176,7 @@ __device__ __forceinline__ constexpr  int3 flat_to_multi(const int kflat) {
 /*                                         Bit operations                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
-__device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
+__device__ __forceinline__ int32_t msb_xor_float(float a, float b) {
     // Finds the most significant bit that differs between x and y
     // For floating point numbers we need to treat the exponent and the mantissa differently:
     // If the exponent differs, then the (power of two) of the difference is given by the larger
@@ -187,11 +187,11 @@ __device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
     if (signbit(a) != signbit(b)) {
         return 128;  // The sign is the highest significant bit
     }
-    int32_t a_bits = __float_as_int(fabsf(a));
-    int32_t b_bits = __float_as_int(fabsf(b));
+    uint32_t a_bits = (uint32_t)__float_as_int(fabsf(a));
+    uint32_t b_bits = (uint32_t)__float_as_int(fabsf(b));
 
-    int32_t a_exp = (a_bits >> 23) - 127;
-    int32_t b_exp = (b_bits >> 23) - 127;
+    int32_t a_exp = (int32_t)(a_bits >> 23) - 127;
+    int32_t b_exp = (int32_t)(b_bits >> 23) - 127;
 
     if (a_exp == b_exp) { // If both floats have the same exponent, we need to compare mantissas
         // clz counts bit-zeros from the left. There will be always 8 leading zeros due to the
@@ -203,10 +203,49 @@ __device__ __forceinline__ int32_t float_xor_msb(float a, float b) {
     }
 }
 
+__device__ __forceinline__ int32_t msb_xor_double(double a, double b) {
+    if (signbit(a) != signbit(b)) {
+        return 1024; // double has exponent with 1+10 bits
+    }
+    uint64_t a_bits = (uint64_t)__double_as_longlong(fabs(a));
+    uint64_t b_bits = (uint64_t)__double_as_longlong(fabs(b));
+
+    int32_t a_exp = (int32_t)(a_bits >> 52) - 1023;
+    int32_t b_exp = (int32_t)(b_bits >> 52) - 1023;
+
+    if (a_exp == b_exp) {
+        return a_exp + (11 - __clzll(a_bits ^ b_bits));
+    }
+    else { // If exponents differ, return the larger exponent
+        return max(a_exp, b_exp);
+    }
+}
+
+template<typename tpos>
+__device__ __forceinline__ int32_t msb_xor(tpos a, tpos b) {
+    if constexpr (std::is_same_v<tpos, float>) 
+        return msb_xor_float(a, b);
+    else if constexpr (std::is_same_v<tpos, double>) {
+        return msb_xor_double(a, b);
+    }
+    else if constexpr (std::is_same_v<tpos, int64_t>) {
+        uint64_t x = (uint64_t)a ^ (uint64_t)b;
+        return 63 - __clzll(x);
+    }
+    else if constexpr (std::is_same_v<tpos, int32_t>) {
+        uint32_t x = (uint32_t)a ^ (uint32_t)b;
+        return 31 - __clz(x);
+    }
+    else {
+        // undefined
+        return 0;
+    }
+}
+
 __device__ __forceinline__ int32_t msb_diff_level(const float3 &p1, const float3 &p2) {
-    int msb_x = float_xor_msb(p1.x, p2.x);
-    int msb_y = float_xor_msb(p1.y, p2.y);
-    int msb_z = float_xor_msb(p1.z, p2.z);
+    int msb_x = msb_xor_float(p1.x, p2.x);
+    int msb_y = msb_xor_float(p1.y, p2.y);
+    int msb_z = msb_xor_float(p1.z, p2.z);
 
     // The level is given by the most significant differing bit
     // but offset according to the dimension
@@ -257,9 +296,9 @@ __device__ __forceinline__ bool z_pos_less3(float3 pos1, float3 pos2)
     if (nan1) return false;
     if (nan2) return true;
 
-    int msb_x = float_xor_msb(pos1.x, pos2.x);
-    int msb_y = float_xor_msb(pos1.y, pos2.y);
-    int msb_z = float_xor_msb(pos1.z, pos2.z);
+    int msb_x = msb_xor_float(pos1.x, pos2.x);
+    int msb_y = msb_xor_float(pos1.y, pos2.y);
+    int msb_z = msb_xor_float(pos1.z, pos2.z);
 
     int ms_dim = (msb_x >= msb_y && msb_x >= msb_z) ? 0 : ((msb_y >= msb_z) ? 1 : 2);
 
@@ -268,27 +307,33 @@ __device__ __forceinline__ bool z_pos_less3(float3 pos1, float3 pos2)
     return pos1.z < pos2.z;
 }
 
-template <int dim> __device__  __forceinline__ bool has_nan(Pos<dim> pos) {
-    bool any_nan = false;
-    #pragma unroll
-    for(int i=0; i<dim; i++) {
-        any_nan = any_nan | isnan(pos[i]);
+template <int dim, typename tpos> __device__  __forceinline__ bool has_nan(
+    Pos<dim,tpos> pos
+) {
+    if constexpr (!std::is_floating_point_v<tpos>) {
+        return false;
+    } else {
+        bool any_nan = false;
+        #pragma unroll
+        for(int i=0; i<dim; i++) {
+            any_nan = any_nan | isnan(pos[i]);
+        }
+        return any_nan;
     }
-    return any_nan;
 }
 
 // Whether pos1 should appear before pos2 in a z-order
-template <int dim=3>
-__device__ __forceinline__ bool z_pos_less(Pos<dim> pos1, Pos<dim> pos2)
+template <int dim, typename tpos>
+__device__ __forceinline__ bool z_pos_less(Pos<dim,tpos> pos1, Pos<dim,tpos> pos2)
 {
-    if(has_nan<dim>(pos1)) return false;
-    if(has_nan<dim>(pos2)) return true;
+    if(has_nan<dim,tpos>(pos1)) return false;
+    if(has_nan<dim,tpos>(pos2)) return true;
 
     int msb_dim = 0;
-    int msb = float_xor_msb(pos1[0], pos2[0]);
+    int msb = msb_xor<tpos>(pos1[0], pos2[0]);
     #pragma unroll
     for(int i=1; i<dim; i++) {
-        int new_msb = float_xor_msb(pos1[i], pos2[i]);
+        int new_msb = msb_xor<tpos>(pos1[i], pos2[i]);
         msb_dim = new_msb > msb ? i : msb_dim;
         msb = new_msb > msb ? new_msb : msb;
     }

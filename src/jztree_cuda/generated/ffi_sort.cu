@@ -133,7 +133,7 @@ using PosZorderSortDispatchFn = std::string (*) (cudaStream_t stream,
     size_t tmp_bytes,
     size_t block_size
 );
-template<int dim>
+template<int dim, typename tpos>
 static std::string PosZorderSortDispatchWrapper(cudaStream_t stream,
     const void* pos_in,
     void* pos_id_out,
@@ -142,9 +142,9 @@ static std::string PosZorderSortDispatchWrapper(cudaStream_t stream,
     size_t tmp_bytes,
     size_t block_size
 ) {
-    return PosZorderSort<dim> (stream,
-        reinterpret_cast<const Pos<dim>*>(pos_in),
-        reinterpret_cast<PosId<dim>*>(pos_id_out),
+    return PosZorderSort<dim, tpos> (stream,
+        reinterpret_cast<const Pos<dim, tpos>*>(pos_in),
+        reinterpret_cast<PosId<dim, tpos>*>(pos_id_out),
         reinterpret_cast<int*>(tmp_buffer),
         size,
         tmp_bytes,
@@ -163,26 +163,33 @@ ffi::Error PosZorderSortFFIHost(
     size_t size = pos_in.dimensions()[0];
     size_t tmp_bytes = tmp_buffer->size_bytes();
     int dim = pos_in.dimensions()[1];
+    DT tpos = pos_in.element_type();
 
 
     // We have template parameters, so we need to instantiate all valid templates.
     // We select a function pointer through a map with a stable, type-erased signature.
-    using TTuple = std::tuple<int>;
+    using TTuple = std::tuple<int, DT>;
     using TFunc = PosZorderSortDispatchFn;
 
     static const std::map<TTuple, TFunc> instance_map = {
-        { {2}, &PosZorderSortDispatchWrapper<2> },
-        { {3}, &PosZorderSortDispatchWrapper<3> }
+        { {2, DT::F32}, &PosZorderSortDispatchWrapper<2, float> },
+        { {2, DT::F64}, &PosZorderSortDispatchWrapper<2, double> },
+        { {2, DT::S32}, &PosZorderSortDispatchWrapper<2, int32_t> },
+        { {2, DT::S64}, &PosZorderSortDispatchWrapper<2, int64_t> },
+        { {3, DT::F32}, &PosZorderSortDispatchWrapper<3, float> },
+        { {3, DT::F64}, &PosZorderSortDispatchWrapper<3, double> },
+        { {3, DT::S32}, &PosZorderSortDispatchWrapper<3, int32_t> },
+        { {3, DT::S64}, &PosZorderSortDispatchWrapper<3, int64_t> }
     };
 
-    const TTuple key = TTuple(dim);
+    const TTuple key = TTuple(dim, tpos);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim)"\
+            "\nUnsupported template parameter combination for (dim, tpos)"\
             " in PosZorderSortFFIHost -- Only supporting:\n"\
-            "(2), (3)"
+            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t)"
         );
     }
     PosZorderSortDispatchFn instance = it->second;
