@@ -7,62 +7,62 @@
 /*                                 Data type specific definitions                                 */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<typename tpos>
-__device__ __forceinline__ tpos invalid_val() {
-    if constexpr (std::is_same_v<tpos, float>) {
+template<typename tvec>
+__device__ __forceinline__ tvec invalid_val() {
+    if constexpr (std::is_same_v<tvec, float>) {
         return __uint_as_float(0x7fc00000u); // quite NaN
     }
-    else if constexpr (std::is_same_v<tpos, double>) {
+    else if constexpr (std::is_same_v<tvec, double>) {
         return __longlong_as_double(0x7ff8000000000000ULL); // quite NaN
     }
-    else if constexpr (std::is_same_v<tpos, int32_t>) {
+    else if constexpr (std::is_same_v<tvec, int32_t>) {
         return static_cast<int32_t>(0x7fffffff); // max int32
     }
-    else if constexpr (std::is_same_v<tpos, int64_t>) {
+    else if constexpr (std::is_same_v<tvec, int64_t>) {
         return static_cast<int64_t>(0x7fffffffffffffffLL); // max int64
     } 
     else {
-        return tpos{};
+        return tvec{};
     }
 }
 
-template <typename tpos>
+template <typename tvec>
 __device__ __forceinline__ int min_node_lvl() {
-    if constexpr (std::is_same_v<tpos, float>) {
+    if constexpr (std::is_same_v<tvec, float>) {
         return -450;
     } 
-    else if constexpr (std::is_same_v<tpos, double>) {
+    else if constexpr (std::is_same_v<tvec, double>) {
         return -3225;
     } 
-    else if constexpr (std::is_same_v<tpos, int32_t>) {
+    else if constexpr (std::is_same_v<tvec, int32_t>) {
         return 0;
     } 
-    else if constexpr (std::is_same_v<tpos, int64_t>) {
+    else if constexpr (std::is_same_v<tvec, int64_t>) {
         return 0;
     } 
     else {
-        static_assert(std::is_same_v<tpos, void>, 
+        static_assert(std::is_same_v<tvec, void>, 
             "min_node_lvl<T>: unsupported type. Add a branch for this T."
         );
     }
 }
 
-template <typename tpos>
+template <typename tvec>
 __host__ __device__ __forceinline__ int max_node_lvl() {
-    if constexpr (std::is_same_v<tpos, float>) {
+    if constexpr (std::is_same_v<tvec, float>) {
         return 388; // 128*3 + 3 + 1
     } 
-    else if constexpr (std::is_same_v<tpos, double>) {
+    else if constexpr (std::is_same_v<tvec, double>) {
         return 3075; // unsure about this
     } 
-    else if constexpr (std::is_same_v<tpos, int32_t>) {
+    else if constexpr (std::is_same_v<tvec, int32_t>) {
         return 32;
     } 
-    else if constexpr (std::is_same_v<tpos, int64_t>) {
+    else if constexpr (std::is_same_v<tvec, int64_t>) {
         return 64;
     } 
     else {
-        static_assert(std::is_same_v<tpos, void>, 
+        static_assert(std::is_same_v<tvec, void>, 
             "max_node_lvl<T>: unsupported type. Add a branch for this T."
         );
     }
@@ -292,18 +292,18 @@ __device__ __forceinline__ int32_t msb_xor_double(double a, double b) {
     }
 }
 
-template<typename tpos>
-__device__ __forceinline__ int32_t msb_xor(tpos a, tpos b) {
-    if constexpr (std::is_same_v<tpos, float>) 
+template<typename tvec>
+__device__ __forceinline__ int32_t msb_xor(tvec a, tvec b) {
+    if constexpr (std::is_same_v<tvec, float>) 
         return msb_xor_float(a, b);
-    else if constexpr (std::is_same_v<tpos, double>) {
+    else if constexpr (std::is_same_v<tvec, double>) {
         return msb_xor_double(a, b);
     }
-    else if constexpr (std::is_same_v<tpos, int64_t>) {
+    else if constexpr (std::is_same_v<tvec, int64_t>) {
         uint64_t x = (uint64_t)a ^ (uint64_t)b;
         return 63 - __clzll(x);
     }
-    else if constexpr (std::is_same_v<tpos, int32_t>) {
+    else if constexpr (std::is_same_v<tvec, int32_t>) {
         uint32_t x = (uint32_t)a ^ (uint32_t)b;
         return 31 - __clz(x);
     }
@@ -313,15 +313,15 @@ __device__ __forceinline__ int32_t msb_xor(tpos a, tpos b) {
     }
 }
 
-template<int dim, typename tpos>
+template<int dim, typename tvec>
 __device__ __forceinline__ int32_t msb_diff_level(
-    const Pos<dim,tpos> &pos1, const Pos<dim,tpos> &pos2
+    const Vec<dim,tvec> &pos1, const Vec<dim,tvec> &pos2
 ) {
     int msb_dim = 0;
-    int msb = msb_xor<tpos>(pos1[0], pos2[0]);
+    int msb = msb_xor<tvec>(pos1[0], pos2[0]);
     #pragma unroll
     for(int i=1; i<dim; i++) {
-        int new_msb = msb_xor<tpos>(pos1[i], pos2[i]);
+        int new_msb = msb_xor<tvec>(pos1[i], pos2[i]);
         msb_dim = new_msb > msb ? i : msb_dim;
         msb = new_msb > msb ? new_msb : msb;
     }
@@ -394,10 +394,10 @@ __device__ __forceinline__ bool z_pos_less3(float3 pos1, float3 pos2)
     return pos1.z < pos2.z;
 }
 
-template <int dim, typename tpos> __device__  __forceinline__ bool has_nan(
-    Pos<dim,tpos> pos
+template <int dim, typename tvec> __device__  __forceinline__ bool has_nan(
+    Vec<dim,tvec> pos
 ) {
-    if constexpr (!std::is_floating_point_v<tpos>) {
+    if constexpr (!std::is_floating_point_v<tvec>) {
         return false;
     } else {
         bool any_nan = false;
@@ -410,17 +410,17 @@ template <int dim, typename tpos> __device__  __forceinline__ bool has_nan(
 }
 
 // Whether pos1 should appear before pos2 in a z-order
-template <int dim, typename tpos>
-__device__ __forceinline__ bool z_pos_less(Pos<dim,tpos> pos1, Pos<dim,tpos> pos2)
+template <int dim, typename tvec>
+__device__ __forceinline__ bool z_pos_less(Vec<dim,tvec> pos1, Vec<dim,tvec> pos2)
 {
-    if(has_nan<dim,tpos>(pos1)) return false;
-    if(has_nan<dim,tpos>(pos2)) return true;
+    if(has_nan<dim,tvec>(pos1)) return false;
+    if(has_nan<dim,tvec>(pos2)) return true;
 
     int msb_dim = 0;
-    int msb = msb_xor<tpos>(pos1[0], pos2[0]);
+    int msb = msb_xor<tvec>(pos1[0], pos2[0]);
     #pragma unroll
     for(int i=1; i<dim; i++) {
-        int new_msb = msb_xor<tpos>(pos1[i], pos2[i]);
+        int new_msb = msb_xor<tvec>(pos1[i], pos2[i]);
         msb_dim = new_msb > msb ? i : msb_dim;
         msb = new_msb > msb ? new_msb : msb;
     }
@@ -479,19 +479,19 @@ __device__ __forceinline__ double round_double_pow2_cent(double x, int level)
     }
 }
 
-template <typename tpos>
-__device__ __forceinline__ tpos round_pow2_cent(tpos x, int level) {
-    if constexpr (std::is_same_v<tpos, float>) {
+template <typename tvec>
+__device__ __forceinline__ tvec round_pow2_cent(tvec x, int level) {
+    if constexpr (std::is_same_v<tvec, float>) {
         return round_float_pow2_cent(x, level);
     } 
-    else if constexpr (std::is_same_v<tpos, double>) {
+    else if constexpr (std::is_same_v<tvec, double>) {
         return round_double_pow2_cent(x, level);
     } 
-    else if constexpr (std::is_same_v<tpos, int32_t> || std::is_same_v<tpos, int64_t>) {
+    else if constexpr (std::is_same_v<tvec, int32_t> || std::is_same_v<tvec, int64_t>) {
         if (level <= 0) return x;
         
-        tpos mask = (static_cast<tpos>(-1) << level);
-        tpos center_offset = (static_cast<tpos>(1) << (level - 1));
+        tvec mask = (static_cast<tvec>(-1) << level);
+        tvec center_offset = (static_cast<tvec>(1) << (level - 1));
         
         return (x & mask) | center_offset;
     }
@@ -523,7 +523,7 @@ __device__ __forceinline__ float distance_squared(const float3 &a, const float3 
 }
 
 template<int dim>
-__device__ __forceinline__ Pos<dim,int32_t> lvl_vec(const int level) {
+__device__ __forceinline__ Vec<dim,int32_t> lvl_vec(const int level) {
     // Converts a node's or leaf's binary level to its level per dimension
 
     // CUDA's integer division does not what we want for negative numbers. 
@@ -532,7 +532,7 @@ __device__ __forceinline__ Pos<dim,int32_t> lvl_vec(const int level) {
     int olvl = (level + 2000*dim) / dim - 2000;
     int omod = level - olvl * dim;
 
-    Pos<dim,int32_t> lvec;
+    Vec<dim,int32_t> lvec;
     #pragma unroll
     for(int i=0; i<dim; i++) {
         lvec[i] = olvl + (omod >= (dim-i));
@@ -556,40 +556,40 @@ __device__ __forceinline__ int3 lvl_xyz_old(const int level) {
     return int3{lx, ly, lz};
 }
 
-template <typename tpos>
-__device__ __forceinline__ tpos pow2(tpos val, int pow) {
-    if constexpr (std::is_same_v<tpos, float>)
+template <typename tvec>
+__device__ __forceinline__ tvec pow2(tvec val, int pow) {
+    if constexpr (std::is_same_v<tvec, float>)
         return ldexpf(val, pow);
-    else if constexpr (std::is_same_v<tpos, double>)
+    else if constexpr (std::is_same_v<tvec, double>)
         return ldexp(val, pow);
-    else if constexpr (std::is_same_v<tpos, int32_t>)
+    else if constexpr (std::is_same_v<tvec, int32_t>)
         return pow >= 0 ? val << pow : val >> -pow;
-    else if constexpr (std::is_same_v<tpos, int64_t>)
+    else if constexpr (std::is_same_v<tvec, int64_t>)
         return pow >= 0 ? val << pow : val >> -pow;
 }
 
-template <int dim, typename tpos>
-__device__ __forceinline__ Pos<dim, tpos> LvlToExt(const int level) {
+template <int dim, typename tvec>
+__device__ __forceinline__ Vec<dim, tvec> LvlToExt(const int level) {
     // Converts a node's or leaf's binary level to its extend per dimension
-    Pos<dim,int32_t> l = lvl_vec<dim>(level);
-    Pos<dim,tpos> ext;
+    Vec<dim,int32_t> l = lvl_vec<dim>(level);
+    Vec<dim,tvec> ext;
     
     #pragma unroll
     for(int i=0; i<dim; i++)
-        ext[i] = pow2(static_cast<tpos>(1.0), l[i]);
+        ext[i] = pow2(static_cast<tvec>(1.0), l[i]);
         
     return ext;
 }
 
-template <int dim, typename tpos>
-__device__ __forceinline__ Pos<dim, tpos> LvlToHalfExt(const int level) {
+template <int dim, typename tvec>
+__device__ __forceinline__ Vec<dim, tvec> LvlToHalfExt(const int level) {
     // Converts a node's or leaf's binary level to its extend per dimension
-    Pos<dim,int32_t> l = lvl_vec<dim>(level);
-    Pos<dim,tpos> ext;
+    Vec<dim,int32_t> l = lvl_vec<dim>(level);
+    Vec<dim,tvec> ext;
     
     #pragma unroll
     for(int i=0; i<dim; i++)
-        ext[i] = pow2(static_cast<tpos>(1.0), l[i]-1);
+        ext[i] = pow2(static_cast<tvec>(1.0), l[i]-1);
         
     return ext;
 }
@@ -615,26 +615,26 @@ __device__ __forceinline__ NodeWithExtOld NodeLvlToHalfExtOld(Node node) {
     return node_ext;
 }
 
-template<int dim, typename tpos>
-__device__ __forceinline__ Pos<dim,tpos> LvlToCenter(const Pos<dim,tpos> pos, const int level) {
-    Pos<dim,int32_t> l = lvl_vec<dim>(level);
+template<int dim, typename tvec>
+__device__ __forceinline__ Vec<dim,tvec> LvlToCenter(const Vec<dim,tvec> pos, const int level) {
+    Vec<dim,int32_t> l = lvl_vec<dim>(level);
     
-    Pos<dim,tpos> res;
+    Vec<dim,tvec> res;
     for(int i=0; i<dim; i++) {
-        res[i] = round_pow2_cent<tpos>(pos[i], l[i]);
+        res[i] = round_pow2_cent<tvec>(pos[i], l[i]);
     }
     return res;
 }
 
-template<int dim, typename tpos>
-__device__ __forceinline__ NodeWithExt<dim,tpos> get_common_node(
-    const Pos<dim,tpos> p1, const Pos<dim,tpos> p2
+template<int dim, typename tvec>
+__device__ __forceinline__ NodeWithExt<dim,tvec> get_common_node(
+    const Vec<dim,tvec> p1, const Vec<dim,tvec> p2
 ) {
-    int lvl = msb_diff_level<dim,tpos>(p1, p2);
+    int lvl = msb_diff_level<dim,tvec>(p1, p2);
 
-    NodeWithExt<dim,tpos> node;
-    node.center = LvlToCenter<dim,tpos>(p1, lvl);
-    node.extent = LvlToExt<dim,tpos>(lvl);
+    NodeWithExt<dim,tvec> node;
+    node.center = LvlToCenter<dim,tvec>(p1, lvl);
+    node.extent = LvlToExt<dim,tvec>(lvl);
     return node;
 }
 
@@ -683,8 +683,8 @@ __device__ __forceinline__ float NodeNodeMaxDist2(const Node& nodeA, const Node&
 /*                                     Warp and Group helpers                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<typename tpos>
-__device__ __forceinline__ tpos warp_reduce_sum(tpos v) {
+template<typename tvec>
+__device__ __forceinline__ tvec warp_reduce_sum(tvec v) {
     #pragma unroll
     for (int offset = 16; offset > 0; offset >>= 1)
         v += __shfl_down_sync(__activemask(), v, offset);

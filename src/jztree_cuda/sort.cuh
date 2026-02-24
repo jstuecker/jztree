@@ -33,19 +33,19 @@ __global__ void DtypeTest(
 /* ---------------------------------------------------------------------------------------------- */
 
 // Wrapper of the z-order comparison function to use with CUB
-template <int dim, typename tpos>
+template <int dim, typename tvec>
 struct PosIdLess {
     __device__ __forceinline__
-    bool operator()(const PosId<dim,tpos> &a, const PosId<dim,tpos> &b) {
-        return z_pos_less<dim,tpos>(a.pos, b.pos);
+    bool operator()(const PosId<dim,tvec> &a, const PosId<dim,tvec> &b) {
+        return z_pos_less<dim,tvec>(a.pos, b.pos);
     }
 };
 
 // Prepare keys and ids for sorting
-template <int dim=3, typename tpos>
+template <int dim=3, typename tvec>
 __global__ void PosKeyArangeKernel(
-    const Pos<dim, tpos>* pos_in,
-    PosId<dim, tpos> *keyid_out,
+    const Vec<dim, tvec>* pos_in,
+    PosId<dim, tvec> *keyid_out,
     size_t n
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -55,18 +55,18 @@ __global__ void PosKeyArangeKernel(
     }
 }
 
-template<int dim, typename tpos>
+template<int dim, typename tvec>
 std::string PosZorderSort(
     cudaStream_t stream, 
-    const Pos<dim, tpos>* pos_in, 
-    PosId<dim, tpos>* pos_id_out,
+    const Vec<dim, tvec>* pos_in, 
+    PosId<dim, tvec>* pos_id_out,
     int* tmp_buffer,
     size_t size,
     size_t tmp_bytes,
     size_t block_size
 ) {
     // Initialize indices 0, 1, 2, ..., size-1
-    PosKeyArangeKernel<dim, tpos><<< div_ceil(size, block_size), block_size, 0, stream>>>(
+    PosKeyArangeKernel<dim, tvec><<< div_ceil(size, block_size), block_size, 0, stream>>>(
         pos_in, pos_id_out, size
     );
 
@@ -82,8 +82,8 @@ std::string PosZorderSort(
 
     // find out the required storage size
     size_t required_storage_bytes = 0;
-    cub::DeviceMergeSort::SortKeys<PosId<dim, tpos>*, int64_t, PosIdLess<dim, tpos>>(
-        nullptr, required_storage_bytes, pos_id_out, size, PosIdLess<dim, tpos>()
+    cub::DeviceMergeSort::SortKeys<PosId<dim, tvec>*, int64_t, PosIdLess<dim, tvec>>(
+        nullptr, required_storage_bytes, pos_id_out, size, PosIdLess<dim, tvec>()
     );
     
     // Check if the provided buffer is large enough
@@ -96,8 +96,8 @@ std::string PosZorderSort(
     }
 
     // Run the sort
-    cub::DeviceMergeSort::SortKeys<PosId<dim, tpos>*, int64_t, PosIdLess<dim, tpos>>(
-        tmp_buffer, required_storage_bytes, pos_id_out, size, PosIdLess<dim, tpos>(), stream
+    cub::DeviceMergeSort::SortKeys<PosId<dim, tvec>*, int64_t, PosIdLess<dim, tvec>>(
+        tmp_buffer, required_storage_bytes, pos_id_out, size, PosIdLess<dim, tvec>(), stream
     );
     
     return std::string();
@@ -107,10 +107,10 @@ std::string PosZorderSort(
 /*                                          SearchSortedZ                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<int dim, typename tpos>
+template<int dim, typename tvec>
 __global__ void SearchSortedZ(
-    const Pos<dim,tpos>* posz_have,
-    const Pos<dim,tpos>* posz_query,
+    const Vec<dim,tvec>* posz_have,
+    const Vec<dim,tvec>* posz_query,
     int32_t* indices,
     size_t n_have,
     size_t n_query,
@@ -120,14 +120,14 @@ __global__ void SearchSortedZ(
     if (idx >= n_query)
         return;
 
-    Pos<dim,tpos> xquery = posz_query[idx];
+    Vec<dim,tvec> xquery = posz_query[idx];
 
     // Binary search for the indices between which xquery would need to be inserted to 
     // maintain order
     int imin = 0, imax = n_have;
     while (imin+1 < imax) {
         int itest = (imin + imax) >> 1;
-        if (z_pos_less<dim,tpos>(posz_have[itest], xquery)) {
+        if (z_pos_less<dim,tvec>(posz_have[itest], xquery)) {
             imin = itest;
         } else {
             imax = itest;
@@ -138,8 +138,8 @@ __global__ void SearchSortedZ(
     if(leaf_search) {
         // In this scenario, we need to learn whether the particle belongs to the left or right leaf
         // it always belongs to the one with the smaller difference level
-        int lv1 = msb_diff_level<dim,tpos>(posz_have[imin], xquery);
-        int lv2 = (imax < n_have) ? msb_diff_level<dim,tpos>(posz_have[imax], xquery) : 388;
+        int lv1 = msb_diff_level<dim,tvec>(posz_have[imin], xquery);
+        int lv2 = (imax < n_have) ? msb_diff_level<dim,tvec>(posz_have[imax], xquery) : 388;
         if(lv1 <= lv2)
             iout = imin;
         else
@@ -149,9 +149,9 @@ __global__ void SearchSortedZ(
         // If we are doing a normal binary search, the index is in general imin + 1
         // and we only need to take care of the boundary cases
         if(imin == 0)
-            iout = z_pos_less<dim,tpos>(posz_have[0], xquery) ? 1 : 0;
+            iout = z_pos_less<dim,tvec>(posz_have[0], xquery) ? 1 : 0;
         else if(imin == n_have - 1)
-            iout = z_pos_less<dim,tpos>(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
+            iout = z_pos_less<dim,tvec>(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
         else
             iout = imin + 1;
     }

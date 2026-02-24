@@ -133,7 +133,7 @@ using PosZorderSortDispatchFn = std::string (*) (cudaStream_t stream,
     size_t tmp_bytes,
     size_t block_size
 );
-template<int dim, typename tpos>
+template<int dim, typename tvec>
 static std::string PosZorderSortDispatchWrapper(cudaStream_t stream,
     const void* pos_in,
     void* pos_id_out,
@@ -142,9 +142,9 @@ static std::string PosZorderSortDispatchWrapper(cudaStream_t stream,
     size_t tmp_bytes,
     size_t block_size
 ) {
-    return PosZorderSort<dim, tpos> (stream,
-        reinterpret_cast<const Pos<dim, tpos>*>(pos_in),
-        reinterpret_cast<PosId<dim, tpos>*>(pos_id_out),
+    return PosZorderSort<dim, tvec> (stream,
+        reinterpret_cast<const Vec<dim, tvec>*>(pos_in),
+        reinterpret_cast<PosId<dim, tvec>*>(pos_id_out),
         reinterpret_cast<int*>(tmp_buffer),
         size,
         tmp_bytes,
@@ -163,7 +163,7 @@ ffi::Error PosZorderSortFFIHost(
     size_t size = pos_in.dimensions()[0];
     size_t tmp_bytes = tmp_buffer->size_bytes();
     int dim = pos_in.dimensions()[1];
-    DT tpos = pos_in.element_type();
+    DT tvec = pos_in.element_type();
 
 
     // We have template parameters, so we need to instantiate all valid templates.
@@ -174,22 +174,18 @@ ffi::Error PosZorderSortFFIHost(
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &PosZorderSortDispatchWrapper<2, float> },
         { {2, DT::F64}, &PosZorderSortDispatchWrapper<2, double> },
-        { {2, DT::S32}, &PosZorderSortDispatchWrapper<2, int32_t> },
-        { {2, DT::S64}, &PosZorderSortDispatchWrapper<2, int64_t> },
         { {3, DT::F32}, &PosZorderSortDispatchWrapper<3, float> },
-        { {3, DT::F64}, &PosZorderSortDispatchWrapper<3, double> },
-        { {3, DT::S32}, &PosZorderSortDispatchWrapper<3, int32_t> },
-        { {3, DT::S64}, &PosZorderSortDispatchWrapper<3, int64_t> }
+        { {3, DT::F64}, &PosZorderSortDispatchWrapper<3, double> }
     };
 
-    const TTuple key = TTuple(dim, tpos);
+    const TTuple key = TTuple(dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim, tpos)"\
+            "\nUnsupported template parameter combination for (dim, tvec)"\
             " in PosZorderSortFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     PosZorderSortDispatchFn instance = it->second;
@@ -242,7 +238,7 @@ ffi::Error SearchSortedZFFIHost(
     size_t n_have = posz_have.dimensions()[0];
     size_t n_query = posz_query.dimensions()[0];
     int dim = posz_have.dimensions()[1];
-    DT tpos = posz_have.element_type();
+    DT tvec = posz_have.element_type();
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(n_query, block_size));
     size_t smem = 0;
@@ -269,18 +265,22 @@ ffi::Error SearchSortedZFFIHost(
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<2, float>) },
         { {2, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<2, double>) },
+        { {2, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<2, int32_t>) },
+        { {2, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<2, int64_t>) },
         { {3, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<3, float>) },
-        { {3, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<3, double>) }
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<3, double>) },
+        { {3, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<3, int32_t>) },
+        { {3, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<3, int64_t>) }
     };
 
-    const TTuple key = TTuple(dim, tpos);
+    const TTuple key = TTuple(dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim, tpos)"\
+            "\nUnsupported template parameter combination for (dim, tvec)"\
             " in SearchSortedZFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t)"
         );
     }
     const void* instance = it->second;

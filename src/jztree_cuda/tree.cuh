@@ -10,9 +10,9 @@
 /*                                      DetectLeafBoundaries                                      */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<int dim, typename tpos>
+template<int dim, typename tvec>
 __global__ void FlagLeafBoundaries(
-    const Pos<dim,tpos>* posz,
+    const Vec<dim,tvec>* posz,
     const int* lvl_bound,
     const int* npart,
     int8_t* split_flags,
@@ -44,7 +44,7 @@ __global__ void FlagLeafBoundaries(
         else if(ipart + 1 >= nump)
             level[i] = lbound_r;
         else
-            level[i] = msb_diff_level<dim,tpos>(posz[ipart], posz[ipart + 1]);
+            level[i] = msb_diff_level<dim,tvec>(posz[ipart], posz[ipart + 1]);
     }
     __syncthreads();
 
@@ -84,10 +84,10 @@ __global__ void FlagLeafBoundaries(
 /*                                          Tree Building                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<int dim, typename tpos>
+template<int dim, typename tvec>
 __global__ void FindNodeBoundaries(
-    const Pos<dim,tpos>* pos_in,
-    const Pos<dim,tpos>* pos_boundary,
+    const Vec<dim,tvec>* pos_in,
+    const Vec<dim,tvec>* pos_boundary,
     const int *nleaves,
     int32_t* nodes_levels,
     int32_t* nodes_lbound,
@@ -111,7 +111,7 @@ __global__ void FindNodeBoundaries(
 
     int target_level, lvl_left, lvl_right;
     int lbound, rbound;
-    Pos<dim,tpos> p1, p2;
+    Vec<dim,tvec> p1, p2;
 
     // Calculate the level difference of our considered set of two points (=node)
     if(idx == 0)
@@ -125,9 +125,9 @@ __global__ void FindNodeBoundaries(
 
     // Our node includes at least [idx-1, idx] and it goes up to the left until a
     // point has a level difference that is larger han target_level:
-    target_level = msb_diff_level<dim,tpos>(p1, p2);
+    target_level = msb_diff_level<dim,tvec>(p1, p2);
 
-    if(msb_diff_level<dim,tpos>(pos_in[0], p2) <= target_level) {
+    if(msb_diff_level<dim,tvec>(pos_in[0], p2) <= target_level) {
         // Node goes until left-domain boundary... We have no left parent
         lbound = 0;
         lvl_left = 388; // larger than any possible level
@@ -138,20 +138,20 @@ __global__ void FindNodeBoundaries(
         lvl_left = 388;
         while (ibefore+1 < iinside) {
             int itest = (ibefore + iinside) / 2;
-            lvl_left = msb_diff_level<dim,tpos>(pos_in[itest], p2);
+            lvl_left = msb_diff_level<dim,tvec>(pos_in[itest], p2);
             if (lvl_left > target_level) {
                 ibefore = itest;
             } else {
                 iinside = itest;
             }
         }
-        lvl_left = msb_diff_level<dim,tpos>(p1, pos_in[ibefore]);
+        lvl_left = msb_diff_level<dim,tvec>(p1, pos_in[ibefore]);
         lbound = iinside;
     }
 
 
     // Now find the right side parent
-    if(msb_diff_level<dim,tpos>(p1, pos_in[n-1]) <= target_level)
+    if(msb_diff_level<dim,tvec>(p1, pos_in[n-1]) <= target_level)
     {
         rbound = n;
         lvl_right = 388;
@@ -162,7 +162,7 @@ __global__ void FindNodeBoundaries(
         lvl_right = 388;
         while (iinside+1 < iafter) {
             int itest = (iinside + iafter) / 2;
-            lvl_right = msb_diff_level<dim,tpos>(p1, pos_in[itest]);
+            lvl_right = msb_diff_level<dim,tvec>(p1, pos_in[itest]);
             if (lvl_right > target_level) {
                 iafter = itest;
             } else {
@@ -171,7 +171,7 @@ __global__ void FindNodeBoundaries(
         }
 
         rbound = iafter;
-        lvl_right = msb_diff_level<dim,tpos>(p1, pos_in[rbound]);
+        lvl_right = msb_diff_level<dim,tvec>(p1, pos_in[rbound]);
     }
 
     nodes_levels[idx] = target_level;
@@ -197,11 +197,11 @@ __global__ void KernelInitLevels(
         index_of_lvl[ilvl] = irange[0];
 }
 
-template<bool left, int dim, typename tpos>
+template<bool left, int dim, typename tvec>
 __global__ void KernelGetBoundaryExtendPerLevel(
-    const Pos<dim,tpos>* pos_ref,
+    const Vec<dim,tvec>* pos_ref,
     const int* irange,
-    const Pos<dim,tpos>* posz,
+    const Vec<dim,tvec>* posz,
     int32_t* index_of_lvl,
     const int lvl_min,
     const int lvl_max
@@ -214,10 +214,10 @@ __global__ void KernelGetBoundaryExtendPerLevel(
     if(idx >= irange[1])
         return;
 
-    Pos<dim,tpos> x0 = pos_ref[0];
-    Pos<dim,tpos> x1 = posz[idx];
+    Vec<dim,tvec> x0 = pos_ref[0];
+    Vec<dim,tvec> x1 = posz[idx];
 
-    int lvl = msb_diff_level<dim,tpos>(x0, x1);
+    int lvl = msb_diff_level<dim,tvec>(x0, x1);
 
     int ilvl = max(min(lvl, lvl_max) - lvl_min, 0);
 
@@ -252,12 +252,12 @@ __global__ void KernelPostProcessLevels(
     index_of_lvl[ilvl] = idx;
 }
 
-template<bool left, int dim, typename tpos>
+template<bool left, int dim, typename tvec>
 std::string GetBoundaryExtendPerLevel(
     cudaStream_t stream, 
-    const Pos<dim,tpos>* pos_ref,
+    const Vec<dim,tvec>* pos_ref,
     const int* irange,
-    const Pos<dim,tpos>* posz,
+    const Vec<dim,tvec>* posz,
     int32_t* index_of_lvl,
     const int size,
     const size_t block_size
@@ -272,7 +272,7 @@ std::string GetBoundaryExtendPerLevel(
         irange, index_of_lvl, lvl_min, lvl_max
     );
 
-    KernelGetBoundaryExtendPerLevel<left,dim,tpos><<< div_ceil(size, block_size), block_size, 0, stream>>>(
+    KernelGetBoundaryExtendPerLevel<left,dim,tvec><<< div_ceil(size, block_size), block_size, 0, stream>>>(
         pos_ref, irange, posz, index_of_lvl, lvl_min, lvl_max
     );
 
@@ -291,15 +291,15 @@ __device__ int clip(int a, int imin, int imax) {
     return min(max(a, imin), imax);
 }
 
-template<int dim, typename tpos>
+template<int dim, typename tvec>
 __global__ void GetNodeGeometry(
-    const Pos<dim,tpos>* pos,
+    const Vec<dim,tvec>* pos,
     const int* lbound,
     const int* rbound,
     const int *nnodes,
     int32_t* level,
-    Pos<dim,tpos>* center,
-    Pos<dim,tpos>* extent,
+    Vec<dim,tvec>* center,
+    Vec<dim,tvec>* extent,
     const int size_nodes,
     const int size_part
 ) {
@@ -310,16 +310,16 @@ __global__ void GetNodeGeometry(
         return;
     if(idx >= nnodes[0]) {
         level[idx] = -1000;
-        center[idx] = Pos<3,tpos>::constant(invalid_val<tpos>()); // !!! Fix later
-        extent[idx] = Pos<3,tpos>::constant(0);
+        center[idx] = Vec<3,tvec>::constant(invalid_val<tvec>()); // !!! Fix later
+        extent[idx] = Vec<3,tvec>::constant(0);
         return;
     }
     
-    Pos<dim,tpos> x0 = pos[clip(lbound[idx], 0, size_part-1)];
-    Pos<dim,tpos> x1 = pos[clip(rbound[idx]-1, 0, size_part-1)];
+    Vec<dim,tvec> x0 = pos[clip(lbound[idx], 0, size_part-1)];
+    Vec<dim,tvec> x1 = pos[clip(rbound[idx]-1, 0, size_part-1)];
 
-    int lvl = msb_diff_level<dim,tpos>(x0, x1);
-    NodeWithExt<dim,tpos> node_ext = get_common_node<dim,tpos>(x0, x1);
+    int lvl = msb_diff_level<dim,tvec>(x0, x1);
+    NodeWithExt<dim,tvec> node_ext = get_common_node<dim,tvec>(x0, x1);
 
     level[idx] = lvl;
     center[idx] = node_ext.center;

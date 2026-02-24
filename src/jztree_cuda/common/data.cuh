@@ -36,41 +36,41 @@ struct __align__(16) PosIdOld {
 //     int32_t id;
 // };
 
-template<int dim, typename tpos>
-struct Pos {
-  tpos v[dim];
+template<int dim, typename tvec>
+struct Vec {
+  tvec v[dim];
 
   __host__ __device__ __forceinline__
-  static Pos constant(tpos val) {
-    Pos p;
+  static Vec constant(tvec val) {
+    Vec p;
     #pragma unroll
     for (int i = 0; i < dim; ++i) p.v[i] = val;
     return p;
   }
 
   __host__ __device__ __forceinline__
-  tpos& operator[](int i) { return v[i]; }
+  tvec& operator[](int i) { return v[i]; }
 
   __host__ __device__ __forceinline__
-  const tpos& operator[](int i) const { return v[i]; }
+  const tvec& operator[](int i) const { return v[i]; }
 
   __host__ __device__ __forceinline__
-  tpos* data() { return v; }
+  tvec* data() { return v; }
 
   __host__ __device__ __forceinline__
-  const tpos* data() const { return v; }
+  const tvec* data() const { return v; }
 };
 
-template <int dim, typename tpos>
+template <int dim, typename tvec>
 struct PosId {
-    Pos<dim, tpos> pos;
+    Vec<dim, tvec> pos;
     int32_t id;
 };
 
-template <int dim, typename tpos>
+template <int dim, typename tvec>
 struct NodeWithExt {
-    Pos<dim,tpos> center;
-    Pos<dim,tpos> extent;
+    Vec<dim,tvec> center;
+    Vec<dim,tvec> extent;
 };
 
 struct __align__(16) ForcePot {

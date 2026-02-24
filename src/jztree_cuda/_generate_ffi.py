@@ -15,8 +15,8 @@ default_includes = ["../common/math.cuh"]
 def add_dim_dtype_templates(func, buf_from, dimensions=dimensions, pos_types=pos_types):
     func.template_par["dim"].instances = dimensions
     func.template_par["dim"].expression = f"{buf_from}.dimensions()[1]"
-    func.template_par["tpos"].instances = pos_types
-    func.template_par["tpos"].expression = f"{buf_from}.element_type()"
+    func.template_par["tvec"].instances = pos_types
+    func.template_par["tvec"].expression = f"{buf_from}.element_type()"
 
 # ------------------------------------------------------------------------------------------------ #
 #                                              knn.cuh                                             #
@@ -93,17 +93,19 @@ functions["DtypeTest"].template_par["out_type"].instances = ("float", "double")
 functions["DtypeTest"].template_par["out_type"].expression = "out->element_type()"
 functions["DtypeTest"].template_par["offset"].instances = (0, 10)
 
-functions["PosZorderSort"].template_par["dim"].instances = dimensions
-functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions()[1]"
-functions["PosZorderSort"].template_par["tpos"].instances = pos_types_sort
-functions["PosZorderSort"].template_par["tpos"].expression = "pos_in.element_type()"
+# functions["PosZorderSort"].template_par["dim"].instances = dimensions
+# functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions()[1]"
+# functions["PosZorderSort"].template_par["tvec"].instances = pos_types_sort
+# functions["PosZorderSort"].template_par["tvec"].expression = "pos_in.element_type()"
+add_dim_dtype_templates(functions["PosZorderSort"], "pos_in")
 functions["PosZorderSort"].par["size"].expression = "pos_in.dimensions()[0]"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
 
-functions["SearchSortedZ"].template_par["dim"].instances = dimensions
-functions["SearchSortedZ"].template_par["dim"].expression = "posz_have.dimensions()[1]"
-functions["SearchSortedZ"].template_par["tpos"].instances = pos_types
-functions["SearchSortedZ"].template_par["tpos"].expression = "posz_have.element_type()"
+# functions["SearchSortedZ"].template_par["dim"].instances = dimensions
+# functions["SearchSortedZ"].template_par["dim"].expression = "posz_have.dimensions()[1]"
+# functions["SearchSortedZ"].template_par["tvec"].instances = pos_types
+# functions["SearchSortedZ"].template_par["tvec"].expression = "posz_have.element_type()"
+add_dim_dtype_templates(functions["SearchSortedZ"], "posz_have", pos_types=pos_types_sort)
 functions["SearchSortedZ"].par["n_have"].expression = "posz_have.dimensions()[0]"
 functions["SearchSortedZ"].par["n_query"].expression = "posz_query.dimensions()[0]"
 functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"

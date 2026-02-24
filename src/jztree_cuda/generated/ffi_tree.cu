@@ -41,7 +41,7 @@ ffi::Error FlagLeafBoundariesFFIHost(
 ) {
     int size_part = posz.element_count()/3;
     int dim = posz.dimensions()[1];
-    DT tpos = posz.element_type();
+    DT tvec = posz.element_type();
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(size_part+1, block_size));
     size_t smem = (block_size + 2*scan_size + 1) * sizeof(int32_t);
@@ -76,12 +76,12 @@ ffi::Error FlagLeafBoundariesFFIHost(
         { {3, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<3, double>) }
     };
 
-    const TTuple key = TTuple(dim, tpos);
+    const TTuple key = TTuple(dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim, tpos)"\
+            "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FlagLeafBoundariesFFIHost -- Only supporting:\n"\
             "(2, float), (2, double), (3, float), (3, double)"
         );
@@ -136,7 +136,7 @@ ffi::Error FindNodeBoundariesFFIHost(
 ) {
     int size_nodes = nodes_levels->element_count();
     int dim = pos_in.dimensions()[1];
-    DT tpos = pos_in.element_type();
+    DT tvec = pos_in.element_type();
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(size_nodes, block_size));
     size_t smem = 0;
@@ -171,12 +171,12 @@ ffi::Error FindNodeBoundariesFFIHost(
         { {3, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<3, double>) }
     };
 
-    const TTuple key = TTuple(dim, tpos);
+    const TTuple key = TTuple(dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim, tpos)"\
+            "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FindNodeBoundariesFFIHost -- Only supporting:\n"\
             "(2, float), (2, double), (3, float), (3, double)"
         );
@@ -226,7 +226,7 @@ using GetBoundaryExtendPerLevelDispatchFn = std::string (*) (cudaStream_t stream
     int size,
     size_t block_size
 );
-template<bool left, int dim, typename tpos>
+template<bool left, int dim, typename tvec>
 static std::string GetBoundaryExtendPerLevelDispatchWrapper(cudaStream_t stream,
     const void* pos_ref,
     const void* irange,
@@ -235,10 +235,10 @@ static std::string GetBoundaryExtendPerLevelDispatchWrapper(cudaStream_t stream,
     int size,
     size_t block_size
 ) {
-    return GetBoundaryExtendPerLevel<left, dim, tpos> (stream,
-        reinterpret_cast<const Pos<dim,tpos>*>(pos_ref),
+    return GetBoundaryExtendPerLevel<left, dim, tvec> (stream,
+        reinterpret_cast<const Vec<dim,tvec>*>(pos_ref),
         reinterpret_cast<const int*>(irange),
-        reinterpret_cast<const Pos<dim,tpos>*>(posz),
+        reinterpret_cast<const Vec<dim,tvec>*>(posz),
         reinterpret_cast<int32_t*>(index_of_lvl),
         size,
         block_size
@@ -257,7 +257,7 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
 ) {
     int size = posz.element_count()/3;
     int dim = posz.dimensions()[1];
-    DT tpos = posz.element_type();
+    DT tvec = posz.element_type();
 
 
     // We have template parameters, so we need to instantiate all valid templates.
@@ -276,12 +276,12 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
         { {false, 3, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 3, double> }
     };
 
-    const TTuple key = TTuple(left, dim, tpos);
+    const TTuple key = TTuple(left, dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (left, dim, tpos)"\
+            "\nUnsupported template parameter combination for (left, dim, tvec)"\
             " in GetBoundaryExtendPerLevelFFIHost -- Only supporting:\n"\
             "(true, 2, float), (true, 2, double), (true, 3, float), (true, 3, double), (false, 2, float), (false, 2, double), (false, 3, float), (false, 3, double)"
         );
@@ -341,7 +341,7 @@ ffi::Error GetNodeGeometryFFIHost(
     int size_nodes = level->element_count();
     int size_part = pos.element_count()/3;
     int dim = pos.dimensions()[1];
-    DT tpos = pos.element_type();
+    DT tvec = pos.element_type();
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(size_nodes, block_size));
     size_t smem = 0;
@@ -376,12 +376,12 @@ ffi::Error GetNodeGeometryFFIHost(
         { {3, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<3, float>) }
     };
 
-    const TTuple key = TTuple(dim, tpos);
+    const TTuple key = TTuple(dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim, tpos)"\
+            "\nUnsupported template parameter combination for (dim, tvec)"\
             " in GetNodeGeometryFFIHost -- Only supporting:\n"\
             "(3, float)"
         );
