@@ -43,7 +43,7 @@ __global__ void FlagLeafBoundaries(
         else if(ipart + 1 >= nump)
             level[i] = lbound_r;
         else
-            level[i] = msb_diff_level(posz[ipart], posz[ipart + 1]);
+            level[i] = msb_diff_level_old(posz[ipart], posz[ipart + 1]);
     }
     __syncthreads();
 
@@ -123,9 +123,9 @@ __global__ void FindNodeBoundaries(
 
     // Our node includes at least [idx-1, idx] and it goes up to the left until a
     // point has a level difference that is larger han target_level:
-    target_level = msb_diff_level(p1, p2);
+    target_level = msb_diff_level_old(p1, p2);
 
-    if(msb_diff_level(pos_in[0], p2) <= target_level) {
+    if(msb_diff_level_old(pos_in[0], p2) <= target_level) {
         // Node goes until left-domain boundary... We have no left parent
         lbound = 0;
         lvl_left = 388; // larger than any possible level
@@ -136,20 +136,20 @@ __global__ void FindNodeBoundaries(
         lvl_left = 388;
         while (ibefore+1 < iinside) {
             int itest = (ibefore + iinside) / 2;
-            lvl_left = msb_diff_level(pos_in[itest], p2);
+            lvl_left = msb_diff_level_old(pos_in[itest], p2);
             if (lvl_left > target_level) {
                 ibefore = itest;
             } else {
                 iinside = itest;
             }
         }
-        lvl_left = msb_diff_level(p1, pos_in[ibefore]);
+        lvl_left = msb_diff_level_old(p1, pos_in[ibefore]);
         lbound = iinside;
     }
 
 
     // Now find the right side parent
-    if(msb_diff_level(p1, pos_in[n-1]) <= target_level)
+    if(msb_diff_level_old(p1, pos_in[n-1]) <= target_level)
     {
         rbound = n;
         lvl_right = 388;
@@ -160,7 +160,7 @@ __global__ void FindNodeBoundaries(
         lvl_right = 388;
         while (iinside+1 < iafter) {
             int itest = (iinside + iafter) / 2;
-            lvl_right = msb_diff_level(p1, pos_in[itest]);
+            lvl_right = msb_diff_level_old(p1, pos_in[itest]);
             if (lvl_right > target_level) {
                 iafter = itest;
             } else {
@@ -169,7 +169,7 @@ __global__ void FindNodeBoundaries(
         }
 
         rbound = iafter;
-        lvl_right = msb_diff_level(p1, pos_in[rbound]);
+        lvl_right = msb_diff_level_old(p1, pos_in[rbound]);
     }
 
     nodes_levels[idx] = target_level;
@@ -215,7 +215,7 @@ __global__ void KernelGetBoundaryExtendPerLevel(
     float3 x0 = pos_ref[0];
     float3 x1 = posz[idx];
 
-    int lvl = msb_diff_level(x0, x1);
+    int lvl = msb_diff_level_old(x0, x1);
 
     int ilvl = max(min(lvl, lvl_max) - lvl_min, 0);
 
@@ -315,10 +315,10 @@ __global__ void GetNodeGeometry(
     float3 x0 = pos[clip(lbound[idx], 0, size_part-1)];
     float3 x1 = pos[clip(rbound[idx]-1, 0, size_part-1)];
 
-    int lvl = msb_diff_level(x0, x1);
+    int lvl = msb_diff_level_old(x0, x1);
     NodeWithExt node_ext = get_common_node(x0, x1);
 
-    level[idx] = msb_diff_level(x0, x1);
+    level[idx] = msb_diff_level_old(x0, x1);
     center[idx] = node_ext.center;
     extent[idx] = node_ext.extent;
 }

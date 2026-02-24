@@ -107,9 +107,10 @@ std::string PosZorderSort(
 /*                                          SearchSortedZ                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
+template<int dim, typename tpos>
 __global__ void SearchSortedZ(
-    const float3* posz_have,
-    const float3* posz_query,
+    const Pos<dim,tpos>* posz_have,
+    const Pos<dim,tpos>* posz_query,
     int32_t* indices,
     size_t n_have,
     size_t n_query,
@@ -119,14 +120,14 @@ __global__ void SearchSortedZ(
     if (idx >= n_query)
         return;
 
-    float3 xquery = posz_query[idx];
+    Pos<dim,tpos> xquery = posz_query[idx];
 
     // Binary search for the indices between which xquery would need to be inserted to 
     // maintain order
     int imin = 0, imax = n_have;
     while (imin+1 < imax) {
         int itest = (imin + imax) >> 1;
-        if (z_pos_less3(posz_have[itest], xquery)) {
+        if (z_pos_less<dim,tpos>(posz_have[itest], xquery)) {
             imin = itest;
         } else {
             imax = itest;
@@ -137,8 +138,8 @@ __global__ void SearchSortedZ(
     if(leaf_search) {
         // In this scenario, we need to learn whether the particle belongs to the left or right leaf
         // it always belongs to the one with the smaller difference level
-        int lv1 = msb_diff_level(posz_have[imin], xquery);
-        int lv2 = (imax < n_have) ? msb_diff_level(posz_have[imax], xquery) : 388;
+        int lv1 = msb_diff_level<dim,tpos>(posz_have[imin], xquery);
+        int lv2 = (imax < n_have) ? msb_diff_level<dim,tpos>(posz_have[imax], xquery) : 388;
         if(lv1 <= lv2)
             iout = imin;
         else
@@ -148,9 +149,9 @@ __global__ void SearchSortedZ(
         // If we are doing a normal binary search, the index is in general imin + 1
         // and we only need to take care of the boundary cases
         if(imin == 0)
-            iout = z_pos_less3(posz_have[0], xquery) ? 1 : 0;
+            iout = z_pos_less<dim,tpos>(posz_have[0], xquery) ? 1 : 0;
         else if(imin == n_have - 1)
-            iout = z_pos_less3(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
+            iout = z_pos_less<dim,tpos>(posz_have[n_have - 1], xquery) ? n_have : n_have - 1;
         else
             iout = imin + 1;
     }

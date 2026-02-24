@@ -100,6 +100,8 @@ def test_leaf_search(pos_mass_z: PosMass, tree_hierarchy: TreeHierarchy):
     ileaf = search_sorted_z(xleaf, pos_mass_z.pos, leaf_search=True)
     spl2 = jnp.searchsorted(ileaf, jnp.arange(len(xleaf)+1), side="left")
 
+    print("lvl", tree_hierarchy.lvl.get(0, 20))
+
     assert jnp.all(spl == spl2), "Leaf ranges should be identical"
 
 def test_tree_nans(pos_mass_z: PosMass):

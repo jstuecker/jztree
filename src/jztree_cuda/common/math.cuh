@@ -248,7 +248,23 @@ __device__ __forceinline__ int32_t msb_xor(tpos a, tpos b) {
     }
 }
 
-__device__ __forceinline__ int32_t msb_diff_level(const float3 &p1, const float3 &p2) {
+template<int dim, typename tpos>
+__device__ __forceinline__ int32_t msb_diff_level(
+    const Pos<dim,tpos> &pos1, const Pos<dim,tpos> &pos2
+) {
+    int msb_dim = 0;
+    int msb = msb_xor<tpos>(pos1[0], pos2[0]);
+    #pragma unroll
+    for(int i=1; i<dim; i++) {
+        int new_msb = msb_xor<tpos>(pos1[i], pos2[i]);
+        msb_dim = new_msb > msb ? i : msb_dim;
+        msb = new_msb > msb ? new_msb : msb;
+    }
+
+    return msb*(dim+1) - msb_dim;
+}
+
+__device__ __forceinline__ int32_t msb_diff_level_old(const float3 &p1, const float3 &p2) {
     int msb_x = msb_xor_float(p1.x, p2.x);
     int msb_y = msb_xor_float(p1.y, p2.y);
     int msb_z = msb_xor_float(p1.z, p2.z);
@@ -449,7 +465,7 @@ __device__ __forceinline__ float3 LvlToCenter(const float3 pos, const int level)
 }
 
 __device__ __forceinline__ NodeWithExt get_common_node(const float3 p1, const float3 p2) {
-    int lvl = msb_diff_level(p1, p2);
+    int lvl = msb_diff_level_old(p1, p2);
 
     NodeWithExt node;
     node.center = LvlToCenter(p1, lvl);
