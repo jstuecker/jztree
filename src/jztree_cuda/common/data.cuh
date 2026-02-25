@@ -53,6 +53,14 @@ struct Vec {
         for (int i = 0; i < dim; ++i) sum += v[i] * rhs.v[i];
         return sum;
     }
+
+    __host__ __device__ __forceinline__
+    tvec norm2() const {
+        tvec sum = tvec(0);
+        #pragma unroll
+        for (int i = 0; i < dim; ++i) sum += v[i] * v[i];
+        return sum;
+    }
 };
 
 // ---- binary + and - ----
@@ -95,20 +103,11 @@ struct Node {
     int level;
 };
 
-struct __align__(16) NodeOld {
-    float3 center;
-    int level;
-};
 
 template<int dim, typename tvec>
 struct NodeWithExt {
     Vec<dim,tvec> center;
     Vec<dim,tvec> extent;
-};
-
-struct NodeWithExtOld {
-    float3 center;
-    float3 extent;
 };
 
 template<int dim, typename tvec>
@@ -117,19 +116,9 @@ struct PosMass {
     tvec mass;
 };
 
-struct __align__(16) PosIdOld {
-    float3 pos;
-    int32_t id;
-};
-
-// template<int dim> struct PosId {
-//     float pos[dim];
-//     int32_t id;
-// };
-
-template <int dim, typename tvec>
+template<int dim, typename tvec>
 struct PosId {
-    Vec<dim, tvec> pos;
+    Vec<dim,tvec> pos;
     int32_t id;
 };
 

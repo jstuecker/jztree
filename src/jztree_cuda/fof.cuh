@@ -15,11 +15,6 @@
 
 namespace ffi = xla::ffi;
 
-struct __align__(16) PosAndIgroup {
-    float3 pos;
-    int igroup;
-};
-
 __device__ __forceinline__ int find_root(const int* __restrict__ igroup, int x) {
     while (true) {
         int p = igroup[x];
@@ -63,7 +58,7 @@ __global__ void NodeToChildLabel(
     int node_root = parent_igroup[node];
     if(node_root >= size_parent || !parent_is_local[node_root])
         return;
-    float L2 = norm2(LvlToExtOld(parent_lvl[node]));
+    float L2 = LvlToExt<3,float>(parent_lvl[node]).norm2();
 
     int inode_start = parent_spl[node], inode_end = parent_spl[node + 1];
     for(int inode = inode_start + threadIdx.x; inode < inode_end; inode += blockDim.x) {
@@ -82,7 +77,7 @@ __global__ void NodeFof_Link_Count_Insert(
     const int* __restrict__ parent_ilist_splits,
     const int* __restrict__ parent_ilist,
     const int* __restrict__ spl,
-    const NodeOld* __restrict__ nodes,
+    const Node<3,float>* __restrict__ nodes,
     const int* __restrict__ node_ilist_spl, // Input (pass 2)
     int* __restrict__ node_igroup, // Output (pass 0) and Input (pass 0-2)
     int* __restrict__ interaction_count, // Output (pass 1)
@@ -110,7 +105,7 @@ __global__ void NodeFof_Link_Count_Insert(
         // we set overhead threads to the last node to avoid adding many conditionals
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
         bool valid = iqoff + threadIdx.x < inodeQ_end;
-        NodeWithExtOld nodeQ = NodeLvlToHalfExtOld(nodes[inodeQ]);
+        NodeWithExt nodeQ = NodeLvlToHalfExt<3,float>(nodes[inodeQ]);
         
         PrefetchList<int> pf_ilist(parent_ilist, parent_ilist_splits[parentQ], parent_ilist_splits[parentQ + 1]);
 
@@ -130,14 +125,14 @@ __global__ void NodeFof_Link_Count_Insert(
 
             int inodeT_start = spl[parentT], inodeT_end = spl[parentT + 1];
 
-            NodeWithExtOld* nodeT = reinterpret_cast<NodeWithExtOld*>(smem);
+            NodeWithExt<3,float>* nodeT = reinterpret_cast<NodeWithExt<3,float>*>(smem);
             int* igroupT = reinterpret_cast<int*>(nodeT + blockDim.x);
 
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int inodeT = itoff + threadIdx.x;
 
                 if(inodeT < inodeT_end) {
-                    nodeT[threadIdx.x] = NodeLvlToHalfExtOld(nodes[inodeT]);
+                    nodeT[threadIdx.x] = NodeLvlToHalfExt<3,float>(nodes[inodeT]);
                     igroupT[threadIdx.x] = node_igroup[inodeT];
                 }
                 __syncthreads();
@@ -161,11 +156,11 @@ __global__ void NodeFof_Link_Count_Insert(
                     // (3) The other node is outside the linking length -> do noting
 
                     // Upper and lower bound to the distance between any two particles in A and B:
-                    NodeWithExtOld lT = nodeT[j];
-                    float r2max = maxdist2old(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
-                    float r2min = mindist2old(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
+                    NodeWithExt<3,float> lT = nodeT[j];
+                    float r2max = maxdist2<3,float>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
+                    float r2min = mindist2<3,float>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
 
-                    float L2 = norm2(2*lT.extent);
+                    float L2 =  lT.extent.norm2() * 4.f;
                     
                     // Check whether we are guaranteed to be linked
                     if(max(r2max, L2) <= r2link) {
@@ -219,7 +214,7 @@ ffi::Error FofNode2Node(
     const int* __restrict__ parent_ilist_spl,
     const int* __restrict__ parent_ilist,
     const int* __restrict__ parent_spl,
-    const NodeOld* __restrict__ nodes,
+    const Node<3,float>* __restrict__ nodes,
     const int* __restrict__ node_igroup_in,
     int* __restrict__ node_igroup,
     int* __restrict__ node_ilist_spl,
@@ -232,7 +227,7 @@ ffi::Error FofNode2Node(
     const size_t size_node_ilist,
     const int block_size
 ) {
-    size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExtOld) + sizeof(int));
+    size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt<3,float>) + sizeof(int));
 
     cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(size_node+1), stream);
     cudaMemsetAsync(node_igroup, 0, sizeof(int)*(size_node), stream);
@@ -300,7 +295,7 @@ __global__ void FofLeaf2LeafLink(
     const int* __restrict__ ilist_spl,
     const int* __restrict__ ilist,
     const int* __restrict__ spl,
-    const float3* __restrict__ pos,
+    const Vec<3,float>* __restrict__ pos,
     int* __restrict__ part_igroup,
     // Parameters:
     float r2link,
@@ -318,7 +313,7 @@ __global__ void FofLeaf2LeafLink(
         
         PrefetchList<int> pf_ilist(ilist, ilist_spl[leafQ], ilist_spl[leafQ + 1]);
         
-        float3 xQ = pos[ipartQ];
+        Vec<3,float> xQ = pos[ipartQ];
         int igroupQ = part_igroup[ipartQ];
 
         while(!pf_ilist.finished()) {
@@ -329,14 +324,13 @@ __global__ void FofLeaf2LeafLink(
 
             int ipartT_start = spl[nodeT], ipartT_end = spl[nodeT + 1];
 
-            PosAndIgroup* tileT = reinterpret_cast<PosAndIgroup*>(smem);
+            PosId<3,float>* tileT = reinterpret_cast<PosId<3,float>*>(smem);
 
             for(int itoff=ipartT_start; itoff < ipartT_end; itoff += blockDim.x) {
                 int ipartT = itoff + threadIdx.x;
 
                 if(ipartT < ipartT_end) {
-                    tileT[threadIdx.x].pos = pos[ipartT];
-                    tileT[threadIdx.x].igroup = part_igroup[ipartT];
+                    tileT[threadIdx.x] = {pos[ipartT], part_igroup[ipartT]};
                 }
                 __syncthreads();
                 
@@ -344,9 +338,9 @@ __global__ void FofLeaf2LeafLink(
                     if(!valid)
                         break;
 
-                    float r2 = distance_squared_old(xQ, tileT[j].pos, boxsize);
+                    float r2 = distance_squared<3,float>(xQ, tileT[j].pos, boxsize);
 
-                    if((igroupQ != tileT[j].igroup) && (r2 <= r2link))
+                    if((igroupQ != tileT[j].id) && (r2 <= r2link))
                         link_roots(part_igroup, ipartQ, itoff+j);
                 }
                 __syncthreads();
@@ -360,7 +354,7 @@ ffi::Error FofLeaf2Leaf(
     const int* __restrict__ ilist_spl,
     const int* __restrict__ ilist,
     const int* __restrict__ spl,
-    const float3* __restrict__ pos,
+    const Vec<3,float>* __restrict__ pos,
     const int* __restrict__ part_igroup_in,
     int* __restrict__ part_igroup,
     // Parameters:
@@ -373,7 +367,7 @@ ffi::Error FofLeaf2Leaf(
     cudaMemcpyAsync(part_igroup, part_igroup_in, size_part*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // Now do particle-particle linking
-    size_t smem = block_size * sizeof(PosAndIgroup);
+    size_t smem = block_size * sizeof(PosId<3,float>);
     FofLeaf2LeafLink<<< size_leaves, block_size, smem, stream >>> (
         ilist_spl, ilist, spl, pos, part_igroup,
         r2link, boxsize

@@ -152,9 +152,9 @@ __global__ void KnnLeaf2Leaf(
     const int* ilist,           // interaction list
     const float* ilist_r2,      // (lower) interaction rmax2
     const int* splT,            // leaf-ranges in A
-    const float3* xT,           // input positions
+    const Vec<3,float>* xT,    // input positions
     const int* splQ,            // leaf-ranges in B
-    const float3* xQ,           // query positions
+    const Vec<3,float>* xQ,    // query positions
     Neighbor* knn,              // output knn list
     float boxsize               // if > 0, use for periodic wrapping
 ) {
@@ -165,11 +165,11 @@ __global__ void KnnLeaf2Leaf(
     for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
         int ipartQ = min(qoff + threadIdx.x, iqend - 1);
 
-        float3 posQ = xQ[ipartQ];
+        Vec<3,float> posQ = xQ[ipartQ];
 
         SortedNearestK<k> nearestK(INFINITY, -1);
 
-        extern __shared__ PosIdOld particles[];
+        extern __shared__ PosId<3,float> particles[];
 
         PrefetchList2<int,float> pf_ilist(
             ilist, ilist_r2, ilist_spl[ileafQ], ilist_spl[ileafQ + 1]
@@ -198,8 +198,8 @@ __global__ void KnnLeaf2Leaf(
 
                 // Now search for the nearest neighbors in A
                 for (int j = 0; j < nload; j++) {
-                    PosIdOld p = particles[j];
-                    float r2 = distance_squared_old(p.pos, posQ, boxsize);
+                    PosId<3,float> p = particles[j];
+                    float r2 = distance_squared<3,float>(p.pos, posQ, boxsize);
                     nearestK.consider(r2, p.id);
                 }
 
@@ -298,7 +298,7 @@ template <int kmax>
 __global__ void KnnNode2NodeFindRmax(
     ConstInteractionList par_ilist,
     const int* parent_spl,
-    const NodeOld* nodes,
+    const Node<3,float>* nodes,
     const int* nodes_npart,
     float* rmax_out,
     int k,
@@ -315,9 +315,9 @@ __global__ void KnnNode2NodeFindRmax(
     for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
         // we set overhead threads to the last node to avoid adding many conditionals
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
-        NodeOld nodeQ = nodes[inodeQ];
-        float3 xQ = nodeQ.center;
-        float3 extQ = LvlToHalfExtOld(nodeQ.level);
+        Node<3,float> nodeQ = nodes[inodeQ];
+        Vec<3,float> xQ = nodeQ.center;
+        Vec<3,float> extQ = LvlToHalfExt<3,float>(nodeQ.level);
 
         SortedNearestKWithCounts<kmax> nearestK(INFINITY);
 
@@ -337,29 +337,29 @@ __global__ void KnnNode2NodeFindRmax(
 
             int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
 
-            float3* xT = reinterpret_cast<float3*>(smem);
-            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
+            Vec<3,float>* xT = reinterpret_cast<Vec<3,float>*>(smem);
+            Vec<3,float>* extT = reinterpret_cast<Vec<3,float>*>(xT + blockDim.x);
             int* npartT = reinterpret_cast<int*>(extT + blockDim.x);
 
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < inodeT_end) {
-                    NodeOld nodeT = nodes[ilT];
+                    Node<3,float> nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
-                    extT[threadIdx.x] = LvlToHalfExtOld(nodeT.level);
+                    extT[threadIdx.x] = LvlToHalfExt<3,float>(nodeT.level);
                     npartT[threadIdx.x] = nodes_npart[ilT];
                 }
                 __syncthreads();
                 
                 for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
-                    float r2 = maxdist2old(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                    float r2 = maxdist2<3,float>(xT[j], xQ, extQ+extT[j], boxsize);
 
                     nearestK.consider_num(r2, npartT[j]);
                 }
                 __syncthreads();
             }
 
-            rmax2 = nearestK.max_r2(k) * (1.f + 1e-6f);
+            rmax2 = nearestK.max_r2(k) * static_cast<float>(1.f + 1e-6f);
         }
 
         // Output our results:
@@ -373,7 +373,7 @@ template<int pass>
 __global__ void KnnNode2NodeCountInsert(
     ConstInteractionList par_ilist,
     const int* parent_spl,
-    const NodeOld* nodes,
+    const Node<3,float>* nodes,
     const float* node_rmax2,
     int* node_icount,
     InteractionList node_ilist,
@@ -391,9 +391,9 @@ __global__ void KnnNode2NodeCountInsert(
     int inodeQ_start = parent_spl[parentQ], inodeQ_end = parent_spl[parentQ + 1];
     for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1);
-        NodeOld nodeQ = nodes[inodeQ];
-        float3 xQ = nodeQ.center;
-        float3 extQ = LvlToHalfExtOld(nodeQ.level);
+        Node<3,float> nodeQ = nodes[inodeQ];
+        Vec<3,float> xQ = nodeQ.center;
+        Vec<3,float> extQ = LvlToHalfExt<3,float>(nodeQ.level);
         float rmaxQ2 = node_rmax2[inodeQ];
         int out_offset = node_ilist.spl[inodeQ];
 
@@ -413,19 +413,19 @@ __global__ void KnnNode2NodeCountInsert(
 
             int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
 
-            float3* xT = reinterpret_cast<float3*>(smem);
-            float3* extT = reinterpret_cast<float3*>(xT + blockDim.x);
+            Vec<3,float>* xT = reinterpret_cast<Vec<3,float>*>(smem);
+            Vec<3,float>* extT = reinterpret_cast<Vec<3,float>*>(xT + blockDim.x);
 
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < inodeT_end) {
-                    NodeOld nodeT = nodes[ilT];
+                    Node<3,float> nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
-                    extT[threadIdx.x] = LvlToHalfExtOld(nodeT.level);
+                    extT[threadIdx.x] = LvlToHalfExt<3,float>(nodeT.level);
                 }
                 __syncthreads();
                 for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
-                    float r2 = mindist2old(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                    float r2 = mindist2<3,float>(xT[j], xQ, extQ+extT[j], boxsize);
 
                     if((iqoff + threadIdx.x < inodeQ_end) && (r2 <= rmaxQ2)){
                         if(pass == 1) {
@@ -437,7 +437,7 @@ __global__ void KnnNode2NodeCountInsert(
                             if(r2 == 0.f) {
                                 // For the direct neighbourhood we add a tiny contribution of the maximum
                                 // distance so that sorting guarantees that we start with the node itself
-                                r2 = 1e-10f*maxdist2old(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                                r2 = 1e-10f*maxdist2<3,float>(xT[j], xQ, extQ+extT[j], boxsize);
                             }
 
                             node_ilist.rad2[offset] = r2;
@@ -466,7 +466,7 @@ ffi::Error KnnNode2Node(
     const int32_t* parent_ilist_ioth,
     const float* parent_ilist_r2,
     const int32_t* parent_spl,
-    const NodeOld* nodes,
+    const Node<3,float>* nodes,
     const int32_t* nodes_npart,
     // outputs
     float* node_rmax2,
@@ -488,7 +488,7 @@ ffi::Error KnnNode2Node(
 
     cudaMemsetAsync(node_ilist.spl, 0, sizeof(int32_t)*(size_nodes+1), stream);
 
-    size_t smem_alloc_size = blocksize_fill * (2*sizeof(float3) + sizeof(int));
+    size_t smem_alloc_size = blocksize_fill * (2*sizeof(Vec<3,float>) + sizeof(int));
 
     if(k <= 4) {
         KnnNode2NodeFindRmax<4><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
@@ -509,7 +509,7 @@ ffi::Error KnnNode2Node(
         return ffi::Error(ffi::ErrorCode::kOutOfRange, "Only supporting k up to 64 for now");
     }
 
-    smem_alloc_size = blocksize_fill * 2*sizeof(float3);
+    smem_alloc_size = blocksize_fill * 2*sizeof(Vec<3,float>);
     KnnNode2NodeCountInsert<0><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         par_ilist, parent_spl, nodes, node_rmax2,
         node_ilist.spl + 1, node_ilist, // output
@@ -534,7 +534,7 @@ ffi::Error KnnNode2Node(
     );
 
     // Now insert the interactions
-    smem_alloc_size = blocksize_fill * 2*sizeof(float3);
+    smem_alloc_size = blocksize_fill * 2*sizeof(Vec<3,float>);
     KnnNode2NodeCountInsert<1><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         par_ilist, parent_spl, nodes, node_rmax2,
         nullptr, node_ilist, // output

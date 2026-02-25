@@ -594,32 +594,11 @@ __device__ __forceinline__ Vec<dim, tvec> LvlToHalfExt(const int level) {
     return ext;
 }
 
-__device__ __forceinline__ float3 LvlToExtOld(const int level) {
-    // Converts a node's or leaf's binary level to its extend per dimension
-    int3 l = lvl_xyz_old(level);
-    
-    return make_float3(ldexpf(1.0f, l.x), ldexpf(1.0f, l.y), ldexpf(1.0f, l.z));
-}
-
-__device__ __forceinline__ float3 LvlToHalfExtOld(int level) {
-    // Same as above, but with half-extends
-    int3 l = lvl_xyz_old(level);
-    
-    return make_float3(ldexpf(1.0f, l.x-1), ldexpf(1.0f, l.y-1), ldexpf(1.0f, l.z-1));
-}
-
-__device__ __forceinline__ NodeWithExtOld NodeLvlToHalfExtOld(NodeOld node) {
-    NodeWithExtOld node_ext;
-    node_ext.center = node.center;
-    node_ext.extent = LvlToHalfExtOld(node.level);
-    return node_ext;
-}
-
 template <int dim, typename tvec>
 __device__ __forceinline__ NodeWithExt<dim,tvec> NodeLvlToHalfExt(Node<dim,tvec> node) {
     return NodeWithExt<dim,tvec>{
         node.center,
-        LvlToHalfExtOld(node.level)
+        LvlToHalfExt<dim,tvec>(node.level)
     };
 }
 
@@ -665,14 +644,6 @@ __device__ __forceinline__ tvec mindist2(
     return r2;
 }
 
-__device__ __forceinline__ float mindist2old(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
-    float dx =  max(fabsf(wrap_old(x1.x-x2.x, boxsize)) - width_half.x, 0.0f);
-    float dy =  max(fabsf(wrap_old(x1.y-x2.y, boxsize)) - width_half.y, 0.0f);
-    float dz =  max(fabsf(wrap_old(x1.z-x2.z, boxsize)) - width_half.z, 0.0f);
-
-    return dx*dx + dy*dy + dz*dz;
-}
-
 template<int dim, typename tvec>
 __device__ __forceinline__ tvec maxdist2(
     Vec<dim,tvec> x1,
@@ -688,14 +659,6 @@ __device__ __forceinline__ tvec maxdist2(
         r2 += dx*dx;
     }
     return r2;
-}
-
-__device__ __forceinline__ float maxdist2old(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
-    float dx =  fabsf(wrap_old(x1.x-x2.x, boxsize)) + width_half.x;
-    float dy =  fabsf(wrap_old(x1.y-x2.y, boxsize)) + width_half.y;
-    float dz =  fabsf(wrap_old(x1.z-x2.z, boxsize)) + width_half.z;
-
-    return dx*dx + dy*dy + dz*dz;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
