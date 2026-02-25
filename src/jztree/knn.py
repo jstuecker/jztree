@@ -39,12 +39,9 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
     assert k in (4,8,12,16,32,64), "Only k=4,8,12,16,32,64 supported"
 
-    x4a = jnp.concatenate((xT, jnp.zeros(xT.shape[:-1])[...,None]), axis=-1)
-    x4b = jnp.concatenate((xQ, jnp.zeros(xQ.shape[:-1])[...,None]), axis=-1)
-
     out_type = jax.ShapeDtypeStruct((xQ.shape[0], k, 2), jnp.int32)
     knn = jax.ffi.ffi_call("KnnLeaf2Leaf", (out_type, ))(
-        ilist.ispl, ilist.iother, ilist.rad2, splT, x4a, splQ, x4b,
+        ilist.ispl, ilist.iother, ilist.rad2, splT, xT, splQ, xQ,
         boxsize=np.float32(boxsize), k=np.int32(k)
     )[0]
     rknn, iknn = knn[...,0].view(jnp.float32), knn[...,1].view(jnp.int32)

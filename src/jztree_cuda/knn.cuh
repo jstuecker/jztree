@@ -152,9 +152,9 @@ __global__ void KnnLeaf2Leaf(
     const int* ilist,           // interaction list
     const float* ilist_r2,      // (lower) interaction rmax2
     const int* splT,            // leaf-ranges in A
-    const PosR* xT,             // input positions
+    const float3* xT,           // input positions
     const int* splQ,            // leaf-ranges in B
-    const PosR* xQ,             // query positions
+    const float3* xQ,           // query positions
     Neighbor* knn,              // output knn list
     float boxsize               // if > 0, use for periodic wrapping
 ) {
@@ -165,7 +165,7 @@ __global__ void KnnLeaf2Leaf(
     for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
         int ipartQ = min(qoff + threadIdx.x, iqend - 1);
 
-        float3 posQ = xQ[ipartQ].pos;
+        float3 posQ = xQ[ipartQ];
 
         SortedNearestK<k> nearestK(INFINITY, -1);
 
@@ -193,7 +193,7 @@ __global__ void KnnLeaf2Leaf(
             for(int ioff = ipartTstart; ioff < ipartTend; ioff += max_part_smem) {
                 int nload = min(max_part_smem, ipartTend - ioff);
                 for(int i = threadIdx.x; i < nload; i += blockDim.x)
-                    particles[i] = {xT[ioff + i].pos, ioff + i};
+                    particles[i] = {xT[ioff + i], ioff + i};
                 __syncthreads();
 
                 // Now search for the nearest neighbors in A

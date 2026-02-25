@@ -6,13 +6,13 @@ from jax_ffi_gen import parse, generator as gen
 HERE = Path(__file__).resolve().parent
 
 dimensions = (2,3)
-pos_types = ("float", "double")
-pos_types_sort = ("float", "double", "int32_t", "int64_t")
+float_types = ("float", "double")
+all_types = ("float", "double", "int32_t", "int64_t")
 
 k_instance_values = (4, 8, 12, 16, 32, 64)
 default_includes = ["../common/math.cuh"]
 
-def add_dim_dtype_templates(func, buf_from, dimensions=dimensions, pos_types=pos_types):
+def add_dim_dtype_templates(func, buf_from, dimensions=dimensions, pos_types=float_types):
     func.template_par["dim"].instances = dimensions
     func.template_par["dim"].expression = f"{buf_from}.dimensions()[1]"
     func.template_par["tvec"].instances = pos_types
@@ -28,6 +28,7 @@ functions = parse.get_functions_from_file(
     only_kernels=False
 )
 
+# add_dim_dtype_templates(functions["KnnLeaf2Leaf"], "xT")
 functions["KnnLeaf2Leaf"].template_par["k"].instances = k_instance_values
 functions["KnnLeaf2Leaf"].block_size_expression = 32
 functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId<3,float>)"
@@ -105,7 +106,7 @@ functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes
 # functions["SearchSortedZ"].template_par["dim"].expression = "posz_have.dimensions()[1]"
 # functions["SearchSortedZ"].template_par["tvec"].instances = pos_types
 # functions["SearchSortedZ"].template_par["tvec"].expression = "posz_have.element_type()"
-add_dim_dtype_templates(functions["SearchSortedZ"], "posz_have", pos_types=pos_types_sort)
+add_dim_dtype_templates(functions["SearchSortedZ"], "posz_have", pos_types=all_types)
 functions["SearchSortedZ"].par["n_have"].expression = "posz_have.dimensions()[0]"
 functions["SearchSortedZ"].par["n_query"].expression = "posz_query.dimensions()[0]"
 functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"
