@@ -155,28 +155,6 @@ __forceinline__ __device__ void kahan_add_vec(
     }
 }
 
-__forceinline__ __device__ void kahan_add_f4(float4 &sum, float4 add, float4 &c) {
-    kahan_add_old(sum.x, add.x, c.x);
-    kahan_add_old(sum.y, add.y, c.y);
-    kahan_add_old(sum.z, add.z, c.z);
-    kahan_add_old(sum.w, add.w, c.w);
-}
-
-template<int num>
-__forceinline__ __device__ void kahan_add_array(float *sum, float *add, float *c) {
-    #pragma unroll
-    for (int i = 0; i < num; i++) {
-        kahan_add_old(sum[i], add[i], c[i]);
-    }
-}
-
-template <bool kahan>
-__forceinline__ __device__ void add_f4(float4 &sum, float4 add, float4 &c) {
-    if(kahan)
-        kahan_add_f4(sum, add, c);
-    else
-        sum = sum + add;
-}
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                          Integer Math                                          */
@@ -354,16 +332,6 @@ __device__ __forceinline__ int32_t msb_diff_level(
     return (msb+1)*dim - msb_dim;
 }
 
-__device__ __forceinline__ int32_t msb_diff_level_old(const float3 &p1, const float3 &p2) {
-    int msb_x = msb_xor_float(p1.x, p2.x);
-    int msb_y = msb_xor_float(p1.y, p2.y);
-    int msb_z = msb_xor_float(p1.z, p2.z);
-
-    // The level is given by the most significant differing bit
-    // but offset according to the dimension
-    return max(3*msb_x+3, max(3*msb_y+2, 3*msb_z+1));
-}
-
 __device__ __forceinline__ float2 float_common_ext(float a, float b) {
     // Warning: This function cannot be used dimension wise in z-order curves
     //          to get node extends!
@@ -398,25 +366,6 @@ __device__ __forceinline__ float2 float_common_ext(float a, float b) {
         ext = ldexpf(1.0f, lvl);
     }
     return {cent, ext};
-}
-
-// Whether pos1 should appear before pos2 in a z-curve ordering
-__device__ __forceinline__ bool z_pos_less3(float3 pos1, float3 pos2)
-{
-    const bool nan1 = isnan(pos1.x) || isnan(pos1.y) || isnan(pos1.z);
-    const bool nan2 = isnan(pos2.x) || isnan(pos2.y) || isnan(pos2.z);
-    if (nan1) return false;
-    if (nan2) return true;
-
-    int msb_x = msb_xor_float(pos1.x, pos2.x);
-    int msb_y = msb_xor_float(pos1.y, pos2.y);
-    int msb_z = msb_xor_float(pos1.z, pos2.z);
-
-    int ms_dim = (msb_x >= msb_y && msb_x >= msb_z) ? 0 : ((msb_y >= msb_z) ? 1 : 2);
-
-    if (ms_dim == 0) return pos1.x < pos2.x;
-    if (ms_dim == 1) return pos1.y < pos2.y;
-    return pos1.z < pos2.z;
 }
 
 template <int dim, typename tvec> __device__  __forceinline__ bool has_nan(

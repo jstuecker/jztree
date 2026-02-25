@@ -99,27 +99,11 @@ struct NodeWithExtOld {
     float3 extent;
 };
 
-struct __align__(16) PosMassOld {
-    union {
-        struct {
-            union {
-                struct {
-                    float x, y, z;
-                };
-                float3 pos;
-            };
-            float mass;
-        };
-        float4 f4;
-    };
-};
-
 template<int dim, typename tvec>
 struct PosMass {
     Vec<dim,tvec> pos;
     tvec mass;
 };
-
 
 struct __align__(16) PosIdOld {
     float3 pos;
