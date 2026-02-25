@@ -146,15 +146,15 @@ struct SortedNearestKWithCounts {
 /*                                     Ilist based KNN kernel                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
-template <int k>
+template <int k, int dim, typename tvec>
 __global__ void KnnLeaf2Leaf(
     const int* ilist_spl,       // leaf-ranges in ilist
     const int* ilist,           // interaction list
     const float* ilist_r2,      // (lower) interaction rmax2
     const int* splT,            // leaf-ranges in A
-    const Vec<3,float>* xT,    // input positions
+    const Vec<dim,tvec>* xT,    // input positions
     const int* splQ,            // leaf-ranges in B
-    const Vec<3,float>* xQ,    // query positions
+    const Vec<dim,tvec>* xQ,    // query positions
     Neighbor* knn,              // output knn list
     float boxsize               // if > 0, use for periodic wrapping
 ) {
@@ -165,11 +165,12 @@ __global__ void KnnLeaf2Leaf(
     for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
         int ipartQ = min(qoff + threadIdx.x, iqend - 1);
 
-        Vec<3,float> posQ = xQ[ipartQ];
+        Vec<dim,tvec> posQ = xQ[ipartQ];
 
         SortedNearestK<k> nearestK(INFINITY, -1);
 
-        extern __shared__ PosId<3,float> particles[];
+        extern __shared__ char shared_mem[];
+        PosId<dim, tvec>* particles = reinterpret_cast<PosId<dim, tvec>*>(shared_mem);
 
         PrefetchList2<int,float> pf_ilist(
             ilist, ilist_r2, ilist_spl[ileafQ], ilist_spl[ileafQ + 1]
@@ -198,8 +199,8 @@ __global__ void KnnLeaf2Leaf(
 
                 // Now search for the nearest neighbors in A
                 for (int j = 0; j < nload; j++) {
-                    PosId<3,float> p = particles[j];
-                    float r2 = distance_squared<3,float>(p.pos, posQ, boxsize);
+                    PosId<dim,tvec> p = particles[j];
+                    float r2 = distance_squared<dim,tvec>(p.pos, posQ, boxsize);
                     nearestK.consider(r2, p.id);
                 }
 
@@ -294,11 +295,11 @@ struct LogBinMap {
 /*                                    Interaction list Building                                   */
 /* ---------------------------------------------------------------------------------------------- */
 
-template <int kmax>
+template <int kmax, int dim, typename tvec>
 __global__ void KnnNode2NodeFindRmax(
     ConstInteractionList par_ilist,
     const int* parent_spl,
-    const Node<3,float>* nodes,
+    const Node<dim,tvec>* nodes,
     const int* nodes_npart,
     float* rmax_out,
     int k,
@@ -315,9 +316,9 @@ __global__ void KnnNode2NodeFindRmax(
     for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
         // we set overhead threads to the last node to avoid adding many conditionals
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
-        Node<3,float> nodeQ = nodes[inodeQ];
-        Vec<3,float> xQ = nodeQ.center;
-        Vec<3,float> extQ = LvlToHalfExt<3,float>(nodeQ.level);
+        Node<dim,tvec> nodeQ = nodes[inodeQ];
+        Vec<dim,tvec> xQ = nodeQ.center;
+        Vec<dim,tvec> extQ = LvlToHalfExt<dim,tvec>(nodeQ.level);
 
         SortedNearestKWithCounts<kmax> nearestK(INFINITY);
 
@@ -337,22 +338,22 @@ __global__ void KnnNode2NodeFindRmax(
 
             int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
 
-            Vec<3,float>* xT = reinterpret_cast<Vec<3,float>*>(smem);
-            Vec<3,float>* extT = reinterpret_cast<Vec<3,float>*>(xT + blockDim.x);
+            Vec<dim,tvec>* xT = reinterpret_cast<Vec<dim,tvec>*>(smem);
+            Vec<dim,tvec>* extT = reinterpret_cast<Vec<dim,tvec>*>(xT + blockDim.x);
             int* npartT = reinterpret_cast<int*>(extT + blockDim.x);
 
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < inodeT_end) {
-                    Node<3,float> nodeT = nodes[ilT];
+                    Node<dim,tvec> nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
-                    extT[threadIdx.x] = LvlToHalfExt<3,float>(nodeT.level);
+                    extT[threadIdx.x] = LvlToHalfExt<dim,tvec>(nodeT.level);
                     npartT[threadIdx.x] = nodes_npart[ilT];
                 }
                 __syncthreads();
                 
                 for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
-                    float r2 = maxdist2<3,float>(xT[j], xQ, extQ+extT[j], boxsize);
+                    float r2 = maxdist2<dim,tvec>(xT[j], xQ, extQ+extT[j], boxsize);
 
                     nearestK.consider_num(r2, npartT[j]);
                 }
@@ -369,11 +370,11 @@ __global__ void KnnNode2NodeFindRmax(
     }
 }
 
-template<int pass>
+template<int pass, int dim, typename tvec>
 __global__ void KnnNode2NodeCountInsert(
     ConstInteractionList par_ilist,
     const int* parent_spl,
-    const Node<3,float>* nodes,
+    const Node<dim,tvec>* nodes,
     const float* node_rmax2,
     int* node_icount,
     InteractionList node_ilist,
@@ -391,9 +392,9 @@ __global__ void KnnNode2NodeCountInsert(
     int inodeQ_start = parent_spl[parentQ], inodeQ_end = parent_spl[parentQ + 1];
     for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1);
-        Node<3,float> nodeQ = nodes[inodeQ];
-        Vec<3,float> xQ = nodeQ.center;
-        Vec<3,float> extQ = LvlToHalfExt<3,float>(nodeQ.level);
+        Node<dim,tvec> nodeQ = nodes[inodeQ];
+        Vec<dim,tvec> xQ = nodeQ.center;
+        Vec<dim,tvec> extQ = LvlToHalfExt<dim,tvec>(nodeQ.level);
         float rmaxQ2 = node_rmax2[inodeQ];
         int out_offset = node_ilist.spl[inodeQ];
 
@@ -413,19 +414,19 @@ __global__ void KnnNode2NodeCountInsert(
 
             int inodeT_start = parent_spl[parentT], inodeT_end = parent_spl[parentT + 1];
 
-            Vec<3,float>* xT = reinterpret_cast<Vec<3,float>*>(smem);
-            Vec<3,float>* extT = reinterpret_cast<Vec<3,float>*>(xT + blockDim.x);
+            Vec<dim,tvec>* xT = reinterpret_cast<Vec<dim,tvec>*>(smem);
+            Vec<dim,tvec>* extT = reinterpret_cast<Vec<dim,tvec>*>(xT + blockDim.x);
 
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < inodeT_end) {
-                    Node<3,float> nodeT = nodes[ilT];
+                    Node<dim,tvec> nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
-                    extT[threadIdx.x] = LvlToHalfExt<3,float>(nodeT.level);
+                    extT[threadIdx.x] = LvlToHalfExt<dim,tvec>(nodeT.level);
                 }
                 __syncthreads();
                 for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
-                    float r2 = mindist2<3,float>(xT[j], xQ, extQ+extT[j], boxsize);
+                    float r2 = mindist2<dim,tvec>(xT[j], xQ, extQ+extT[j], boxsize);
 
                     if((iqoff + threadIdx.x < inodeQ_end) && (r2 <= rmaxQ2)){
                         if(pass == 1) {
@@ -437,7 +438,7 @@ __global__ void KnnNode2NodeCountInsert(
                             if(r2 == 0.f) {
                                 // For the direct neighbourhood we add a tiny contribution of the maximum
                                 // distance so that sorting guarantees that we start with the node itself
-                                r2 = 1e-10f*maxdist2<3,float>(xT[j], xQ, extQ+extT[j], boxsize);
+                                r2 = 1e-10f*maxdist2<dim,tvec>(xT[j], xQ, extQ+extT[j], boxsize);
                             }
 
                             node_ilist.rad2[offset] = r2;
@@ -460,13 +461,14 @@ __global__ void KnnNode2NodeCountInsert(
 /*                                          Host function                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
+template<int dim, typename tvec>
 ffi::Error KnnNode2Node(
     cudaStream_t stream,
     const int32_t* parent_ilist_spl,
     const int32_t* parent_ilist_ioth,
     const float* parent_ilist_r2,
     const int32_t* parent_spl,
-    const Node<3,float>* nodes,
+    const Node<dim,tvec>* nodes,
     const int32_t* nodes_npart,
     // outputs
     float* node_rmax2,
@@ -488,20 +490,20 @@ ffi::Error KnnNode2Node(
 
     cudaMemsetAsync(node_ilist.spl, 0, sizeof(int32_t)*(size_nodes+1), stream);
 
-    size_t smem_alloc_size = blocksize_fill * (2*sizeof(Vec<3,float>) + sizeof(int));
+    size_t smem_alloc_size = blocksize_fill * (2*sizeof(Vec<dim,tvec>) + sizeof(int));
 
     if(k <= 4) {
-        KnnNode2NodeFindRmax<4><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+        KnnNode2NodeFindRmax<4,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
     }
     if(k <= 16) {
-        KnnNode2NodeFindRmax<16><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+        KnnNode2NodeFindRmax<16,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
     }
     else if(k <= 64) {
-        KnnNode2NodeFindRmax<64><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+        KnnNode2NodeFindRmax<64,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
     }
@@ -509,8 +511,8 @@ ffi::Error KnnNode2Node(
         return ffi::Error(ffi::ErrorCode::kOutOfRange, "Only supporting k up to 64 for now");
     }
 
-    smem_alloc_size = blocksize_fill * 2*sizeof(Vec<3,float>);
-    KnnNode2NodeCountInsert<0><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+    smem_alloc_size = blocksize_fill * 2*sizeof(Vec<dim,tvec>);
+    KnnNode2NodeCountInsert<0,dim,tvec><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         par_ilist, parent_spl, nodes, node_rmax2,
         node_ilist.spl + 1, node_ilist, // output
         node_ilist_size, boxsize    // parameters
@@ -534,8 +536,8 @@ ffi::Error KnnNode2Node(
     );
 
     // Now insert the interactions
-    smem_alloc_size = blocksize_fill * 2*sizeof(Vec<3,float>);
-    KnnNode2NodeCountInsert<1><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+    smem_alloc_size = blocksize_fill * 2*sizeof(Vec<dim,tvec>);
+    KnnNode2NodeCountInsert<1,dim,tvec><<< size_parents, blocksize_fill, smem_alloc_size, stream>>>(
         par_ilist, parent_spl, nodes, node_rmax2,
         nullptr, node_ilist, // output
         node_ilist_size, boxsize    // parameters

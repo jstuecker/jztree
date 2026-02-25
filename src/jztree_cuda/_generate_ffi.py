@@ -28,12 +28,17 @@ functions = parse.get_functions_from_file(
     only_kernels=False
 )
 
-# add_dim_dtype_templates(functions["KnnLeaf2Leaf"], "xT")
+knn_types = ("float",)
+knn_dim = (2,3)
+
+add_dim_dtype_templates(functions["KnnLeaf2Leaf"], "xT", knn_dim, knn_types)
 functions["KnnLeaf2Leaf"].template_par["k"].instances = k_instance_values
 functions["KnnLeaf2Leaf"].block_size_expression = 32
 functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * sizeof(PosId<3,float>)"
 functions["KnnLeaf2Leaf"].grid_size_expression = "splQ.element_count() - 1"
 
+add_dim_dtype_templates(functions["KnnNode2Node"], "nodes", knn_dim, knn_types)
+functions["KnnNode2Node"].template_par["dim"].expression = None # need explicit input
 functions["KnnNode2Node"].par["size_parents"].expression = "parent_spl.element_count() - 1"
 functions["KnnNode2Node"].par["size_nodes"].expression = "nodes_npart.element_count()"
 functions["KnnNode2Node"].par["node_ilist_size"].expression = "node_ilist_ioth->element_count()"

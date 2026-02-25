@@ -49,8 +49,12 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     return rknn, iknn
 _knn_leaf2leaf.jit = jax.jit(_knn_leaf2leaf, static_argnames=("k", "boxsize"))
 
-def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_data: PosLvlNum,
-                         k: int = 32, boxsize: float = 0.) -> InteractionList:
+def _knn_node2node_ilist(
+        ilist: InteractionList,
+        spl_parent: jax.Array,
+        node_data: PosLvlNum,
+        k: int = 32,
+        boxsize: float = 0.) -> InteractionList:
     boxsize = 0. if boxsize is None else boxsize
 
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
@@ -70,7 +74,7 @@ def _knn_node2node_ilist(ilist: InteractionList, spl_parent: jax.Array, node_dat
     radii, ispl, il, ilr2 = jax.ffi.ffi_call("KnnNode2Node", outputs)(
         ilist.ispl, ilist.iother, ilist.rad2, spl_parent, poslvl, node_data.npart,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
-        boxsize=np.float32(boxsize)
+        boxsize=np.float32(boxsize), dim=np.int32(node_data.pos.shape[-1])
     )
 
     # Mark as varying per process if input is varying

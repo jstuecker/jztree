@@ -41,6 +41,8 @@ ffi::Error KnnLeaf2LeafFFIHost(
     float boxsize,
     int k
 ) {
+    int dim = xT.dimensions()[1];
+    DT tvec = xT.element_type();
     dim3 blockDim(32);
     dim3 gridDim(splQ.element_count() - 1);
     size_t smem = blockDim.x * sizeof(PosId<3,float>);
@@ -69,26 +71,32 @@ ffi::Error KnnLeaf2LeafFFIHost(
 
     // We have template parameters, so we need to instantiate all valid templates.
     // We select a function pointer through a map with a stable, type-erased signature.
-    using TTuple = std::tuple<int>;
+    using TTuple = std::tuple<int, int, DT>;
     using TFunc = const void*;
 
     static const std::map<TTuple, TFunc> instance_map = {
-        { {4}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4>) },
-        { {8}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8>) },
-        { {12}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12>) },
-        { {16}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16>) },
-        { {32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32>) },
-        { {64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64>) }
+        { {4, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 2, float>) },
+        { {4, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 3, float>) },
+        { {8, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 2, float>) },
+        { {8, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 3, float>) },
+        { {12, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 2, float>) },
+        { {12, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 3, float>) },
+        { {16, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 2, float>) },
+        { {16, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 3, float>) },
+        { {32, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 2, float>) },
+        { {32, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, float>) },
+        { {64, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 2, float>) },
+        { {64, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 3, float>) }
     };
 
-    const TTuple key = TTuple(k);
+    const TTuple key = TTuple(k, dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (k)"\
+            "\nUnsupported template parameter combination for (k, dim, tvec)"\
             " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(4), (8), (12), (16), (32), (64)"
+            "(4, 2, float), (4, 3, float), (8, 2, float), (8, 3, float), (12, 2, float), (12, 3, float), (16, 2, float), (16, 3, float), (32, 2, float), (32, 3, float), (64, 2, float), (64, 3, float)"
         );
     }
     const void* instance = it->second;
@@ -131,6 +139,67 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 
+using KnnNode2NodeDispatchFn = ffi::Error (*) (cudaStream_t stream,
+    const void* parent_ilist_spl,
+    const void* parent_ilist_ioth,
+    const void* parent_ilist_r2,
+    const void* parent_spl,
+    const void* nodes,
+    const void* nodes_npart,
+    void* node_rmax2,
+    void* node_ilist_spl,
+    void* node_ilist_ioth,
+    void* node_ilist_r2,
+    int k,
+    size_t blocksize_fill,
+    size_t blocksize_sort,
+    float boxsize,
+    int size_parents,
+    int size_nodes,
+    size_t node_ilist_size
+);
+template<int dim, typename tvec>
+static ffi::Error KnnNode2NodeDispatchWrapper(cudaStream_t stream,
+    const void* parent_ilist_spl,
+    const void* parent_ilist_ioth,
+    const void* parent_ilist_r2,
+    const void* parent_spl,
+    const void* nodes,
+    const void* nodes_npart,
+    void* node_rmax2,
+    void* node_ilist_spl,
+    void* node_ilist_ioth,
+    void* node_ilist_r2,
+    int k,
+    size_t blocksize_fill,
+    size_t blocksize_sort,
+    float boxsize,
+    int size_parents,
+    int size_nodes,
+    size_t node_ilist_size
+) {
+    return KnnNode2Node<dim, tvec> (stream,
+        reinterpret_cast<const int32_t*>(parent_ilist_spl),
+        reinterpret_cast<const int32_t*>(parent_ilist_ioth),
+        reinterpret_cast<const float*>(parent_ilist_r2),
+        reinterpret_cast<const int32_t*>(parent_spl),
+        reinterpret_cast<const Node<dim,tvec>*>(nodes),
+        reinterpret_cast<const int32_t*>(nodes_npart),
+        reinterpret_cast<float*>(node_rmax2),
+        reinterpret_cast<int32_t*>(node_ilist_spl),
+        reinterpret_cast<int32_t*>(node_ilist_ioth),
+        reinterpret_cast<float*>(node_ilist_r2),
+        k,
+        blocksize_fill,
+        blocksize_sort,
+        boxsize,
+        size_parents,
+        size_nodes,
+        node_ilist_size
+    );
+}
+
+
 ffi::Error KnnNode2NodeFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer parent_ilist_spl,
@@ -146,24 +215,49 @@ ffi::Error KnnNode2NodeFFIHost(
     int k,
     size_t blocksize_fill,
     size_t blocksize_sort,
-    float boxsize
+    float boxsize,
+    int dim
 ) {
     int size_parents = parent_spl.element_count() - 1;
     int size_nodes = nodes_npart.element_count();
     size_t node_ilist_size = node_ilist_ioth->element_count();
+    DT tvec = nodes.element_type();
+
+
+    // We have template parameters, so we need to instantiate all valid templates.
+    // We select a function pointer through a map with a stable, type-erased signature.
+    using TTuple = std::tuple<int, DT>;
+    using TFunc = KnnNode2NodeDispatchFn;
+
+    static const std::map<TTuple, TFunc> instance_map = {
+        { {2, DT::F32}, &KnnNode2NodeDispatchWrapper<2, float> },
+        { {3, DT::F32}, &KnnNode2NodeDispatchWrapper<3, float> }
+    };
+
+    const TTuple key = TTuple(dim, tvec);
+
+    const auto it = instance_map.find(key);
+    if (it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (dim, tvec)"\
+            " in KnnNode2NodeFFIHost -- Only supporting:\n"\
+            "(2, float), (3, float)"
+        );
+    }
+    KnnNode2NodeDispatchFn instance = it->second;
 
     // Now call our function
-    ffi::Error result = KnnNode2Node(stream,
-        reinterpret_cast<const int32_t*>(parent_ilist_spl.untyped_data()),
-        reinterpret_cast<const int32_t*>(parent_ilist_ioth.untyped_data()),
-        reinterpret_cast<const float*>(parent_ilist_r2.untyped_data()),
-        reinterpret_cast<const int32_t*>(parent_spl.untyped_data()),
-        reinterpret_cast<const Node<3,float>*>(nodes.untyped_data()),
-        reinterpret_cast<const int32_t*>(nodes_npart.untyped_data()),
-        reinterpret_cast<float*>(node_rmax2->untyped_data()),
-        reinterpret_cast<int32_t*>(node_ilist_spl->untyped_data()),
-        reinterpret_cast<int32_t*>(node_ilist_ioth->untyped_data()),
-        reinterpret_cast<float*>(node_ilist_r2->untyped_data()),
+    ffi::Error result = instance(stream,
+        parent_ilist_spl.untyped_data(),
+        parent_ilist_ioth.untyped_data(),
+        parent_ilist_r2.untyped_data(),
+        parent_spl.untyped_data(),
+        nodes.untyped_data(),
+        nodes_npart.untyped_data(),
+        node_rmax2->untyped_data(),
+        node_ilist_spl->untyped_data(),
+        node_ilist_ioth->untyped_data(),
+        node_ilist_r2->untyped_data(),
         k,
         blocksize_fill,
         blocksize_sort,
@@ -197,7 +291,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Attr<int>("k")
         .Attr<size_t>("blocksize_fill")
         .Attr<size_t>("blocksize_sort")
-        .Attr<float>("boxsize"),
+        .Attr<float>("boxsize")
+        .Attr<int>("dim"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
