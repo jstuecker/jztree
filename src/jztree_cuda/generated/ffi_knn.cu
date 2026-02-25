@@ -158,7 +158,7 @@ ffi::Error KnnNode2NodeFFIHost(
         reinterpret_cast<const int32_t*>(parent_ilist_ioth.untyped_data()),
         reinterpret_cast<const float*>(parent_ilist_r2.untyped_data()),
         reinterpret_cast<const int32_t*>(parent_spl.untyped_data()),
-        reinterpret_cast<const Node*>(nodes.untyped_data()),
+        reinterpret_cast<const NodeOld*>(nodes.untyped_data()),
         reinterpret_cast<const int32_t*>(nodes_npart.untyped_data()),
         reinterpret_cast<float*>(node_rmax2->untyped_data()),
         reinterpret_cast<int32_t*>(node_ilist_spl->untyped_data()),

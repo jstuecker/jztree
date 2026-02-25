@@ -121,7 +121,7 @@ ffi::Error FofNode2NodeFFIHost(
         reinterpret_cast<const int*>(parent_ilist_spl.untyped_data()),
         reinterpret_cast<const int*>(parent_ilist.untyped_data()),
         reinterpret_cast<const int*>(parent_spl.untyped_data()),
-        reinterpret_cast<const Node*>(nodes.untyped_data()),
+        reinterpret_cast<const NodeOld*>(nodes.untyped_data()),
         reinterpret_cast<const int*>(node_igroup_in.untyped_data()),
         reinterpret_cast<int*>(node_igroup->untyped_data()),
         reinterpret_cast<int*>(node_ilist_spl->untyped_data()),

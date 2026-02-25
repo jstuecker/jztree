@@ -199,7 +199,7 @@ __global__ void KnnLeaf2Leaf(
                 // Now search for the nearest neighbors in A
                 for (int j = 0; j < nload; j++) {
                     PosIdOld p = particles[j];
-                    float r2 = distance_squared(p.pos, posQ, boxsize);
+                    float r2 = distance_squared_old(p.pos, posQ, boxsize);
                     nearestK.consider(r2, p.id);
                 }
 
@@ -298,7 +298,7 @@ template <int kmax>
 __global__ void KnnNode2NodeFindRmax(
     ConstInteractionList par_ilist,
     const int* parent_spl,
-    const Node* nodes,
+    const NodeOld* nodes,
     const int* nodes_npart,
     float* rmax_out,
     int k,
@@ -315,7 +315,7 @@ __global__ void KnnNode2NodeFindRmax(
     for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
         // we set overhead threads to the last node to avoid adding many conditionals
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
-        Node nodeQ = nodes[inodeQ];
+        NodeOld nodeQ = nodes[inodeQ];
         float3 xQ = nodeQ.center;
         float3 extQ = LvlToHalfExtOld(nodeQ.level);
 
@@ -344,7 +344,7 @@ __global__ void KnnNode2NodeFindRmax(
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < inodeT_end) {
-                    Node nodeT = nodes[ilT];
+                    NodeOld nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
                     extT[threadIdx.x] = LvlToHalfExtOld(nodeT.level);
                     npartT[threadIdx.x] = nodes_npart[ilT];
@@ -352,7 +352,7 @@ __global__ void KnnNode2NodeFindRmax(
                 __syncthreads();
                 
                 for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
-                    float r2 = maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                    float r2 = maxdist2old(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     nearestK.consider_num(r2, npartT[j]);
                 }
@@ -373,7 +373,7 @@ template<int pass>
 __global__ void KnnNode2NodeCountInsert(
     ConstInteractionList par_ilist,
     const int* parent_spl,
-    const Node* nodes,
+    const NodeOld* nodes,
     const float* node_rmax2,
     int* node_icount,
     InteractionList node_ilist,
@@ -391,7 +391,7 @@ __global__ void KnnNode2NodeCountInsert(
     int inodeQ_start = parent_spl[parentQ], inodeQ_end = parent_spl[parentQ + 1];
     for(int iqoff = inodeQ_start; iqoff < inodeQ_end; iqoff += blockDim.x) {
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1);
-        Node nodeQ = nodes[inodeQ];
+        NodeOld nodeQ = nodes[inodeQ];
         float3 xQ = nodeQ.center;
         float3 extQ = LvlToHalfExtOld(nodeQ.level);
         float rmaxQ2 = node_rmax2[inodeQ];
@@ -419,13 +419,13 @@ __global__ void KnnNode2NodeCountInsert(
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int ilT = itoff + threadIdx.x;
                 if(ilT < inodeT_end) {
-                    Node nodeT = nodes[ilT];
+                    NodeOld nodeT = nodes[ilT];
                     xT[threadIdx.x] = nodeT.center;
                     extT[threadIdx.x] = LvlToHalfExtOld(nodeT.level);
                 }
                 __syncthreads();
                 for(int j = 0; j < min(inodeT_end - itoff, blockDim.x); j++) {
-                    float r2 = mindist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                    float r2 = mindist2old(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
 
                     if((iqoff + threadIdx.x < inodeQ_end) && (r2 <= rmaxQ2)){
                         if(pass == 1) {
@@ -437,7 +437,7 @@ __global__ void KnnNode2NodeCountInsert(
                             if(r2 == 0.f) {
                                 // For the direct neighbourhood we add a tiny contribution of the maximum
                                 // distance so that sorting guarantees that we start with the node itself
-                                r2 = 1e-10f*maxdist2(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
+                                r2 = 1e-10f*maxdist2old(xT[j], xQ, sumf3(extQ, extT[j]), boxsize);
                             }
 
                             node_ilist.rad2[offset] = r2;
@@ -466,7 +466,7 @@ ffi::Error KnnNode2Node(
     const int32_t* parent_ilist_ioth,
     const float* parent_ilist_r2,
     const int32_t* parent_spl,
-    const Node* nodes,
+    const NodeOld* nodes,
     const int32_t* nodes_npart,
     // outputs
     float* node_rmax2,

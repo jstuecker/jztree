@@ -89,9 +89,21 @@ Vec<dim, tvec> operator*(tvec s, Vec<dim, tvec> a) {
 /*                                         Derived classes                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-struct __align__(16) Node {
+template<int dim, typename tvec>
+struct Node {
+    Vec<dim,tvec> center;
+    int level;
+};
+
+struct __align__(16) NodeOld {
     float3 center;
     int level;
+};
+
+template<int dim, typename tvec>
+struct NodeWithExt {
+    Vec<dim,tvec> center;
+    Vec<dim,tvec> extent;
 };
 
 struct NodeWithExtOld {
@@ -119,12 +131,6 @@ template <int dim, typename tvec>
 struct PosId {
     Vec<dim, tvec> pos;
     int32_t id;
-};
-
-template <int dim, typename tvec>
-struct NodeWithExt {
-    Vec<dim,tvec> center;
-    Vec<dim,tvec> extent;
 };
 
 struct __align__(16) ForcePot {

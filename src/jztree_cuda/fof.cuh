@@ -82,7 +82,7 @@ __global__ void NodeFof_Link_Count_Insert(
     const int* __restrict__ parent_ilist_splits,
     const int* __restrict__ parent_ilist,
     const int* __restrict__ spl,
-    const Node* __restrict__ nodes,
+    const NodeOld* __restrict__ nodes,
     const int* __restrict__ node_ilist_spl, // Input (pass 2)
     int* __restrict__ node_igroup, // Output (pass 0) and Input (pass 0-2)
     int* __restrict__ interaction_count, // Output (pass 1)
@@ -162,8 +162,8 @@ __global__ void NodeFof_Link_Count_Insert(
 
                     // Upper and lower bound to the distance between any two particles in A and B:
                     NodeWithExtOld lT = nodeT[j];
-                    float r2max = maxdist2(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
-                    float r2min = mindist2(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
+                    float r2max = maxdist2old(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
+                    float r2min = mindist2old(lT.center, nodeQ.center, sumf3(nodeQ.extent, lT.extent), boxsize);
 
                     float L2 = norm2(2*lT.extent);
                     
@@ -219,7 +219,7 @@ ffi::Error FofNode2Node(
     const int* __restrict__ parent_ilist_spl,
     const int* __restrict__ parent_ilist,
     const int* __restrict__ parent_spl,
-    const Node* __restrict__ nodes,
+    const NodeOld* __restrict__ nodes,
     const int* __restrict__ node_igroup_in,
     int* __restrict__ node_igroup,
     int* __restrict__ node_ilist_spl,
@@ -344,7 +344,7 @@ __global__ void FofLeaf2LeafLink(
                     if(!valid)
                         break;
 
-                    float r2 = distance_squared(xQ, tileT[j].pos, boxsize);
+                    float r2 = distance_squared_old(xQ, tileT[j].pos, boxsize);
 
                     if((igroupQ != tileT[j].igroup) && (r2 <= r2link))
                         link_roots(part_igroup, ipartQ, itoff+j);

@@ -3,6 +3,9 @@
 
 #include "data.cuh"
 
+#include <cmath>
+using std::abs; // be sure we have a floating point and int compatible abs function
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                 Data type specific definitions                                 */
 /* ---------------------------------------------------------------------------------------------- */
@@ -120,15 +123,6 @@ __device__ __forceinline__ float dotf3(const float3 &a, const float3 b) {
 /* ---------------------------------------------------------------------------------------------- */
 /*                                         Kahan Summation                                        */
 /* ---------------------------------------------------------------------------------------------- */
-
-__forceinline__ __device__ void kahan_add_old(float &sum, float add, float &c) {
-    // Cancels summation error with an extra variable c, that needs to start at 0
-    // https://en.wikipedia.org/wiki/Kahan_summation_algorithm
-    float y = add - c;
-    float t = sum + y;
-    c = (t - sum) - y;
-    sum = t;
-}
 
 template<typename tvec>
 __forceinline__ __device__ void kahan_add(
@@ -475,7 +469,26 @@ __device__ __forceinline__ tvec round_pow2_cent(tvec x, int level) {
 /*                                            Node Math                                           */
 /* ---------------------------------------------------------------------------------------------- */
 
-__device__ __forceinline__ float wrap(float dx, const float boxsize) {
+template <typename tvec>
+__device__ __forceinline__ tvec wrap_dx(tvec dx, const tvec boxsize) {
+    // wraps a coordinate difference into the interval [-boxsize/2, boxsize/2)
+    // Note: in principle this code would be slightly more optimal if we decided at compile time
+    // whether we are periodic. However, my tests suggest that this would only be 3% or so.
+    if(boxsize > static_cast<tvec>(0)) {
+        if constexpr (std::is_floating_point_v<tvec>) {
+            float bh = static_cast<tvec>(0.5) * boxsize;
+            dx = dx < -bh ? dx + boxsize : dx;
+            dx = dx >= bh ? dx - boxsize : dx;
+        }
+        else {
+            static_assert(dependent_false_v<tvec>, "wrapping not implemented for integers.");
+        }
+    }
+
+    return dx;
+}
+
+__device__ __forceinline__ float wrap_old(float dx, const float boxsize) {
     // wraps a coordinate difference into the interval [-boxsize/2, boxsize/2)
     // Note: in principle this code would be slightly more optimal if we decided at compile time
     // whether we are periodic. However, my tests suggest that this would only be 3% or so.
@@ -488,12 +501,25 @@ __device__ __forceinline__ float wrap(float dx, const float boxsize) {
     return dx;
 }
 
-__device__ __forceinline__ float distance_squared(const float3 &a, const float3 &b, const float boxsize) {
-    float dx = wrap(a.x - b.x, boxsize);
-    float dy = wrap(a.y - b.y, boxsize);
-    float dz = wrap(a.z - b.z, boxsize);
+__device__ __forceinline__ float distance_squared_old(const float3 &a, const float3 &b, const float boxsize) {
+    float dx = wrap_old(a.x - b.x, boxsize);
+    float dy = wrap_old(a.y - b.y, boxsize);
+    float dz = wrap_old(a.z - b.z, boxsize);
 
     return dx * dx + dy * dy + dz * dz;
+}
+
+template<int dim, typename tvec>
+__device__ __forceinline__ float distance_squared(
+    const Vec<dim,tvec> &a, const Vec<dim,tvec> &b, const tvec boxsize
+) {
+    tvec res = 0.;
+    #pragma unroll
+    for(int i=0; i<dim; i++) {
+        tvec dx = wrap_dx<tvec>(a[i] - b[i], boxsize);
+        res += dx*dx;
+    }
+    return res;
 }
 
 template<int dim>
@@ -582,11 +608,19 @@ __device__ __forceinline__ float3 LvlToHalfExtOld(int level) {
     return make_float3(ldexpf(1.0f, l.x-1), ldexpf(1.0f, l.y-1), ldexpf(1.0f, l.z-1));
 }
 
-__device__ __forceinline__ NodeWithExtOld NodeLvlToHalfExtOld(Node node) {
+__device__ __forceinline__ NodeWithExtOld NodeLvlToHalfExtOld(NodeOld node) {
     NodeWithExtOld node_ext;
     node_ext.center = node.center;
     node_ext.extent = LvlToHalfExtOld(node.level);
     return node_ext;
+}
+
+template <int dim, typename tvec>
+__device__ __forceinline__ NodeWithExt<dim,tvec> NodeLvlToHalfExt(Node<dim,tvec> node) {
+    return NodeWithExt<dim,tvec>{
+        node.center,
+        LvlToHalfExtOld(node.level)
+    };
 }
 
 template<int dim, typename tvec>
@@ -612,45 +646,56 @@ __device__ __forceinline__ NodeWithExt<dim,tvec> get_common_node(
     return node;
 }
 
-__device__ __forceinline__ float mindist2(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
-    float dx =  max(fabsf(wrap(x1.x-x2.x, boxsize)) - width_half.x, 0.0f);
-    float dy =  max(fabsf(wrap(x1.y-x2.y, boxsize)) - width_half.y, 0.0f);
-    float dz =  max(fabsf(wrap(x1.z-x2.z, boxsize)) - width_half.z, 0.0f);
+
+template<int dim, typename tvec>
+__device__ __forceinline__ tvec mindist2(
+    Vec<dim,tvec> x1,
+    Vec<dim,tvec> x2,
+    Vec<dim,tvec> width_half,
+    tvec boxsize=static_cast<tvec>(0)
+) {
+    tvec r2 = static_cast<tvec>(0);
+    #pragma unroll
+    for(int i=0; i<dim; i++) {
+        tvec dcent = wrap_dx<tvec>(x1[i]-x2[i], boxsize);
+        tvec dx = max(abs(dcent) - width_half[i], static_cast<tvec>(0));
+        r2 += dx*dx;
+    }
+    
+    return r2;
+}
+
+__device__ __forceinline__ float mindist2old(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
+    float dx =  max(fabsf(wrap_old(x1.x-x2.x, boxsize)) - width_half.x, 0.0f);
+    float dy =  max(fabsf(wrap_old(x1.y-x2.y, boxsize)) - width_half.y, 0.0f);
+    float dz =  max(fabsf(wrap_old(x1.z-x2.z, boxsize)) - width_half.z, 0.0f);
 
     return dx*dx + dy*dy + dz*dz;
 }
 
-__device__ __forceinline__ float maxdist2(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
-    float dx =  fabsf(wrap(x1.x-x2.x, boxsize)) + width_half.x;
-    float dy =  fabsf(wrap(x1.y-x2.y, boxsize)) + width_half.y;
-    float dz =  fabsf(wrap(x1.z-x2.z, boxsize)) + width_half.z;
+template<int dim, typename tvec>
+__device__ __forceinline__ tvec maxdist2(
+    Vec<dim,tvec> x1,
+    Vec<dim,tvec> x2,
+    Vec<dim,tvec> width_half,
+    tvec boxsize=static_cast<tvec>(0)
+) {
+    tvec r2 = static_cast<tvec>(0);
+    #pragma unroll
+    for(int i=0; i<dim; i++) {
+        tvec dcent = wrap_dx<tvec>(x1[i]-x2[i], boxsize);
+        tvec dx = max(abs(dcent) + width_half[i], static_cast<tvec>(0));
+        r2 += dx*dx;
+    }
+    return r2;
+}
+
+__device__ __forceinline__ float maxdist2old(float3 x1, float3 x2, float3 width_half, float boxsize=0.f) {
+    float dx =  fabsf(wrap_old(x1.x-x2.x, boxsize)) + width_half.x;
+    float dy =  fabsf(wrap_old(x1.y-x2.y, boxsize)) + width_half.y;
+    float dz =  fabsf(wrap_old(x1.z-x2.z, boxsize)) + width_half.z;
 
     return dx*dx + dy*dy + dz*dz;
-}
-
-__device__ __forceinline__ float NodePartMinDist2(const Node& node, const float3& part, float boxsize=0.f) {
-    // Minimum squared distance between a node and a particle
-    float3 half_ext = LvlToHalfExtOld(node.level);
-
-    return mindist2(part, node.center, half_ext, boxsize);
-}
-
-__device__ __forceinline__ float NodeNodeMinDist2(const Node& nodeA, const Node& nodeB, float boxsize=0.f) {
-    // The distance between the closest points inside two nodes
-    float3 hA = LvlToHalfExtOld(nodeA.level);
-    float3 hB = LvlToHalfExtOld(nodeB.level);
-    float3 half_ext = make_float3(hA.x + hB.x, hA.y + hB.y, hA.z + hB.z);
-
-    return mindist2(nodeA.center, nodeB.center, half_ext, boxsize);
-}
-
-__device__ __forceinline__ float NodeNodeMaxDist2(const Node& nodeA, const Node& nodeB, float boxsize=0.f) {
-    // The distance between the closest points inside two nodes
-    float3 hA = LvlToHalfExtOld(nodeA.level);
-    float3 hB = LvlToHalfExtOld(nodeB.level);
-    float3 half_ext = make_float3(hA.x + hB.x, hA.y + hB.y, hA.z + hB.z);
-
-    return maxdist2(nodeA.center, nodeB.center, half_ext, boxsize);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
