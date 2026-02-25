@@ -36,6 +36,7 @@ ffi::Error NodeToChildLabelFFIHost(
     ffi::AnyBuffer parent_spl,
     ffi::Result<ffi::AnyBuffer> node_igroup,
     float r2link,
+    int dim,
     size_t block_size
 ) {
     int size_parent = parent_igroup.element_count();
@@ -61,7 +62,29 @@ ffi::Error NodeToChildLabelFFIHost(
         &size_parent,
         &r2link
     };
-    const void* instance = (const void*)NodeToChildLabel;
+    
+
+    // We have template parameters, so we need to instantiate all valid templates.
+    // We select a function pointer through a map with a stable, type-erased signature.
+    using TTuple = std::tuple<int>;
+    using TFunc = const void*;
+
+    static const std::map<TTuple, TFunc> instance_map = {
+        { {2}, reinterpret_cast<TFunc>(&NodeToChildLabel<2>) },
+        { {3}, reinterpret_cast<TFunc>(&NodeToChildLabel<3>) }
+    };
+
+    const TTuple key = TTuple(dim);
+
+    const auto it = instance_map.find(key);
+    if (it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (dim)"\
+            " in NodeToChildLabelFFIHost -- Only supporting:\n"\
+            "(2), (3)"
+        );
+    }
+    const void* instance = it->second;
 
     cudaLaunchKernel(
         instance,
@@ -89,6 +112,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // parent_spl
         .Ret<ffi::AnyBuffer>() // node_igroup
         .Attr<float>("r2link")
+        .Attr<int>("dim")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
@@ -96,6 +120,58 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: FofNode2Node                              */
 /* ---------------------------------------------------------------------------------------------- */
+
+
+using FofNode2NodeDispatchFn = ffi::Error (*) (cudaStream_t stream,
+    const void* parent_ilist_spl,
+    const void* parent_ilist,
+    const void* parent_spl,
+    const void* nodes,
+    const void* node_igroup_in,
+    void* node_igroup,
+    void* node_ilist_spl,
+    void* node_ilist,
+    float r2link,
+    float boxsize,
+    int size_parent,
+    int size_node,
+    size_t size_node_ilist,
+    int block_size
+);
+template<int dim, typename tvec>
+static ffi::Error FofNode2NodeDispatchWrapper(cudaStream_t stream,
+    const void* parent_ilist_spl,
+    const void* parent_ilist,
+    const void* parent_spl,
+    const void* nodes,
+    const void* node_igroup_in,
+    void* node_igroup,
+    void* node_ilist_spl,
+    void* node_ilist,
+    float r2link,
+    float boxsize,
+    int size_parent,
+    int size_node,
+    size_t size_node_ilist,
+    int block_size
+) {
+    return FofNode2Node<dim, tvec> (stream,
+        reinterpret_cast<const int*>(parent_ilist_spl),
+        reinterpret_cast<const int*>(parent_ilist),
+        reinterpret_cast<const int*>(parent_spl),
+        reinterpret_cast<const Node<dim,tvec>*>(nodes),
+        reinterpret_cast<const int*>(node_igroup_in),
+        reinterpret_cast<int*>(node_igroup),
+        reinterpret_cast<int*>(node_ilist_spl),
+        reinterpret_cast<int*>(node_ilist),
+        r2link,
+        boxsize,
+        size_parent,
+        size_node,
+        size_node_ilist,
+        block_size
+    );
+}
 
 
 ffi::Error FofNode2NodeFFIHost(
@@ -110,22 +186,47 @@ ffi::Error FofNode2NodeFFIHost(
     ffi::Result<ffi::AnyBuffer> node_ilist,
     float r2link,
     float boxsize,
-    int block_size
+    int block_size,
+    int dim
 ) {
     int size_parent = parent_spl.element_count() - 1;
     int size_node = node_igroup->element_count();
     size_t size_node_ilist = node_ilist->element_count();
+    DT tvec = nodes.element_type();
+
+
+    // We have template parameters, so we need to instantiate all valid templates.
+    // We select a function pointer through a map with a stable, type-erased signature.
+    using TTuple = std::tuple<int, DT>;
+    using TFunc = FofNode2NodeDispatchFn;
+
+    static const std::map<TTuple, TFunc> instance_map = {
+        { {2, DT::F32}, &FofNode2NodeDispatchWrapper<2, float> },
+        { {3, DT::F32}, &FofNode2NodeDispatchWrapper<3, float> }
+    };
+
+    const TTuple key = TTuple(dim, tvec);
+
+    const auto it = instance_map.find(key);
+    if (it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (dim, tvec)"\
+            " in FofNode2NodeFFIHost -- Only supporting:\n"\
+            "(2, float), (3, float)"
+        );
+    }
+    FofNode2NodeDispatchFn instance = it->second;
 
     // Now call our function
-    ffi::Error result = FofNode2Node(stream,
-        reinterpret_cast<const int*>(parent_ilist_spl.untyped_data()),
-        reinterpret_cast<const int*>(parent_ilist.untyped_data()),
-        reinterpret_cast<const int*>(parent_spl.untyped_data()),
-        reinterpret_cast<const Node<3,float>*>(nodes.untyped_data()),
-        reinterpret_cast<const int*>(node_igroup_in.untyped_data()),
-        reinterpret_cast<int*>(node_igroup->untyped_data()),
-        reinterpret_cast<int*>(node_ilist_spl->untyped_data()),
-        reinterpret_cast<int*>(node_ilist->untyped_data()),
+    ffi::Error result = instance(stream,
+        parent_ilist_spl.untyped_data(),
+        parent_ilist.untyped_data(),
+        parent_spl.untyped_data(),
+        nodes.untyped_data(),
+        node_igroup_in.untyped_data(),
+        node_igroup->untyped_data(),
+        node_ilist_spl->untyped_data(),
+        node_ilist->untyped_data(),
         r2link,
         boxsize,
         size_parent,
@@ -155,13 +256,57 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::AnyBuffer>() // node_ilist
         .Attr<float>("r2link")
         .Attr<float>("boxsize")
-        .Attr<int>("block_size"),
+        .Attr<int>("block_size")
+        .Attr<int>("dim"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: FofLeaf2Leaf                              */
 /* ---------------------------------------------------------------------------------------------- */
+
+
+using FofLeaf2LeafDispatchFn = ffi::Error (*) (cudaStream_t stream,
+    const void* ilist_spl,
+    const void* ilist,
+    const void* spl,
+    const void* pos,
+    const void* part_igroup_in,
+    void* part_igroup,
+    float r2link,
+    float boxsize,
+    int size_leaves,
+    int size_part,
+    int block_size
+);
+template<int dim, typename tvec>
+static ffi::Error FofLeaf2LeafDispatchWrapper(cudaStream_t stream,
+    const void* ilist_spl,
+    const void* ilist,
+    const void* spl,
+    const void* pos,
+    const void* part_igroup_in,
+    void* part_igroup,
+    float r2link,
+    float boxsize,
+    int size_leaves,
+    int size_part,
+    int block_size
+) {
+    return FofLeaf2Leaf<dim, tvec> (stream,
+        reinterpret_cast<const int*>(ilist_spl),
+        reinterpret_cast<const int*>(ilist),
+        reinterpret_cast<const int*>(spl),
+        reinterpret_cast<const Vec<dim,tvec>*>(pos),
+        reinterpret_cast<const int*>(part_igroup_in),
+        reinterpret_cast<int*>(part_igroup),
+        r2link,
+        boxsize,
+        size_leaves,
+        size_part,
+        block_size
+    );
+}
 
 
 ffi::Error FofLeaf2LeafFFIHost(
@@ -178,15 +323,40 @@ ffi::Error FofLeaf2LeafFFIHost(
 ) {
     int size_leaves = spl.element_count() - 1;
     int size_part = part_igroup->element_count();
+    int dim = pos.dimensions()[1];
+    DT tvec = pos.element_type();
+
+
+    // We have template parameters, so we need to instantiate all valid templates.
+    // We select a function pointer through a map with a stable, type-erased signature.
+    using TTuple = std::tuple<int, DT>;
+    using TFunc = FofLeaf2LeafDispatchFn;
+
+    static const std::map<TTuple, TFunc> instance_map = {
+        { {2, DT::F32}, &FofLeaf2LeafDispatchWrapper<2, float> },
+        { {3, DT::F32}, &FofLeaf2LeafDispatchWrapper<3, float> }
+    };
+
+    const TTuple key = TTuple(dim, tvec);
+
+    const auto it = instance_map.find(key);
+    if (it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (dim, tvec)"\
+            " in FofLeaf2LeafFFIHost -- Only supporting:\n"\
+            "(2, float), (3, float)"
+        );
+    }
+    FofLeaf2LeafDispatchFn instance = it->second;
 
     // Now call our function
-    ffi::Error result = FofLeaf2Leaf(stream,
-        reinterpret_cast<const int*>(ilist_spl.untyped_data()),
-        reinterpret_cast<const int*>(ilist.untyped_data()),
-        reinterpret_cast<const int*>(spl.untyped_data()),
-        reinterpret_cast<const Vec<3,float>*>(pos.untyped_data()),
-        reinterpret_cast<const int*>(part_igroup_in.untyped_data()),
-        reinterpret_cast<int*>(part_igroup->untyped_data()),
+    ffi::Error result = instance(stream,
+        ilist_spl.untyped_data(),
+        ilist.untyped_data(),
+        spl.untyped_data(),
+        pos.untyped_data(),
+        part_igroup_in.untyped_data(),
+        part_igroup->untyped_data(),
         r2link,
         boxsize,
         size_leaves,

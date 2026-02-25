@@ -43,6 +43,7 @@ __device__ __forceinline__ void link_roots(int* __restrict__ igroup, int a, int 
 /*                                  Kernels for node-node linking                                 */
 /* ---------------------------------------------------------------------------------------------- */
 
+template<int dim>
 __global__ void NodeToChildLabel(
     const int* __restrict__ parent_igroup,
     const bool* __restrict__ parent_is_local,
@@ -58,7 +59,7 @@ __global__ void NodeToChildLabel(
     int node_root = parent_igroup[node];
     if(node_root >= size_parent || !parent_is_local[node_root])
         return;
-    float L2 = LvlToExt<3,float>(parent_lvl[node]).norm2();
+    float L2 = LvlToExt<dim,float>(parent_lvl[node]).norm2();
 
     int inode_start = parent_spl[node], inode_end = parent_spl[node + 1];
     for(int inode = inode_start + threadIdx.x; inode < inode_end; inode += blockDim.x) {
@@ -72,12 +73,12 @@ __global__ void NodeToChildLabel(
     }
 }
 
-template<int pass>
+template<int pass, int dim, typename tvec>
 __global__ void NodeFof_Link_Count_Insert(
     const int* __restrict__ parent_ilist_splits,
     const int* __restrict__ parent_ilist,
     const int* __restrict__ spl,
-    const Node<3,float>* __restrict__ nodes,
+    const Node<dim,tvec>* __restrict__ nodes,
     const int* __restrict__ node_ilist_spl, // Input (pass 2)
     int* __restrict__ node_igroup, // Output (pass 0) and Input (pass 0-2)
     int* __restrict__ interaction_count, // Output (pass 1)
@@ -105,7 +106,7 @@ __global__ void NodeFof_Link_Count_Insert(
         // we set overhead threads to the last node to avoid adding many conditionals
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
         bool valid = iqoff + threadIdx.x < inodeQ_end;
-        NodeWithExt nodeQ = NodeLvlToHalfExt<3,float>(nodes[inodeQ]);
+        NodeWithExt nodeQ = NodeLvlToHalfExt<dim,tvec>(nodes[inodeQ]);
         
         PrefetchList<int> pf_ilist(parent_ilist, parent_ilist_splits[parentQ], parent_ilist_splits[parentQ + 1]);
 
@@ -125,14 +126,14 @@ __global__ void NodeFof_Link_Count_Insert(
 
             int inodeT_start = spl[parentT], inodeT_end = spl[parentT + 1];
 
-            NodeWithExt<3,float>* nodeT = reinterpret_cast<NodeWithExt<3,float>*>(smem);
+            NodeWithExt<dim,tvec>* nodeT = reinterpret_cast<NodeWithExt<dim,tvec>*>(smem);
             int* igroupT = reinterpret_cast<int*>(nodeT + blockDim.x);
 
             for(int itoff=inodeT_start; itoff < inodeT_end; itoff += blockDim.x) {
                 int inodeT = itoff + threadIdx.x;
 
                 if(inodeT < inodeT_end) {
-                    nodeT[threadIdx.x] = NodeLvlToHalfExt<3,float>(nodes[inodeT]);
+                    nodeT[threadIdx.x] = NodeLvlToHalfExt<dim,tvec>(nodes[inodeT]);
                     igroupT[threadIdx.x] = node_igroup[inodeT];
                 }
                 __syncthreads();
@@ -156,9 +157,9 @@ __global__ void NodeFof_Link_Count_Insert(
                     // (3) The other node is outside the linking length -> do noting
 
                     // Upper and lower bound to the distance between any two particles in A and B:
-                    NodeWithExt<3,float> lT = nodeT[j];
-                    float r2max = maxdist2<3,float>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
-                    float r2min = mindist2<3,float>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
+                    NodeWithExt<dim,tvec> lT = nodeT[j];
+                    float r2max = maxdist2<dim,tvec>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
+                    float r2min = mindist2<dim,tvec>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
 
                     float L2 =  lT.extent.norm2() * 4.f;
                     
@@ -209,12 +210,13 @@ __global__ void KernelContractLinks(
     igroup[idx] = igr;
 }
 
+template <int dim, typename tvec>
 ffi::Error FofNode2Node(
     cudaStream_t stream,
     const int* __restrict__ parent_ilist_spl,
     const int* __restrict__ parent_ilist,
     const int* __restrict__ parent_spl,
-    const Node<3,float>* __restrict__ nodes,
+    const Node<dim,tvec>* __restrict__ nodes,
     const int* __restrict__ node_igroup_in,
     int* __restrict__ node_igroup,
     int* __restrict__ node_ilist_spl,
@@ -227,7 +229,7 @@ ffi::Error FofNode2Node(
     const size_t size_node_ilist,
     const int block_size
 ) {
-    size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt<3,float>) + sizeof(int));
+    size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt<dim,tvec>) + sizeof(int));
 
     cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(size_node+1), stream);
     cudaMemsetAsync(node_igroup, 0, sizeof(int)*(size_node), stream);
@@ -238,7 +240,7 @@ ffi::Error FofNode2Node(
     cudaMemcpyAsync(node_igroup, node_igroup_in, size_node*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // pass 0: link
-    NodeFof_Link_Count_Insert<0><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
+    NodeFof_Link_Count_Insert<0,dim,tvec><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
         parent_ilist_spl, parent_ilist, parent_spl, nodes, nullptr,
         node_igroup, nullptr, nullptr,
         r2link, boxsize, size_node_ilist
@@ -249,7 +251,7 @@ ffi::Error FofNode2Node(
     KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(node_igroup, size_node);
 
     // pass 1: count interactions
-    NodeFof_Link_Count_Insert<1><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
+    NodeFof_Link_Count_Insert<1,dim,tvec><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
         parent_ilist_spl, parent_ilist, parent_spl, nodes, nullptr,
         node_igroup, interaction_count, nullptr,
         r2link, boxsize, size_node_ilist
@@ -273,7 +275,7 @@ ffi::Error FofNode2Node(
     );
 
     // pass 2: insert interactions
-    NodeFof_Link_Count_Insert<2><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
+    NodeFof_Link_Count_Insert<2,dim,tvec><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
         parent_ilist_spl, parent_ilist, parent_spl, nodes, node_ilist_spl,
         node_igroup, nullptr, node_ilist,
         r2link, boxsize, size_node_ilist
@@ -290,12 +292,12 @@ ffi::Error FofNode2Node(
 /*                              Kernels for particle-particle linking                             */
 /* ---------------------------------------------------------------------------------------------- */
 
-
+template<int dim, typename tvec>
 __global__ void FofLeaf2LeafLink(
     const int* __restrict__ ilist_spl,
     const int* __restrict__ ilist,
     const int* __restrict__ spl,
-    const Vec<3,float>* __restrict__ pos,
+    const Vec<dim,tvec>* __restrict__ pos,
     int* __restrict__ part_igroup,
     // Parameters:
     float r2link,
@@ -313,7 +315,7 @@ __global__ void FofLeaf2LeafLink(
         
         PrefetchList<int> pf_ilist(ilist, ilist_spl[leafQ], ilist_spl[leafQ + 1]);
         
-        Vec<3,float> xQ = pos[ipartQ];
+        Vec<dim,tvec> xQ = pos[ipartQ];
         int igroupQ = part_igroup[ipartQ];
 
         while(!pf_ilist.finished()) {
@@ -324,7 +326,7 @@ __global__ void FofLeaf2LeafLink(
 
             int ipartT_start = spl[nodeT], ipartT_end = spl[nodeT + 1];
 
-            PosId<3,float>* tileT = reinterpret_cast<PosId<3,float>*>(smem);
+            PosId<dim,tvec>* tileT = reinterpret_cast<PosId<dim,tvec>*>(smem);
 
             for(int itoff=ipartT_start; itoff < ipartT_end; itoff += blockDim.x) {
                 int ipartT = itoff + threadIdx.x;
@@ -338,7 +340,7 @@ __global__ void FofLeaf2LeafLink(
                     if(!valid)
                         break;
 
-                    float r2 = distance_squared<3,float>(xQ, tileT[j].pos, boxsize);
+                    float r2 = distance_squared<dim,tvec>(xQ, tileT[j].pos, boxsize);
 
                     if((igroupQ != tileT[j].id) && (r2 <= r2link))
                         link_roots(part_igroup, ipartQ, itoff+j);
@@ -349,12 +351,13 @@ __global__ void FofLeaf2LeafLink(
     }
 }
 
+template<int dim, typename tvec>
 ffi::Error FofLeaf2Leaf(
     cudaStream_t stream,
     const int* __restrict__ ilist_spl,
     const int* __restrict__ ilist,
     const int* __restrict__ spl,
-    const Vec<3,float>* __restrict__ pos,
+    const Vec<dim,tvec>* __restrict__ pos,
     const int* __restrict__ part_igroup_in,
     int* __restrict__ part_igroup,
     // Parameters:
@@ -367,7 +370,7 @@ ffi::Error FofLeaf2Leaf(
     cudaMemcpyAsync(part_igroup, part_igroup_in, size_part*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // Now do particle-particle linking
-    size_t smem = block_size * sizeof(PosId<3,float>);
+    size_t smem = block_size * sizeof(PosId<dim,tvec>);
     FofLeaf2LeafLink<<< size_leaves, block_size, smem, stream >>> (
         ilist_spl, ilist, spl, pos, part_igroup,
         r2link, boxsize
