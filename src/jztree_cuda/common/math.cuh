@@ -7,6 +7,8 @@
 /*                                 Data type specific definitions                                 */
 /* ---------------------------------------------------------------------------------------------- */
 
+template <class> inline constexpr bool dependent_false_v = false;
+
 template<typename tvec>
 __device__ __forceinline__ tvec invalid_val() {
     if constexpr (std::is_same_v<tvec, float>) {
@@ -62,9 +64,7 @@ __host__ __device__ __forceinline__ int max_node_lvl() {
         return 64;
     } 
     else {
-        static_assert(std::is_same_v<tvec, void>, 
-            "max_node_lvl<T>: unsupported type. Add a branch for this T."
-        );
+        static_assert(dependent_false_v<tvec>, "max_node_lvl<T>: unsupported type");
     }
 }
 
@@ -121,7 +121,7 @@ __device__ __forceinline__ float dotf3(const float3 &a, const float3 b) {
 /*                                         Kahan Summation                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
-__forceinline__ __device__ void kahan_add(float &sum, float add, float &c) {
+__forceinline__ __device__ void kahan_add_old(float &sum, float add, float &c) {
     // Cancels summation error with an extra variable c, that needs to start at 0
     // https://en.wikipedia.org/wiki/Kahan_summation_algorithm
     float y = add - c;
@@ -130,18 +130,43 @@ __forceinline__ __device__ void kahan_add(float &sum, float add, float &c) {
     sum = t;
 }
 
+template<typename tvec>
+__forceinline__ __device__ void kahan_add(
+    tvec &sum, tvec add, tvec &c
+) {
+    if constexpr (std::is_floating_point_v<tvec>) {
+        tvec y = add - c;
+        tvec t = sum + y;
+        c = (t - sum) - y;
+        sum = t;
+    } else {
+        // for integer types we simply do a normal add, since they are anyways exact
+        sum += add;
+    }
+}
+
+template<int dim, typename tvec>
+__forceinline__ __device__ void kahan_add_vec(
+    Vec<dim,tvec> &sum, Vec<dim,tvec> add, Vec<dim,tvec> &c
+) {
+    #pragma unroll
+    for(int i=0; i<dim; i++) {
+        kahan_add<tvec>(sum[i], add[i], c[i]);
+    }
+}
+
 __forceinline__ __device__ void kahan_add_f4(float4 &sum, float4 add, float4 &c) {
-    kahan_add(sum.x, add.x, c.x);
-    kahan_add(sum.y, add.y, c.y);
-    kahan_add(sum.z, add.z, c.z);
-    kahan_add(sum.w, add.w, c.w);
+    kahan_add_old(sum.x, add.x, c.x);
+    kahan_add_old(sum.y, add.y, c.y);
+    kahan_add_old(sum.z, add.z, c.z);
+    kahan_add_old(sum.w, add.w, c.w);
 }
 
 template<int num>
 __forceinline__ __device__ void kahan_add_array(float *sum, float *add, float *c) {
     #pragma unroll
     for (int i = 0; i < num; i++) {
-        kahan_add(sum[i], add[i], c[i]);
+        kahan_add_old(sum[i], add[i], c[i]);
     }
 }
 

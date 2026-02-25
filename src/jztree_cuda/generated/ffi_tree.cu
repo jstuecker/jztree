@@ -437,6 +437,8 @@ ffi::Error CenterOfMassFFIHost(
     size_t block_size
 ) {
     int nnodes = isplit.element_count() - 1;
+    int dim = pos.dimensions()[1];
+    DT tvec = pos.element_type();
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(isplit.element_count() - 1, block_size));
     size_t smem = 0;
@@ -454,7 +456,31 @@ ffi::Error CenterOfMassFFIHost(
         &nnodes,
         &kahan
     };
-    const void* instance = (const void*)CenterOfMass;
+    
+
+    // We have template parameters, so we need to instantiate all valid templates.
+    // We select a function pointer through a map with a stable, type-erased signature.
+    using TTuple = std::tuple<int, DT>;
+    using TFunc = const void*;
+
+    static const std::map<TTuple, TFunc> instance_map = {
+        { {2, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<2, float>) },
+        { {2, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<2, double>) },
+        { {3, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<3, float>) },
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<3, double>) }
+    };
+
+    const TTuple key = TTuple(dim, tvec);
+
+    const auto it = instance_map.find(key);
+    if (it == instance_map.end()) {
+        return ffi::Error::Internal(
+            "\nUnsupported template parameter combination for (dim, tvec)"\
+            " in CenterOfMassFFIHost -- Only supporting:\n"\
+            "(2, float), (2, double), (3, float), (3, double)"
+        );
+    }
+    const void* instance = it->second;
 
     cudaLaunchKernel(
         instance,

@@ -149,7 +149,7 @@ add_dim_dtype_templates(functions["GetBoundaryExtendPerLevel"], "posz")
 functions["GetBoundaryExtendPerLevel"].par["size"].expression = "posz.dimensions()[0]"
 functions["GetBoundaryExtendPerLevel"].template_par["left"].instances = ["true", "false"]
 
-# add_dim_dtype_templates(functions["CenterOfMass"], "posz")
+add_dim_dtype_templates(functions["CenterOfMass"], "pos")
 functions["CenterOfMass"].grid_size_expression = "div_ceil(isplit.element_count() - 1, block_size)"
 functions["CenterOfMass"].par["nnodes"].expression = "isplit.element_count() - 1"
 

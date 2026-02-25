@@ -330,11 +330,12 @@ __global__ void GetNodeGeometry(
 /*                                         Center of Mass                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
+template<int dim, typename tvec>
 __global__ void CenterOfMass(
     const int* __restrict__ isplit,
-    const float3* __restrict__ pos,
-    const float* __restrict__ mass,
-    PosMass* __restrict__ com_out,
+    const Vec<dim,tvec>* __restrict__ pos,
+    const tvec* __restrict__ mass,
+    PosMass<dim,tvec>* __restrict__ com_out,
     int nnodes,
     bool kahan
 ) {
@@ -346,31 +347,39 @@ __global__ void CenterOfMass(
     int istart = isplit[inode], iend = isplit[inode + 1];
 
     if(istart >= iend) {
-        com_out[inode] = {CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F};
+        com_out[inode] = {Vec<dim,tvec>::constant(invalid_val<tvec>()), invalid_val<tvec>()};
         return;
     }
     
-    float4 mp_sum = {0.f, 0.f, 0.f, 0.f};
-    float4 mp_kahan = {0.f, 0.f, 0.f, 0.f};
+    Vec<dim+1,tvec> mp_sum = Vec<dim+1,tvec>::constant(static_cast<tvec>(0));
+    Vec<dim+1,tvec> mp_kahan = Vec<dim+1,tvec>::constant(static_cast<tvec>(0));
 
     for(int ip = istart; ip < iend; ip++) {
-        float m = mass[ip];
-        float4 mpnew = {m, pos[ip].x * m, pos[ip].y * m, pos[ip].z * m};
+        tvec m = mass[ip];
+        Vec<dim+1,tvec> mp_new;
+        #pragma unroll
+        for(int i=0; i<dim; i++)
+            mp_new[i] = m * pos[ip][i];
+        mp_new[dim] = m;
 
         if(kahan)
-            kahan_add_f4(mp_sum, mpnew, mp_kahan);
+            kahan_add_vec<dim+1,tvec>(mp_sum, mp_new, mp_kahan);
         else
-            mp_sum = mp_sum + mpnew;
+            mp_sum = mp_sum + mp_new;
     }
 
-    if (mp_sum.x > 0.f) {
-        PosMass out;
-        out.pos = (1.f / mp_sum.x) * make_float3(mp_sum.y, mp_sum.z, mp_sum.w);
-        out.mass = mp_sum.x;
+    if (mp_sum[dim] > static_cast<tvec>(0)) {
+        PosMass<dim,tvec> out;
+        out.mass = mp_sum[dim];
+        tvec invmass = static_cast<tvec>(1) / out.mass;
+        #pragma unroll
+        for(int i=0; i<dim; i++) {
+            out.pos[i] = invmass * mp_sum[i];
+        }
         com_out[inode] = out;
     }
     else {
-        com_out[inode].f4 = make_float4(CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F, CUDART_NAN_F);
+        com_out[inode] = PosMass<dim,tvec>{Vec<dim,tvec>::constant(invalid_val<tvec>()), invalid_val<tvec>()};
     }
 }
 
