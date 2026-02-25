@@ -39,7 +39,7 @@ ffi::Error FlagLeafBoundariesFFIHost(
     int scan_size,
     size_t block_size
 ) {
-    int size_part = posz.element_count()/3;
+    int size_part = posz.dimensions()[0];
     int dim = posz.dimensions()[1];
     DT tvec = posz.element_type();
     dim3 blockDim(block_size);
@@ -255,7 +255,7 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
     size_t block_size,
     bool left
 ) {
-    int size = posz.element_count()/3;
+    int size = posz.dimensions()[0];
     int dim = posz.dimensions()[1];
     DT tvec = posz.element_type();
 
@@ -339,7 +339,7 @@ ffi::Error GetNodeGeometryFFIHost(
     size_t block_size
 ) {
     int size_nodes = level->element_count();
-    int size_part = pos.element_count()/3;
+    int size_part = pos.dimensions()[0];
     int dim = pos.dimensions()[1];
     DT tvec = pos.element_type();
     dim3 blockDim(block_size);
@@ -373,7 +373,10 @@ ffi::Error GetNodeGeometryFFIHost(
     using TFunc = const void*;
 
     static const std::map<TTuple, TFunc> instance_map = {
-        { {3, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<3, float>) }
+        { {2, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<2, float>) },
+        { {2, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<2, double>) },
+        { {3, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<3, float>) },
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<3, double>) }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -383,7 +386,7 @@ ffi::Error GetNodeGeometryFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in GetNodeGeometryFFIHost -- Only supporting:\n"\
-            "(3, float)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     const void* instance = it->second;

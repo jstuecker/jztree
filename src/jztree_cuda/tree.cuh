@@ -310,8 +310,8 @@ __global__ void GetNodeGeometry(
         return;
     if(idx >= nnodes[0]) {
         level[idx] = -1000;
-        center[idx] = Vec<3,tvec>::constant(invalid_val<tvec>()); // !!! Fix later
-        extent[idx] = Vec<3,tvec>::constant(0);
+        center[idx] = Vec<dim,tvec>::constant(invalid_val<tvec>()); // !!! Fix later
+        extent[idx] = Vec<dim,tvec>::constant(0);
         return;
     }
     

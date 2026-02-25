@@ -132,7 +132,7 @@ functions = parse.get_functions_from_file(
 # functions["FlagLeafBoundaries"].template_par["tpos"].instances = pos_types
 # functions["FlagLeafBoundaries"].template_par["tpos"].expression = "posz.element_type()"
 add_dim_dtype_templates(functions["FlagLeafBoundaries"], "posz")
-functions["FlagLeafBoundaries"].par["size_part"].expression = "posz.element_count()/3"
+functions["FlagLeafBoundaries"].par["size_part"].expression = "posz.dimensions()[0]"
 functions["FlagLeafBoundaries"].grid_size_expression = "div_ceil(size_part+1, block_size)"
 functions["FlagLeafBoundaries"].smem_size_expression = "(block_size + 2*scan_size + 1) * sizeof(int32_t)"
 
@@ -140,13 +140,13 @@ add_dim_dtype_templates(functions["FindNodeBoundaries"], "pos_in")
 functions["FindNodeBoundaries"].par["size_nodes"].expression = "nodes_levels->element_count()"
 functions["FindNodeBoundaries"].grid_size_expression = "div_ceil(size_nodes, block_size)"
 
-add_dim_dtype_templates(functions["GetNodeGeometry"], "pos", dimensions=(3,), pos_types=("float",))
+add_dim_dtype_templates(functions["GetNodeGeometry"], "pos")
 functions["GetNodeGeometry"].par["size_nodes"].expression = "level->element_count()"
-functions["GetNodeGeometry"].par["size_part"].expression = "pos.element_count()/3"
+functions["GetNodeGeometry"].par["size_part"].expression = "pos.dimensions()[0]"
 functions["GetNodeGeometry"].grid_size_expression = "div_ceil(size_nodes, block_size)"
 
 add_dim_dtype_templates(functions["GetBoundaryExtendPerLevel"], "posz")
-functions["GetBoundaryExtendPerLevel"].par["size"].expression = "posz.element_count()/3"
+functions["GetBoundaryExtendPerLevel"].par["size"].expression = "posz.dimensions()[0]"
 functions["GetBoundaryExtendPerLevel"].template_par["left"].instances = ["true", "false"]
 
 # add_dim_dtype_templates(functions["CenterOfMass"], "posz")
