@@ -132,6 +132,8 @@ ffi::Error FindNodeBoundariesFFIHost(
     ffi::Result<ffi::AnyBuffer> nodes_levels,
     ffi::Result<ffi::AnyBuffer> nodes_lbound,
     ffi::Result<ffi::AnyBuffer> nodes_rbound,
+    int lvl_max,
+    int lvl_invalid,
     size_t block_size
 ) {
     int size_nodes = nodes_levels->element_count();
@@ -155,7 +157,9 @@ ffi::Error FindNodeBoundariesFFIHost(
         &nodes_levels_arg,
         &nodes_lbound_arg,
         &nodes_rbound_arg,
-        &size_nodes
+        &size_nodes,
+        &lvl_max,
+        &lvl_invalid
     };
     
 
@@ -209,6 +213,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::AnyBuffer>() // nodes_levels
         .Ret<ffi::AnyBuffer>() // nodes_lbound
         .Ret<ffi::AnyBuffer>() // nodes_rbound
+        .Attr<int>("lvl_max")
+        .Attr<int>("lvl_invalid")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
@@ -224,7 +230,9 @@ using GetBoundaryExtendPerLevelDispatchFn = std::string (*) (cudaStream_t stream
     const void* posz,
     void* index_of_lvl,
     int size,
-    size_t block_size
+    size_t block_size,
+    int lvl_min,
+    int lvl_max
 );
 template<bool left, int dim, typename tvec>
 static std::string GetBoundaryExtendPerLevelDispatchWrapper(cudaStream_t stream,
@@ -233,7 +241,9 @@ static std::string GetBoundaryExtendPerLevelDispatchWrapper(cudaStream_t stream,
     const void* posz,
     void* index_of_lvl,
     int size,
-    size_t block_size
+    size_t block_size,
+    int lvl_min,
+    int lvl_max
 ) {
     return GetBoundaryExtendPerLevel<left, dim, tvec> (stream,
         reinterpret_cast<const Vec<dim,tvec>*>(pos_ref),
@@ -241,7 +251,9 @@ static std::string GetBoundaryExtendPerLevelDispatchWrapper(cudaStream_t stream,
         reinterpret_cast<const Vec<dim,tvec>*>(posz),
         reinterpret_cast<int32_t*>(index_of_lvl),
         size,
-        block_size
+        block_size,
+        lvl_min,
+        lvl_max
     );
 }
 
@@ -253,6 +265,8 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
     ffi::AnyBuffer posz,
     ffi::Result<ffi::AnyBuffer> index_of_lvl,
     size_t block_size,
+    int lvl_min,
+    int lvl_max,
     bool left
 ) {
     int size = posz.dimensions()[0];
@@ -295,7 +309,9 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
         posz.untyped_data(),
         index_of_lvl->untyped_data(),
         size,
-        block_size
+        block_size,
+        lvl_min,
+        lvl_max
     );
     // Check if the function returned an error string
     if (!result.empty()) {
@@ -318,6 +334,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // posz
         .Ret<ffi::AnyBuffer>() // index_of_lvl
         .Attr<size_t>("block_size")
+        .Attr<int>("lvl_min")
+        .Attr<int>("lvl_max")
         .Attr<bool>("left"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
@@ -336,6 +354,7 @@ ffi::Error GetNodeGeometryFFIHost(
     ffi::Result<ffi::AnyBuffer> level,
     ffi::Result<ffi::AnyBuffer> center,
     ffi::Result<ffi::AnyBuffer> extent,
+    int lvl_invalid,
     size_t block_size
 ) {
     int size_nodes = level->element_count();
@@ -363,7 +382,8 @@ ffi::Error GetNodeGeometryFFIHost(
         &center_arg,
         &extent_arg,
         &size_nodes,
-        &size_part
+        &size_part,
+        &lvl_invalid
     };
     
 
@@ -418,6 +438,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::AnyBuffer>() // level
         .Ret<ffi::AnyBuffer>() // center
         .Ret<ffi::AnyBuffer>() // extent
+        .Attr<int>("lvl_invalid")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

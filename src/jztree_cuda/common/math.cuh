@@ -31,45 +31,45 @@ __device__ __forceinline__ tvec invalid_val() {
     }
 }
 
-template <typename tvec>
-__device__ __forceinline__ int min_node_lvl() {
-    if constexpr (std::is_same_v<tvec, float>) {
-        return -450;
-    } 
-    else if constexpr (std::is_same_v<tvec, double>) {
-        return -3225;
-    } 
-    else if constexpr (std::is_same_v<tvec, int32_t>) {
-        return 0;
-    } 
-    else if constexpr (std::is_same_v<tvec, int64_t>) {
-        return 0;
-    } 
-    else {
-        static_assert(std::is_same_v<tvec, void>, 
-            "min_node_lvl<T>: unsupported type. Add a branch for this T."
-        );
-    }
-}
+// template <typename tvec>
+// __device__ __forceinline__ int min_node_lvl() {
+//     if constexpr (std::is_same_v<tvec, float>) {
+//         return -450;
+//     } 
+//     else if constexpr (std::is_same_v<tvec, double>) {
+//         return -3225;
+//     } 
+//     else if constexpr (std::is_same_v<tvec, int32_t>) {
+//         return 0;
+//     } 
+//     else if constexpr (std::is_same_v<tvec, int64_t>) {
+//         return 0;
+//     } 
+//     else {
+//         static_assert(std::is_same_v<tvec, void>, 
+//             "min_node_lvl<T>: unsupported type. Add a branch for this T."
+//         );
+//     }
+// }
 
-template <typename tvec>
-__host__ __device__ __forceinline__ int max_node_lvl() {
-    if constexpr (std::is_same_v<tvec, float>) {
-        return 388; // 128*3 + 3 + 1
-    } 
-    else if constexpr (std::is_same_v<tvec, double>) {
-        return 3075; // unsure about this
-    } 
-    else if constexpr (std::is_same_v<tvec, int32_t>) {
-        return 32;
-    } 
-    else if constexpr (std::is_same_v<tvec, int64_t>) {
-        return 64;
-    } 
-    else {
-        static_assert(dependent_false_v<tvec>, "max_node_lvl<T>: unsupported type");
-    }
-}
+// template <typename tvec>
+// __host__ __device__ __forceinline__ int max_node_lvl() {
+//     if constexpr (std::is_same_v<tvec, float>) {
+//         return 388; // 128*3 + 3 + 1
+//     } 
+//     else if constexpr (std::is_same_v<tvec, double>) {
+//         return 3075; // unsure about this
+//     } 
+//     else if constexpr (std::is_same_v<tvec, int32_t>) {
+//         return 32;
+//     } 
+//     else if constexpr (std::is_same_v<tvec, int64_t>) {
+//         return 64;
+//     } 
+//     else {
+//         static_assert(dependent_false_v<tvec>, "max_node_lvl<T>: unsupported type");
+//     }
+// }
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                           Vector Math                                          */

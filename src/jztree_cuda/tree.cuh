@@ -92,7 +92,9 @@ __global__ void FindNodeBoundaries(
     int32_t* nodes_levels,
     int32_t* nodes_lbound,
     int32_t* nodes_rbound,
-    const int size_nodes
+    const int size_nodes,
+    const int lvl_max,
+    const int lvl_invalid
 ) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     int n = nleaves[0];
@@ -102,7 +104,7 @@ __global__ void FindNodeBoundaries(
         return;
     if (idx >= nnodes) {
         // Set values for undefined nodes
-        nodes_levels[idx] = -1000;
+        nodes_levels[idx] = lvl_invalid;
         nodes_lbound[idx] = n;
         nodes_rbound[idx] = n;
 
@@ -130,12 +132,12 @@ __global__ void FindNodeBoundaries(
     if(msb_diff_level<dim,tvec>(pos_in[0], p2) <= target_level) {
         // Node goes until left-domain boundary... We have no left parent
         lbound = 0;
-        lvl_left = 388; // larger than any possible level
+        lvl_left = lvl_max; // larger than any possible level
     } else {
         // ibefore is the an index (left) outside of the node, iinside is an index inside
         // We do a binary search until they lie next to each other:
         int ibefore = 0, iinside = idx;
-        lvl_left = 388;
+        lvl_left = lvl_max;
         while (ibefore+1 < iinside) {
             int itest = (ibefore + iinside) / 2;
             lvl_left = msb_diff_level<dim,tvec>(pos_in[itest], p2);
@@ -154,12 +156,12 @@ __global__ void FindNodeBoundaries(
     if(msb_diff_level<dim,tvec>(p1, pos_in[n-1]) <= target_level)
     {
         rbound = n;
-        lvl_right = 388;
+        lvl_right = lvl_max;
     }
     else
     {
         int iinside = idx-1, iafter = n-1;
-        lvl_right = 388;
+        lvl_right = lvl_max;
         while (iinside+1 < iafter) {
             int itest = (iinside + iafter) / 2;
             lvl_right = msb_diff_level<dim,tvec>(p1, pos_in[itest]);
@@ -260,11 +262,10 @@ std::string GetBoundaryExtendPerLevel(
     const Vec<dim,tvec>* posz,
     int32_t* index_of_lvl,
     const int size,
-    const size_t block_size
+    const size_t block_size,
+    const int lvl_min,
+    const int lvl_max
 ) {
-    int lvl_min = -450;
-    int lvl_max = 388;
-
     // Initialize indices 0, 1, 2, ..., size-1
     int nlevels = lvl_max - lvl_min + 1;
 
@@ -301,7 +302,8 @@ __global__ void GetNodeGeometry(
     Vec<dim,tvec>* center,
     Vec<dim,tvec>* extent,
     const int size_nodes,
-    const int size_part
+    const int size_part,
+    const int lvl_invalid
 ) {
     // Gets the properties of the smallest node that contains pos[lbound[idx]] and pos[rbound[idx]-1]
     int idx = blockIdx.x * blockDim.x + threadIdx.x;

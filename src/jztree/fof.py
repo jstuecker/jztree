@@ -129,7 +129,8 @@ def _fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac
     # Define super-node data
     igroup = jnp.arange(size, dtype=jnp.int32)
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
-    nlvl = th.lvl.append(jnp.full_like(igroup, 388), nsup, 388, resize=True)
+    max_lvl = th.info().max_lvl()
+    nlvl = th.lvl.append(jnp.full_like(igroup, max_lvl), nsup, max_lvl, resize=True)
 
     def handle_level(i, carry):
         igroup, ilist = carry
@@ -384,7 +385,8 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     )
     # Define arrays we need during tree-walk
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
-    node_lvl = th.lvl.append(jnp.full(size, 388), nsup, fill_value=388, resize=True)
+    lvl_max = th.info().max_lvl()
+    node_lvl = th.lvl.append(jnp.full(size, lvl_max), nsup, fill_value=lvl_max, resize=True)
     l2p = th.ispl_n2n.get(0, size+1)
 
     # initialize labels of top-level

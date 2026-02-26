@@ -139,7 +139,7 @@ __global__ void SearchSortedZ(
         // In this scenario, we need to learn whether the particle belongs to the left or right leaf
         // it always belongs to the one with the smaller difference level
         int lv1 = msb_diff_level<dim,tvec>(posz_have[imin], xquery);
-        int lv2 = (imax < n_have) ? msb_diff_level<dim,tvec>(posz_have[imax], xquery) : 388;
+        int lv2 = (imax < n_have) ? msb_diff_level<dim,tvec>(posz_have[imax], xquery) : 2000;
         if(lv1 <= lv2)
             iout = imin;
         else

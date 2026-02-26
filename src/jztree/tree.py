@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 from typing import Tuple, Any
 
-from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList
+from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList, LevelInfo
 from .data import get_num_total, get_pos, get_num, verify_ilist
 from .config import TreeConfig, RegularizationConfig
 from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, masked_to_dense
@@ -23,6 +23,7 @@ jax.ffi.register_ffi_target("FindNodeBoundaries", ffi_tree.FindNodeBoundaries(),
 jax.ffi.register_ffi_target("GetNodeGeometry", ffi_tree.GetNodeGeometry(), platform="CUDA")
 jax.ffi.register_ffi_target("GetBoundaryExtendPerLevel", ffi_tree.GetBoundaryExtendPerLevel(), platform="CUDA")
 jax.ffi.register_ffi_target("CenterOfMass", ffi_tree.CenterOfMass(), platform="CUDA")
+
 
 # ------------------------------------------------------------------------------------------------ #
 #                                         Helper Functions                                         #
@@ -134,7 +135,7 @@ def weighted_percentile(x, weights, percentile):
     return x[isort[iperc]]
 
 def detect_leaf_boundaries(
-        posz: jax.Array, leaf_size: int = 32, npart: int | None = None, lvl_bound = (388, 388),
+        posz: jax.Array, leaf_size: int = 32, npart: int | None = None, lvl_bound = None,
         block_size: int = 64, alloc_size: int | None = None,
         cfg_reg: RegularizationConfig | None = None
     ) -> jax.Array:
@@ -142,6 +143,9 @@ def detect_leaf_boundaries(
         alloc_size = int(div_ceil(len(posz), np.maximum(leaf_size//2, 1))) + 1
     if npart is None:
         npart = len(posz)
+    if lvl_bound is None:
+        lvl_max = LevelInfo(posz.shape[-1], posz.dtype).max_lvl()
+        lvl_bound = (lvl_max, lvl_max)
 
     outputs = (
         jax.ShapeDtypeStruct((posz.shape[0]+1,), jnp.int8),
@@ -196,6 +200,8 @@ def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: j
     if nleaves is None:
         nleaves = jnp.array(len(posz), dtype=jnp.int32)
     nleaves = jnp.minimum(len(posz), nleaves)
+
+    info = LevelInfo(posz.shape[-1], posz.dtype)
     
     # Set domain boundaries to behave like infinities
     # Note that this is fine for multi-GPU, because we ensure in advance that no
@@ -204,7 +210,8 @@ def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: j
 
     out_types = (jax.ShapeDtypeStruct((posz.shape[0]+1,), jnp.int32),)*3
     lvl, lbound, rbound = jax.ffi.ffi_call("FindNodeBoundaries", out_types)(
-        posz, pos_bound, nleaves, block_size=np.uint64(block_size)
+        posz, pos_bound, nleaves, block_size=np.uint64(block_size),
+        lvl_max = np.int32(info.max_lvl()), lvl_invalid = np.int32(-2000)
     )
 
     return lvl, lbound, rbound
@@ -224,7 +231,8 @@ def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array,
                  jax.ShapeDtypeStruct((lbound.shape[0], posz.shape[-1]), posz.dtype))
     
     lvl, node_cent, node_ext = jax.ffi.ffi_call("GetNodeGeometry", out_types)(
-        posz, lbound, rbound, num, block_size=np.uint64(block_size)
+        posz, lbound, rbound, num, block_size=np.uint64(block_size),
+        lvl_invalid=np.int32(-2000)
     )
 
     return lvl, node_cent, node_ext
@@ -235,8 +243,10 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
 
     if npart is None:
         npart = jnp.sum(~jnp.isnan(posz[...,0]))
-    
-    nlevels = 388 + 450 + 1
+
+    info = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
+
+    nlevels = info.max_lvl() - info.min_lvl() + 1
     out_types = (jax.ShapeDtypeStruct((nlevels,), jnp.int32),)
 
     irange = jnp.array([0, npart])
@@ -244,13 +254,15 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
     # Distance from the left boundary where each levels node ends
     xleft = send_to_right(posz[npart-1], axis_name, invalid_float=-jnp.inf)
     ext_lr = jax.ffi.ffi_call("GetBoundaryExtendPerLevel", out_types)(
-        xleft, irange, posz, block_size=np.uint64(block_size), left=True
+        xleft, irange, posz, block_size=np.uint64(block_size), left=True,
+        lvl_min=np.int32(info.min_lvl()), lvl_max=np.int32(info.max_lvl())
     )[0]
 
     # Distance from the right boundary where each levels node starts
     xright = send_to_left(posz[0], axis_name, invalid_float=jnp.inf)
     ext_rl = jax.ffi.ffi_call("GetBoundaryExtendPerLevel", out_types)(
-        xright, irange, posz, block_size=np.uint64(block_size), left=False
+        xright, irange, posz, block_size=np.uint64(block_size), left=False,
+        lvl_min=np.int32(info.min_lvl()), lvl_max=np.int32(info.max_lvl())
     )[0]
 
     ext_rr = send_to_left(ext_lr, axis_name, invalid_int=0)
@@ -423,7 +435,7 @@ def define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
     return node_sizes
 
 def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: int, 
-                           npart: int | None = None, lvl_bound = (388,388),
+                           npart: int | None = None, lvl_bound = None,
                            cfg_reg: RegularizationConfig | None = None
                            ) -> Tuple[jax.Array, PackedArray, PackedArray]:
     """Finds the splitting point of the tree hierarchy
@@ -434,6 +446,10 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
       ispl_n2l: a PackedArray that defines the node to leaf splitting points per level
     """
     nlevels = len(node_sizes)
+
+    if lvl_bound is None:
+        lvl_max = LevelInfo(posz.shape[-1], posz.dtype).max_lvl()
+        lvl_bound = (lvl_max, lvl_max)
     
     ispl, lvl_percentile =  detect_leaf_boundaries(
         posz, leaf_size=node_sizes[0], npart=npart, alloc_size=alloc_size, lvl_bound=lvl_bound,
@@ -520,7 +536,7 @@ def get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedA
 
     return node_mcent, node_mass
 
-def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bound=(388, 388)
+def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bound=None
                          ) -> TreeHierarchy:
     """Builds a tree hierarchy from z-order positions
 
@@ -566,7 +582,7 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
 
     # node property arrays are on each level one element smaller than the splitting point arrays
     prop_array_spl = cumsum_starting_with_zero(ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1)
-    lvl = PackedArray.from_data(lvl, prop_array_spl, fill_values=-1000)
+    lvl = PackedArray.from_data(lvl, prop_array_spl, fill_values=-2000)
     geom_cent = PackedArray.from_data(geom_cent, prop_array_spl, fill_values=jnp.nan)
 
     if cfg_tree.mass_centered:

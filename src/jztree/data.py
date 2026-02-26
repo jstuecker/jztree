@@ -363,6 +363,34 @@ class TreePlane():
         else:
             return jnp.stack((dx, dy, dz), axis=-1)
 
+def min_max_msb_diff(dtype):
+    if dtype == jnp.float32:
+        return -150, 128
+    elif dtype == jnp.float64:
+        return -1075, 1024
+    elif dtype == jnp.int32:
+        return -1, 32
+    elif dtype == jnp.int64:
+        return -1, 64
+
+def min_tree_level(dim, dtype):
+    min_per_dim = min_max_msb_diff(dtype)[0]
+    return dim*min_per_dim
+
+def max_tree_level(dim, dtype):
+    max_per_dim = min_max_msb_diff(dtype)[1]
+    return dim*(max_per_dim + 1)
+
+@dataclass(frozen=True)
+class LevelInfo():
+    dim: int
+    dtype: jnp.dtype
+
+    def min_lvl(self) -> int:
+        return min_tree_level(self.dim, self.dtype)
+    def max_lvl(self) -> int:
+        return max_tree_level(self.dim, self.dtype)
+
 @jax.tree_util.register_dataclass
 @dataclass
 class TreeHierarchy():
@@ -400,6 +428,11 @@ class TreeHierarchy():
         """The recommended allocation size at the leaf level"""
         # Could choose something smaller here later...
         return self.ispl_n2n.size() - 1
+    
+    def info(self) -> LevelInfo:
+        dim = self.geom_cent.data.shape[-1]
+        dtype = self.geom_cent.data.dtype
+        return LevelInfo(dim, dtype)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                         Interaction Data                                         #
