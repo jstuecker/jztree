@@ -265,11 +265,11 @@ class PackedArray:
     def get(self, level, size=None, fill_value=None):
         if size is None:
             size = self.size()
-        indices = jnp.arange(size) + self.ispl[level]
+        indices = jnp.arange(size, dtype=jnp.int32) + self.ispl[level]
         valid = indices < self.ispl[level + 1]
         valid = valid.reshape((-1,) + (1,) * (self.data.ndim - 1))
         if fill_value is None:
-            fill_value = self.fill_values[level]
+            fill_value = jnp.astype(self.fill_values[level], self.data.dtype)
         return jnp.where(valid, self.data[indices], fill_value)
     
     def set(self, level, values, num=None, fill_value=None):
@@ -278,7 +278,7 @@ class PackedArray:
         new_spl = jnp.where(jnp.arange(len(self.ispl)) <= level, self.ispl, self.ispl[level] + num)
         new_data = set_range(self.data, values, self.ispl[level], self.ispl[level] + num)
         if fill_value is not None:
-            new_fill_vals = self.fill_values.at[level].set(fill_value)
+            new_fill_vals = self.fill_values.at[level].set(jnp.astype(fill_value, self.data.dtype))
         else:
             new_fill_vals = self.fill_values
         return PackedArray(new_data, new_spl, new_fill_vals, jnp.reshape(level+1, (1,)))

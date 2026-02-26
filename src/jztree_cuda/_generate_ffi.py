@@ -5,11 +5,18 @@ from jax_ffi_gen import parse, generator as gen
 
 HERE = Path(__file__).resolve().parent
 
-dimensions = (2,3)
+# Supported dtypes
 float_types = ("float", "double")
-all_types = ("float", "double", "int32_t", "int64_t")
+knn_types = ("float",)
+sort_types = ("float", "double", "int32_t", "int64_t")
 
+# Supported dimensions
+dimensions = (2,3)
+
+# knn
 k_instance_values = (4, 8, 12, 16, 32, 64)
+knn_dim = (2,3)
+
 default_includes = ["../common/math.cuh"]
 
 def add_dim_dtype_templates(func, buf_from, dimensions=dimensions, pos_types=float_types):
@@ -27,9 +34,6 @@ functions = parse.get_functions_from_file(
     names=["KnnLeaf2Leaf", "KnnNode2Node", "SegmentSort"],
     only_kernels=False
 )
-
-knn_types = ("float",)
-knn_dim = (2,3)
 
 add_dim_dtype_templates(functions["KnnLeaf2Leaf"], "xT", knn_dim, knn_types)
 functions["KnnLeaf2Leaf"].template_par["k"].instances = k_instance_values
@@ -110,7 +114,7 @@ functions["DtypeTest"].template_par["offset"].instances = (0, 10)
 # functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions()[1]"
 # functions["PosZorderSort"].template_par["tvec"].instances = pos_types_sort
 # functions["PosZorderSort"].template_par["tvec"].expression = "pos_in.element_type()"
-add_dim_dtype_templates(functions["PosZorderSort"], "pos_in")
+add_dim_dtype_templates(functions["PosZorderSort"], "pos_in", pos_types=sort_types)
 functions["PosZorderSort"].par["size"].expression = "pos_in.dimensions()[0]"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
 
@@ -118,7 +122,7 @@ functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes
 # functions["SearchSortedZ"].template_par["dim"].expression = "posz_have.dimensions()[1]"
 # functions["SearchSortedZ"].template_par["tvec"].instances = pos_types
 # functions["SearchSortedZ"].template_par["tvec"].expression = "posz_have.element_type()"
-add_dim_dtype_templates(functions["SearchSortedZ"], "posz_have", pos_types=all_types)
+add_dim_dtype_templates(functions["SearchSortedZ"], "posz_have", pos_types=sort_types)
 functions["SearchSortedZ"].par["n_have"].expression = "posz_have.dimensions()[0]"
 functions["SearchSortedZ"].par["n_query"].expression = "posz_query.dimensions()[0]"
 functions["SearchSortedZ"].grid_size_expression = "div_ceil(n_query, block_size)"

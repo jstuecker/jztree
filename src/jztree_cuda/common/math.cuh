@@ -247,7 +247,7 @@ __device__ __forceinline__ int32_t msb_xor_float(float a, float b) {
     // difference is then given by the differing bit in the mantissa, offset by the exponent
 
     if (isnan(a) || isnan(b) || (signbit(a) != signbit(b))) {
-        return 128;  // One higher than highest possible float diff (2**127)
+        return 128;  // One higher than highest finite float diff (2**127)
     }
     uint32_t a_bits = (uint32_t)__float_as_int(fabsf(a));
     uint32_t b_bits = (uint32_t)__float_as_int(fabsf(b));
@@ -258,10 +258,10 @@ __device__ __forceinline__ int32_t msb_xor_float(float a, float b) {
     if (a_exp == b_exp) { // If both floats have the same exponent, we need to compare mantissas
         // clz counts bit-zeros from the left. There will be always 8 leading zeros due to the
         // exponent
-        if(a_bits == b_bits)
-            return -151; // one smaller than the lowest possible float diff (-127 - 23)
-        else
-            return a_exp + (8 - __clz(a_bits ^ b_bits)); 
+        // if(a_bits == b_bits)
+        //     return -150; // one smaller than the smallest non-zero float 2**-149
+        a_exp = max(a_exp, -126); // because of special sub-precision number behaviour
+        return a_exp + (8 - __clz(a_bits ^ b_bits)); 
     }
     else { // If exponents differ, return the larger exponent
         return max(a_exp, b_exp);
@@ -272,17 +272,17 @@ __device__ __forceinline__ int32_t msb_xor_double(double a, double b) {
     if (signbit(a) != signbit(b)) {
         return 1024; // double has exponent with 1+10 bits
     }
-    uint64_t a_bits = (uint64_t)__double_as_longlong(fabs(a));
-    uint64_t b_bits = (uint64_t)__double_as_longlong(fabs(b));
+    uint64_t a_bits = (uint64_t)__double_as_longlong(abs(a));
+    uint64_t b_bits = (uint64_t)__double_as_longlong(abs(b));
 
     int32_t a_exp = (int32_t)(a_bits >> 52) - 1023;
     int32_t b_exp = (int32_t)(b_bits >> 52) - 1023;
 
     if (a_exp == b_exp) {
-        if(a_bits == b_bits)
-            return -1076;
-        else
-            return a_exp + (11 - __clzll(a_bits ^ b_bits));
+        // if(a_bits == b_bits)
+        //     return -1075;
+        a_exp = max(a_exp, -1022);
+        return a_exp + (11 - __clzll(a_bits ^ b_bits));
     }
     else {
         return max(a_exp, b_exp);
@@ -412,22 +412,21 @@ __device__ __forceinline__ float round_float_pow2_cent(float x, int level)
     if(level >= 128) {
         return 0.f; // level represents sign bit difference -> center = 0
     }
-    if (level > x_exp) { // exponent larger -- our bits don't matter
+    if(level > x_exp) { // exponent larger -- our bits don't matter
         return ldexpf(signbit(x) ? -0.5f : 0.5f, level);
     }
-    else {
-        // the rounding is done by zeroing out mantissa bits
-        int32_t keep_bits = x_exp - level; // how many mantissa bits to keep
-        int32_t mask = 0xFFFFFFFFu << max(23 - keep_bits, 0);
-        new_bits = x_bits & mask;
-        new_bits = new_bits | (1u << max(22 - keep_bits, 0)); // set next bit to one for center
-        return signbit(x) ? -__int_as_float(new_bits) : __int_as_float(new_bits);
-    }
+    // the rounding is done by zeroing out mantissa bits
+    int32_t keep_bits = max(x_exp, -126) - level; // how many mantissa bits to keep
+    if(keep_bits >= 23) return x; // are exact center already
+    int32_t mask = 0xFFFFFFFFu << 23 - keep_bits;
+    new_bits = x_bits & mask;
+    new_bits = new_bits | (1u << 22 - keep_bits); // set next bit to one for center
+    return signbit(x) ? -__int_as_float(new_bits) : __int_as_float(new_bits);
 }
 
 __device__ __forceinline__ double round_double_pow2_cent(double x, int level)
 {
-    int64_t x_bits = __double_as_longlong(fabs(x));
+    int64_t x_bits = __double_as_longlong(abs(x));
     int32_t x_exp = (int32_t)(x_bits >> 52) - 1023;
 
     int64_t new_bits = x_bits;
@@ -438,13 +437,13 @@ __device__ __forceinline__ double round_double_pow2_cent(double x, int level)
     if (level > x_exp) {
         return ldexp(signbit(x) ? -0.5 : 0.5, level);
     }
-    else {
-        int32_t keep_bits = x_exp - level;
-        int64_t mask = 0xFFFFFFFFFFFFFFFFULL << max(52 - keep_bits, 0);
-        new_bits = x_bits & mask;
-        new_bits = new_bits | (1ULL << max(51 - keep_bits, 0));
-        return signbit(x) ? -__longlong_as_double(new_bits) : __longlong_as_double(new_bits);
-    }
+
+    int32_t keep_bits = max(x_exp,-1022) - level;
+    if(keep_bits >= 52) return x; // are exact center already
+    int64_t mask = 0xFFFFFFFFFFFFFFFFULL << 52 - keep_bits;
+    new_bits = x_bits & mask;
+    new_bits = new_bits | (1ULL << 51 - keep_bits);
+    return signbit(x) ? -__longlong_as_double(new_bits) : __longlong_as_double(new_bits);
 }
 
 template <typename tvec>

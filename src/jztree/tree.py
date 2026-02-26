@@ -116,7 +116,7 @@ def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
     if leaf_search is True, it is assumed that xz contains one point per leaf and we 
     return the index of the leaf that the query point belongs to.
     """
-    assert xz.dtype ==  xz_query.dtype == jnp.float32
+    assert xz.dtype ==  xz_query.dtype
     assert xz.shape[-1] == xz_query.shape[-1] == 3
 
     out_type = jax.ShapeDtypeStruct((xz_query.shape[0],), jnp.int32)
@@ -184,7 +184,7 @@ def detect_leaf_boundaries(
         filled=nfilled, size=alloc_size, max_trace_depth=5
     )
 
-    splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
+    splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0].astype(jnp.int32)
 
     return splits, lvl_percentile
 detect_leaf_boundaries.jit = jax.jit(detect_leaf_boundaries,
@@ -194,13 +194,13 @@ detect_leaf_boundaries.jit = jax.jit(detect_leaf_boundaries,
 def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: jnp.array = None) -> Tuple[jax.Array, jax.Array, jax.Array]:
     """Builds a Z-order tree from positions"""
     if nleaves is None:
-        nleaves = jnp.array(len(posz))
+        nleaves = jnp.array(len(posz), dtype=jnp.int32)
     nleaves = jnp.minimum(len(posz), nleaves)
     
     # Set domain boundaries to behave like infinities
     # Note that this is fine for multi-GPU, because we ensure in advance that no
     # top-node intersects the boundary.
-    pos_bound = jnp.full((2,3), jnp.nan, dtype=posz.dtype)
+    pos_bound = jnp.full((2,posz.shape[-1]), jnp.nan, dtype=posz.dtype)
 
     out_types = (jax.ShapeDtypeStruct((posz.shape[0]+1,), jnp.int32),)*3
     lvl, lbound, rbound = jax.ffi.ffi_call("FindNodeBoundaries", out_types)(
@@ -213,14 +213,15 @@ determine_znode_boundaries.jit = jax.jit(determine_znode_boundaries)
 def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array, 
                       num: jnp.array = None, block_size: int = 64
                       ) -> Tuple[jax.Array, jax.Array, jax.Array]:
-    assert lbound.shape == rbound.shape    
+    assert lbound.shape == rbound.shape
+    assert lbound.dtype == rbound.dtype == jnp.int32
 
     if num is None:
         num = jnp.array(len(lbound))
 
     out_types = (jax.ShapeDtypeStruct((lbound.shape[0],), jnp.int32),
-                 jax.ShapeDtypeStruct((lbound.shape[0], 3), jnp.float32),
-                 jax.ShapeDtypeStruct((lbound.shape[0], 3), jnp.float32))
+                 jax.ShapeDtypeStruct((lbound.shape[0], posz.shape[-1]), posz.dtype),
+                 jax.ShapeDtypeStruct((lbound.shape[0], posz.shape[-1]), posz.dtype))
     
     lvl, node_cent, node_ext = jax.ffi.ffi_call("GetNodeGeometry", out_types)(
         posz, lbound, rbound, num, block_size=np.uint64(block_size)
@@ -390,7 +391,7 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int, dataz: Any | None
 
     lvl_bound = get_node_geometry(
         jnp.array([xl, posz[0], posz[npart-1], xr]), 
-        lbound=jnp.array([0,2]), rbound=jnp.array([2,4]), num=2
+        lbound=jnp.array([0,2], dtype=jnp.int32), rbound=jnp.array([2,4], dtype=jnp.int32), num=2
     )[0]
 
     return partz, dataz, lvl_bound
@@ -469,7 +470,7 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
 
     # Calculate a prefix accross hierarchy levels to densly stack the nodes later
     offsets = jnp.cumsum(is_spl_on_level.flatten()).reshape(is_spl_on_level.shape)
-    level_spl = jnp.pad(offsets[:,-1], (1,0), constant_values=0) # save level start/end points
+    level_spl = jnp.pad(offsets[:,-1], (1,0), constant_values=np.int32(0)) # save level start/end points
     nnodes_on_level = level_spl[1:] - level_spl[:-1] - 1 # -1 since splits are always 1 larger than nodes
 
     # Check that the allocation is big enough
@@ -482,7 +483,7 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
     stats_callback("allocation", AllocStats.record_filled_nodes, level_spl[-1], alloc_size)
 
     # correct offsets to exclude the element at hand and invalidate inactive elements:
-    offsets = jnp.where(is_spl_on_level, offsets - is_spl_on_level, alloc_size)
+    offsets = jnp.where(is_spl_on_level, offsets - is_spl_on_level, alloc_size).astype(jnp.int32)
     
     # node-to-leaf relation is given by the leaf that is active at the node location
     ispl_n2l = jnp.zeros(alloc_size, dtype=jnp.int32).at[offsets].set(offsets[0:1,:])

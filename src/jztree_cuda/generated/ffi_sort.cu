@@ -174,8 +174,12 @@ ffi::Error PosZorderSortFFIHost(
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &PosZorderSortDispatchWrapper<2, float> },
         { {2, DT::F64}, &PosZorderSortDispatchWrapper<2, double> },
+        { {2, DT::S32}, &PosZorderSortDispatchWrapper<2, int32_t> },
+        { {2, DT::S64}, &PosZorderSortDispatchWrapper<2, int64_t> },
         { {3, DT::F32}, &PosZorderSortDispatchWrapper<3, float> },
-        { {3, DT::F64}, &PosZorderSortDispatchWrapper<3, double> }
+        { {3, DT::F64}, &PosZorderSortDispatchWrapper<3, double> },
+        { {3, DT::S32}, &PosZorderSortDispatchWrapper<3, int32_t> },
+        { {3, DT::S64}, &PosZorderSortDispatchWrapper<3, int64_t> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -185,7 +189,7 @@ ffi::Error PosZorderSortFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in PosZorderSortFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t)"
         );
     }
     PosZorderSortDispatchFn instance = it->second;
