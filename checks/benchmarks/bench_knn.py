@@ -34,8 +34,8 @@ def bench_knn_steps(jax_bench, pos):
     jb.measure(fn_jit=evaluate_knn_z.jit, d=data2, posz_query=pos_qz, tag="eval_q_z")
     jb.measure(fn_jit=knn.jit, pos0=pos_q, k=k, pos_query=pos_q, tag="total_q_z")
 
-@pytest.mark.shrink_in_quick(keep_index=3)
-@pytest.mark.parametrize("k", [4,8,12,16,32,64])
+@pytest.mark.shrink_in_quick(keep_index=5)
+@pytest.mark.parametrize("k", [2,4,8,12,13,16,32,64])
 def bench_knn_k(jax_bench, pos, k):
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
 
@@ -86,3 +86,17 @@ def bench_knn_setup(jax_bench):
         pos = jax.random.normal(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
         jb.measure(fn_jit=knn.jit, pos0=pos, k=16, tag="gaus(reg)")
         st.print_suggestions(cfg)
+
+@pytest.mark.parametrize("dim", [2,3])
+def bench_knn_dtype_dim(jax_bench, dim):
+    jb = jax_bench(jit_rounds=5, jit_loops=4, jit_warmup=1)
+
+    N = int(1e6)
+    k = 16
+
+    pos = jax.random.uniform(jax.random.key(0), (N,dim))
+    jb.measure(fn_jit=knn.jit, pos0=pos, k=k, tag="float")
+
+    with jax.enable_x64():
+        pos = jax.random.uniform(jax.random.key(0), (N,dim), dtype=jnp.float64)
+        jb.measure(fn_jit=knn.jit, pos0=pos, k=k, tag="double")

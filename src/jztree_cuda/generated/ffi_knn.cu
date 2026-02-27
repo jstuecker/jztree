@@ -39,8 +39,9 @@ ffi::Error KnnLeaf2LeafFFIHost(
     ffi::AnyBuffer xQ,
     ffi::Result<ffi::AnyBuffer> knn_rad,
     ffi::Result<ffi::AnyBuffer> knn_id,
+    int k,
     float boxsize,
-    int k
+    int kmax
 ) {
     int dim = xT.dimensions()[1];
     DT tvec = xT.element_type();
@@ -68,6 +69,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
         &xQ_arg,
         &knn_rad_arg,
         &knn_id_arg,
+        &k,
         &boxsize
     };
     
@@ -104,12 +106,12 @@ ffi::Error KnnLeaf2LeafFFIHost(
         { {64, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 3, double>) }
     };
 
-    const TTuple key = TTuple(k, dim, tvec);
+    const TTuple key = TTuple(kmax, dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (k, dim, tvec)"\
+            "\nUnsupported template parameter combination for (kmax, dim, tvec)"\
             " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
             "(4, 2, float), (4, 2, double), (4, 3, float), (4, 3, double), (8, 2, float), (8, 2, double), (8, 3, float), (8, 3, double), (12, 2, float), (12, 2, double), (12, 3, float), (12, 3, double), (16, 2, float), (16, 2, double), (16, 3, float), (16, 3, double), (32, 2, float), (32, 2, double), (32, 3, float), (32, 3, double), (64, 2, float), (64, 2, double), (64, 3, float), (64, 3, double)"
         );
@@ -145,8 +147,9 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // xQ
         .Ret<ffi::AnyBuffer>() // knn_rad
         .Ret<ffi::AnyBuffer>() // knn_id
+        .Attr<int>("k")
         .Attr<float>("boxsize")
-        .Attr<int>("k"),
+        .Attr<int>("kmax"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 

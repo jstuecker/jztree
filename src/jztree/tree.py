@@ -511,7 +511,7 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
     # for the leaf-level we insert the leaf to particle relation here
     ilevel = jnp.arange(nlevels)
     value = jnp.where(ilevel[:,None] == 0, ispl, offsets[ilevel-1,:] - level_spl[ilevel-1,None])
-    ispl_n2n = jnp.zeros(alloc_size, dtype=jnp.int32).at[offsets].set(value)
+    ispl_n2n = jnp.zeros(alloc_size, dtype=jnp.int32).at[offsets].set(value.astype(jnp.int32))
     # out of bounds access shall give nnodes of next smaller level (or npart for leaves):
     fill_val = jnp.pad(nnodes_on_level[:-1], (1,0), constant_values=ispl[-1])
     ispl_n2n = PackedArray.from_data(ispl_n2n, level_spl, fill_values=fill_val)

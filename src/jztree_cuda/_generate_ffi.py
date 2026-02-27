@@ -14,7 +14,7 @@ sort_types = ("float", "double", "int32_t", "int64_t")
 dimensions = (2,3)
 
 # knn
-k_instance_values = (4, 8, 12, 16, 32, 64)
+kmax_instance_values = (4, 8, 12, 16, 32, 64)
 knn_dim = (2,3)
 
 default_includes = ["../common/math.cuh"]
@@ -36,7 +36,7 @@ functions = parse.get_functions_from_file(
 )
 
 add_dim_dtype_templates(functions["KnnLeaf2Leaf"], "xT", knn_dim, knn_types)
-functions["KnnLeaf2Leaf"].template_par["k"].instances = k_instance_values
+functions["KnnLeaf2Leaf"].template_par["kmax"].instances = kmax_instance_values
 functions["KnnLeaf2Leaf"].block_size_expression = 32
 functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * (dim*ffi::ByteWidth(xT.element_type()) + sizeof(int32_t))"
 functions["KnnLeaf2Leaf"].grid_size_expression = "splQ.element_count() - 1"

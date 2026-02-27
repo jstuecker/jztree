@@ -37,7 +37,11 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     assert xT.shape[-1] == xQ.shape[-1]
     assert splT.dtype == splQ.dtype == jnp.int32
     assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
-    assert k in (4,8,12,16,32,64), "Only k=4,8,12,16,32,64 supported"
+
+    assert k <= 64
+    # We don't compile the knn kernel for every k, so we need to find the closest one
+    # that we have compiled
+    kmax = min([kmax for kmax in (4,8,12,16,32,64) if kmax >= k])
 
     outputs = (
         jax.ShapeDtypeStruct((xQ.shape[0], k), xT.dtype),
@@ -45,7 +49,7 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     )
     rknn, iknn = jax.ffi.ffi_call("KnnLeaf2Leaf", outputs)(
         ilist.ispl, ilist.iother, ilist.rad2, splT, xT, splQ, xQ,
-        boxsize=np.float32(boxsize), k=np.int32(k)
+        boxsize=np.float32(boxsize), k=np.int32(k), kmax=np.int32(kmax)
     )
  
     return rknn, iknn

@@ -141,7 +141,7 @@ struct SortedNearestKWithCounts {
 /*                                     Ilist based KNN kernel                                     */
 /* ---------------------------------------------------------------------------------------------- */
 
-template <int k, int dim, typename tvec>
+template <int kmax, int dim, typename tvec>
 __global__ void KnnLeaf2Leaf(
     const int* ilist_spl,       // leaf-ranges in ilist
     const int* ilist,           // interaction list
@@ -152,6 +152,7 @@ __global__ void KnnLeaf2Leaf(
     const Vec<dim,tvec>* xQ,    // query positions
     tvec* knn_rad,              // output knn radii
     int* knn_id,                // output knn ids
+    int k,                      // Actual k, has to be <= kmax
     float boxsize               // if > 0, use for periodic wrapping
 ) {
     int ileafQ = blockIdx.x;
@@ -163,7 +164,7 @@ __global__ void KnnLeaf2Leaf(
 
         Vec<dim,tvec> posQ = xQ[ipartQ];
 
-        SortedNearestK<k,tvec> nearestK(INFINITY, -1);
+        SortedNearestK<kmax,tvec> nearestK(INFINITY, -1);
 
         extern __shared__ char shared_mem[];
         PosId<dim, tvec>* particles = reinterpret_cast<PosId<dim, tvec>*>(shared_mem);
