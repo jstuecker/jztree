@@ -597,7 +597,7 @@ template <int dim, typename tvec>
 __device__ __forceinline__ NodeWithExt<dim,tvec> NodeLvlToHalfExt(Node<dim,tvec> node) {
     return NodeWithExt<dim,tvec>{
         node.center,
-        LvlToHalfExt<dim,tvec>(node.level)
+        LvlToHalfExt<dim,tvec>((int)node.level)
     };
 }
 

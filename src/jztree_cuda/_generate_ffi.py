@@ -7,7 +7,7 @@ HERE = Path(__file__).resolve().parent
 
 # Supported dtypes
 float_types = ("float", "double")
-knn_types = ("float",)
+knn_types = ("float", "double")
 sort_types = ("float", "double", "int32_t", "int64_t")
 
 # Supported dimensions

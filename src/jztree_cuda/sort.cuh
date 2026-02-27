@@ -48,7 +48,7 @@ __global__ void PosKeyArangeKernel(
     PosId<dim, tvec> *keyid_out,
     size_t n
 ) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    same_width_int<tvec> idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
         keyid_out[idx].pos = pos_in[idx];
         keyid_out[idx].id = idx;
@@ -65,6 +65,8 @@ std::string PosZorderSort(
     size_t tmp_bytes,
     size_t block_size
 ) {
+    static_assert(sizeof(PosId<dim, tvec>) == (dim+1) * sizeof(tvec), "Unexpected PosId layout");
+
     // Initialize indices 0, 1, 2, ..., size-1
     PosKeyArangeKernel<dim, tvec><<< div_ceil(size, block_size), block_size, 0, stream>>>(
         pos_in, pos_id_out, size

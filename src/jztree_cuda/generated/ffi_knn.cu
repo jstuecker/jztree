@@ -76,17 +76,29 @@ ffi::Error KnnLeaf2LeafFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {4, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 2, float>) },
+        { {4, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 2, double>) },
         { {4, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 3, float>) },
+        { {4, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 3, double>) },
         { {8, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 2, float>) },
+        { {8, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 2, double>) },
         { {8, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 3, float>) },
+        { {8, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 3, double>) },
         { {12, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 2, float>) },
+        { {12, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 2, double>) },
         { {12, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 3, float>) },
+        { {12, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 3, double>) },
         { {16, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 2, float>) },
+        { {16, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 2, double>) },
         { {16, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 3, float>) },
+        { {16, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 3, double>) },
         { {32, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 2, float>) },
+        { {32, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 2, double>) },
         { {32, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, float>) },
+        { {32, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, double>) },
         { {64, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 2, float>) },
-        { {64, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 3, float>) }
+        { {64, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 2, double>) },
+        { {64, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 3, float>) },
+        { {64, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 3, double>) }
     };
 
     const TTuple key = TTuple(k, dim, tvec);
@@ -96,7 +108,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (k, dim, tvec)"\
             " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(4, 2, float), (4, 3, float), (8, 2, float), (8, 3, float), (12, 2, float), (12, 3, float), (16, 2, float), (16, 3, float), (32, 2, float), (32, 3, float), (64, 2, float), (64, 3, float)"
+            "(4, 2, float), (4, 2, double), (4, 3, float), (4, 3, double), (8, 2, float), (8, 2, double), (8, 3, float), (8, 3, double), (12, 2, float), (12, 2, double), (12, 3, float), (12, 3, double), (16, 2, float), (16, 2, double), (16, 3, float), (16, 3, double), (32, 2, float), (32, 2, double), (32, 3, float), (32, 3, double), (64, 2, float), (64, 2, double), (64, 3, float), (64, 3, double)"
         );
     }
     const void* instance = it->second;
@@ -231,7 +243,9 @@ ffi::Error KnnNode2NodeFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &KnnNode2NodeDispatchWrapper<2, float> },
-        { {3, DT::F32}, &KnnNode2NodeDispatchWrapper<3, float> }
+        { {2, DT::F64}, &KnnNode2NodeDispatchWrapper<2, double> },
+        { {3, DT::F32}, &KnnNode2NodeDispatchWrapper<3, float> },
+        { {3, DT::F64}, &KnnNode2NodeDispatchWrapper<3, double> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -241,7 +255,7 @@ ffi::Error KnnNode2NodeFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in KnnNode2NodeFFIHost -- Only supporting:\n"\
-            "(2, float), (3, float)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     KnnNode2NodeDispatchFn instance = it->second;

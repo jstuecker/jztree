@@ -1,6 +1,9 @@
 #ifndef COMMON_DATA_H
 #define COMMON_DATA_H
 
+template <typename T>
+using same_width_int = std::conditional_t<(sizeof(T) == 4), std::int32_t, std::int64_t>;
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                   Vector class and operators                                   */
 /* ---------------------------------------------------------------------------------------------- */
@@ -110,8 +113,8 @@ Vec<dim, tvec> reversed_vec(const Vec<dim, tvec>& x) {
 
 template<int dim, typename tvec>
 struct Node {
-    Vec<dim,tvec> center;
-    int level;
+    Vec<dim, tvec> center;
+    same_width_int<tvec> level;
 };
 
 
@@ -130,7 +133,7 @@ struct PosMass {
 template<int dim, typename tvec>
 struct PosId {
     Vec<dim,tvec> pos;
-    int32_t id;
+    same_width_int<tvec> id;
 };
 
 struct __align__(16) ForcePot {

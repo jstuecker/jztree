@@ -5,7 +5,7 @@ from jax.sharding import PartitionSpec as P
 from typing import Tuple, Any
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList, LevelInfo
-from .data import get_num_total, get_pos, get_num, verify_ilist
+from .data import get_num_total, get_pos, get_num, verify_ilist, same_width_int
 from .config import TreeConfig, RegularizationConfig
 from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, masked_to_dense
 from .comm import send_to_left, send_to_right, shift_particles_left
@@ -57,6 +57,8 @@ def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
     dim = x.shape[-1]
     assert dim in (2,3)
 
+    idtype = same_width_int(x.dtype)
+
     # To optimize memory layout, we bundle position and id together into a single array
     # We later need to reinterprete the output to extract positions and ids
     out_type = jax.ShapeDtypeStruct((x.shape[0],dim+1), x.dtype)
@@ -68,7 +70,7 @@ def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
     )[0]
 
     pos = isort[:, :dim].view(x.dtype)
-    ids = isort[:, dim].view(jnp.int32)
+    ids = isort[:, dim].view(idtype)
 
     return pos, ids
 
@@ -638,7 +640,8 @@ dense_interaction_list.jit = jax.jit(dense_interaction_list, static_argnames=['s
 
 def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
                                    ngroup: int = 32, size_super: int | None = None,
-                                   node_range: jax.Array | None = None
+                                   node_range: jax.Array | None = None,
+                                   dtype=jnp.int32
                                    ) -> Tuple[jax.Array, InteractionList, jax.Array]:
     """Defines an all-to-all interaction list over super-nodes and a super-node to node relation
 
@@ -647,6 +650,7 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
     node_range: if specified, the interaction list will only contain interactions with
                 receiving indices in node_range will be evaluated
     """
+    nnodes, ngroup = jnp.astype(nnodes, dtype), jnp.astype(ngroup, dtype)
 
     if size_super is None: # if not provided, guarantee a sufficient allocation
         size_super = np.ceil(np.sqrt(size_ilist)).astype(np.int64) + 2
@@ -655,20 +659,20 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
     if node_range is None:
         nsuper_nodes = div_ceil(nnodes, ngroup)
         nint = nsuper_nodes*nsuper_nodes
-        spl_super = jnp.minimum(jnp.arange(size_super+1) * ngroup, nnodes)
-        ispl = jnp.minimum(jnp.arange(size_super+1) * nsuper_nodes, nint)
+        spl_super = jnp.minimum(jnp.arange(size_super+1,dtype=dtype) * ngroup, nnodes)
+        ispl = jnp.minimum(jnp.arange(size_super+1,dtype=dtype) * nsuper_nodes, nint)
     else:
-        node_range = jnp.asarray(node_range)
+        node_range = jnp.astype(node_range, dtype)
         super_range = node_range // ngroup
         # In this case we only evaluate receiving nodes that lie inside of the node_range
         # further, we have to make sure that spl_super splits at our indices
         nsuper_nodes = div_ceil(nnodes, ngroup) + 2
-        spl_super = jnp.minimum(jnp.arange(size_super+1) * ngroup, nnodes)
+        spl_super = jnp.minimum(jnp.arange(size_super+1,dtype=dtype) * ngroup, nnodes)
         spl_super = jnp.insert(spl_super, super_range + 1, node_range)
 
         valid = (spl_super[:-1] >= node_range[0]) & (spl_super[1:] <= node_range[1])
         valid = valid & (spl_super[1:] > spl_super[:-1]) # may have some 0 nodes due to way we inserted
-        ispl = cumsum_starting_with_zero(jnp.where(valid, nsuper_nodes, 0))
+        ispl = cumsum_starting_with_zero(jnp.where(valid, nsuper_nodes, 0).astype(dtype))
         nint = ispl[-1]
 
     nsuper_nodes = nsuper_nodes + raise_if(nint > size_ilist,
@@ -677,7 +681,7 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
         n=nint, size=size_ilist
     )
     
-    idx = jnp.arange(size_ilist)
+    idx = jnp.arange(size_ilist, dtype=dtype)
     ilist = jnp.where(idx < nint, idx % nsuper_nodes, 0)
 
     ilist = verify_ilist(InteractionList(ispl=ispl, iother=ilist))

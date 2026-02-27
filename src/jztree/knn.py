@@ -33,7 +33,7 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
 
     assert ilist.rad2.shape == ilist.iother.shape, "rilist must have the same shape as ilist"
 
-    assert xT.dtype == xQ.dtype == jnp.float32
+    assert xT.dtype == xQ.dtype
     assert xT.shape[-1] == xQ.shape[-1]
     assert splT.dtype == splQ.dtype == jnp.int32
     assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
@@ -56,6 +56,9 @@ def _knn_node2node_ilist(
         k: int = 32,
         boxsize: float = 0.) -> InteractionList:
     boxsize = 0. if boxsize is None else boxsize
+
+    dtype = node_data.pos.dtype
+    assert dtype in (jnp.float32, jnp.float64)
 
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
     assert ilist.iother.shape == ilist.rad2.shape, "node_ilist and node_ir2list must have the same shape"

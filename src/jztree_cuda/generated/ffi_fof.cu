@@ -202,7 +202,9 @@ ffi::Error FofNode2NodeFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &FofNode2NodeDispatchWrapper<2, float> },
-        { {3, DT::F32}, &FofNode2NodeDispatchWrapper<3, float> }
+        { {2, DT::F64}, &FofNode2NodeDispatchWrapper<2, double> },
+        { {3, DT::F32}, &FofNode2NodeDispatchWrapper<3, float> },
+        { {3, DT::F64}, &FofNode2NodeDispatchWrapper<3, double> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -212,7 +214,7 @@ ffi::Error FofNode2NodeFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FofNode2NodeFFIHost -- Only supporting:\n"\
-            "(2, float), (3, float)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     FofNode2NodeDispatchFn instance = it->second;
@@ -334,7 +336,9 @@ ffi::Error FofLeaf2LeafFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &FofLeaf2LeafDispatchWrapper<2, float> },
-        { {3, DT::F32}, &FofLeaf2LeafDispatchWrapper<3, float> }
+        { {2, DT::F64}, &FofLeaf2LeafDispatchWrapper<2, double> },
+        { {3, DT::F32}, &FofLeaf2LeafDispatchWrapper<3, float> },
+        { {3, DT::F64}, &FofLeaf2LeafDispatchWrapper<3, double> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -344,7 +348,7 @@ ffi::Error FofLeaf2LeafFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FofLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(2, float), (3, float)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     FofLeaf2LeafDispatchFn instance = it->second;
