@@ -45,7 +45,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
     DT tvec = xT.element_type();
     dim3 blockDim(32);
     dim3 gridDim(splQ.element_count() - 1);
-    size_t smem = blockDim.x * sizeof(PosId<3,float>);
+    size_t smem = blockDim.x * (dim*ffi::ByteWidth(xT.element_type()) + sizeof(int32_t));
     
     // Build a bundled argument list for cudaLaunchKernel
     void* ilist_spl_arg = ilist_spl.untyped_data();

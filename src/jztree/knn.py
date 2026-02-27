@@ -34,7 +34,7 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     assert ilist.rad2.shape == ilist.iother.shape, "rilist must have the same shape as ilist"
 
     assert xT.dtype == xQ.dtype == jnp.float32
-    assert xT.shape[-1] == xQ.shape[-1] == 3
+    assert xT.shape[-1] == xQ.shape[-1]
     assert splT.dtype == splQ.dtype == jnp.int32
     assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
     assert k in (4,8,12,16,32,64), "Only k=4,8,12,16,32,64 supported"
