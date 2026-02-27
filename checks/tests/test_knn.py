@@ -7,8 +7,8 @@ from jztree.config import KNNConfig
 from jztree.knn import knn_z, _segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z, evaluate_knn, knn
 from jztree.tree import pos_zorder_sort
 
-def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1):
-    pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax)
+def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1, dim=3, dtype=jnp.float32):
+    pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,dim), dtype=dtype, minval=xmin, maxval=xmax)
     if duplicate:
         pos0 = jnp.concatenate((pos0, pos0, pos0, pos0))
     
@@ -62,9 +62,23 @@ def test_k(k):
 
     check_against_ckdtree(posz, k=k)
 
+@pytest.mark.shrink_in_quick(keep_index=0)
+@pytest.mark.parametrize("dim", [2,3])
+def test_dim(dim):
+    k = 13
+    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10., dim=dim))
+
+    check_against_ckdtree(posz, k=k)
+
+def test_double():
+    k = 13
+    with jax.enable_x64():
+        posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10., dtype=jnp.float64))
+        check_against_ckdtree(posz, k=k)
+
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("boxsize", [0.03,1.,170.])
-def test_boxisze(boxsize):
+def test_boxsize(boxsize):
     posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=boxsize))
 
     check_against_ckdtree(posz, boxsize=boxsize)
