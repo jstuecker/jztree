@@ -16,11 +16,6 @@
 
 namespace ffi = xla::ffi;
 
-struct Neighbor {
-    float r2;
-    int id;
-};
-
 struct PosR {
     float3 pos;
     float r;
@@ -42,15 +37,15 @@ struct InteractionList {
 /*                                         Nearest K Heap                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<int K>
+template<int K, typename trad>
 struct SortedNearestK {
     // Keeps track of the nearest K neighbors that we have seen so far in ascending order of r2.
     // Offers efficient insertion of new candidates
 
-    float r2s[K];
+    trad r2s[K];
     int   ids[K];
 
-    __device__ __forceinline__ SortedNearestK(float r2=INFINITY, int idx=-1){
+    __device__ __forceinline__ SortedNearestK(trad r2=INFINITY, int idx=-1){
         #pragma unroll
         for (int i=0;i<K;++i){ 
             r2s[i]=r2;
@@ -58,7 +53,7 @@ struct SortedNearestK {
         }
     }
 
-    __device__ __forceinline__ float max_r2() const {
+    __device__ __forceinline__ trad max_r2() const {
         return r2s[K-1]; 
     }
 
@@ -69,7 +64,7 @@ struct SortedNearestK {
     // * no breaks/returns in the loop (stops the compiler from unrolling)
     // * It seems the pattern with the mask helps the compiler to skip unnecessary work
     //   -- effectively achieving an early exit (still not totally sure how it works though...)
-    __device__ __forceinline__ void consider(float r2, int id) {
+    __device__ __forceinline__ void consider(trad r2, int id) {
         if (r2 > r2s[K-1]) return;
 
         bool  active   = true;  // true until we've placed the item
@@ -155,7 +150,8 @@ __global__ void KnnLeaf2Leaf(
     const Vec<dim,tvec>* xT,    // input positions
     const int* splQ,            // leaf-ranges in B
     const Vec<dim,tvec>* xQ,    // query positions
-    Neighbor* knn,              // output knn list
+    tvec* knn_rad,              // output knn radii
+    int* knn_id,                // output knn ids
     float boxsize               // if > 0, use for periodic wrapping
 ) {
     int ileafQ = blockIdx.x;
@@ -167,7 +163,7 @@ __global__ void KnnLeaf2Leaf(
 
         Vec<dim,tvec> posQ = xQ[ipartQ];
 
-        SortedNearestK<k> nearestK(INFINITY, -1);
+        SortedNearestK<k,tvec> nearestK(INFINITY, -1);
 
         extern __shared__ char shared_mem[];
         PosId<dim, tvec>* particles = reinterpret_cast<PosId<dim, tvec>*>(shared_mem);
@@ -200,7 +196,7 @@ __global__ void KnnLeaf2Leaf(
                 // Now search for the nearest neighbors in A
                 for (int j = 0; j < nload; j++) {
                     PosId<dim,tvec> p = particles[j];
-                    float r2 = distance_squared<dim,tvec>(p.pos, posQ, boxsize);
+                    tvec r2 = distance_squared<dim,tvec>(p.pos, posQ, boxsize);
                     nearestK.consider(r2, p.id);
                 }
 
@@ -211,7 +207,8 @@ __global__ void KnnLeaf2Leaf(
         if(qoff + threadIdx.x < iqend) {
             #pragma unroll
             for(int i = 0; i < k; i++) {
-                knn[ipartQ * k + i] = {sqrtf(nearestK.r2s[i]), nearestK.ids[i]};
+                knn_rad[ipartQ * k + i] = sqrt(nearestK.r2s[i]);
+                knn_id[ipartQ * k + i] = nearestK.ids[i];
             }
         }
         __syncthreads();

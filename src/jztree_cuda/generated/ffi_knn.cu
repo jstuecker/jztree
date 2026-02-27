@@ -37,7 +37,8 @@ ffi::Error KnnLeaf2LeafFFIHost(
     ffi::AnyBuffer xT,
     ffi::AnyBuffer splQ,
     ffi::AnyBuffer xQ,
-    ffi::Result<ffi::AnyBuffer> knn,
+    ffi::Result<ffi::AnyBuffer> knn_rad,
+    ffi::Result<ffi::AnyBuffer> knn_id,
     float boxsize,
     int k
 ) {
@@ -55,7 +56,8 @@ ffi::Error KnnLeaf2LeafFFIHost(
     void* xT_arg = xT.untyped_data();
     void* splQ_arg = splQ.untyped_data();
     void* xQ_arg = xQ.untyped_data();
-    void* knn_arg = knn->untyped_data();
+    void* knn_rad_arg = knn_rad->untyped_data();
+    void* knn_id_arg = knn_id->untyped_data();
     void* args[] = {
         &ilist_spl_arg,
         &ilist_arg,
@@ -64,7 +66,8 @@ ffi::Error KnnLeaf2LeafFFIHost(
         &xT_arg,
         &splQ_arg,
         &xQ_arg,
-        &knn_arg,
+        &knn_rad_arg,
+        &knn_id_arg,
         &boxsize
     };
     
@@ -140,7 +143,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // xT
         .Arg<ffi::AnyBuffer>() // splQ
         .Arg<ffi::AnyBuffer>() // xQ
-        .Ret<ffi::AnyBuffer>() // knn
+        .Ret<ffi::AnyBuffer>() // knn_rad
+        .Ret<ffi::AnyBuffer>() // knn_id
         .Attr<float>("boxsize")
         .Attr<int>("k"),
     {xla::ffi::Traits::kCmdBufferCompatible}

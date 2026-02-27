@@ -509,7 +509,7 @@ __device__ __forceinline__ float distance_squared_old(const float3 &a, const flo
 }
 
 template<int dim, typename tvec>
-__device__ __forceinline__ float distance_squared(
+__device__ __forceinline__ tvec distance_squared(
     const Vec<dim,tvec> &a, const Vec<dim,tvec> &b, const tvec boxsize
 ) {
     tvec res = 0.;
