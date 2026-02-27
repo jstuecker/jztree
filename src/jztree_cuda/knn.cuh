@@ -54,7 +54,7 @@ struct SortedNearestK {
     }
 
     __device__ __forceinline__ trad max_r2() const {
-        return r2s[K-1]; 
+        return r2s[K-1];
     }
 
     // Insert (r2,id) into ascending r2s[], evicting the largest.
@@ -150,17 +150,28 @@ __global__ void KnnLeaf2Leaf(
     const Vec<dim,tvec>* xT,    // input positions
     const int* splQ,            // leaf-ranges in B
     const Vec<dim,tvec>* xQ,    // query positions
-    tvec* knn_rad,              // output knn radii
+    const tvec* rmin2_in,       // Optional, if provided find the find the first k neighbours
+    const int* skipequals_in,       // that have r2 > rmin2 or (r2 == rmin2 and i > idmin)
+    tvec* knn_rad2,             // output knn radii
     int* knn_id,                // output knn ids
     int k,                      // Actual k, has to be <= kmax
-    float boxsize               // if > 0, use for periodic wrapping
+    float boxsize,              // if > 0, use for periodic wrapping
+    bool use_rmin
 ) {
     int ileafQ = blockIdx.x;
     int iqstart = splQ[ileafQ], iqend = splQ[ileafQ + 1];
     int max_part_smem = blockDim.x;
 
+    tvec rmin2 = static_cast<tvec>(0);
+    int skipeq = 0;
+
     for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
         int ipartQ = min(qoff + threadIdx.x, iqend - 1);
+
+        if(use_rmin) {
+            rmin2 = rmin2_in[ipartQ];
+            skipeq = skipequals_in[ipartQ];
+        }
 
         Vec<dim,tvec> posQ = xQ[ipartQ];
 
@@ -198,7 +209,16 @@ __global__ void KnnLeaf2Leaf(
                 for (int j = 0; j < nload; j++) {
                     PosId<dim,tvec> p = particles[j];
                     tvec r2 = distance_squared<dim,tvec>(p.pos, posQ, boxsize);
-                    nearestK.consider(r2, p.id);
+
+                    if(!use_rmin || (r2 > rmin2)) {
+                        nearestK.consider(r2, p.id);
+                    }
+                    else if(r2 == rmin2) {
+                        if(skipeq > 0)
+                            skipeq -= 1;
+                        else
+                            nearestK.consider(r2, p.id);
+                    }
                 }
 
                 __syncthreads();
@@ -208,7 +228,7 @@ __global__ void KnnLeaf2Leaf(
         if(qoff + threadIdx.x < iqend) {
             #pragma unroll
             for(int i = 0; i < k; i++) {
-                knn_rad[ipartQ * k + i] = sqrt(nearestK.r2s[i]);
+                knn_rad2[ipartQ * k + i] = nearestK.r2s[i];
                 knn_id[ipartQ * k + i] = nearestK.ids[i];
             }
         }
