@@ -65,7 +65,7 @@ __global__ void FlagLeafBoundaries(
     bool is_split = lsize + rsize > max_size;
 
     // If nodes hit a domain boundary and are larger than the boundary level, we always flag them
-    int max_lvl_left = lvl_bound[0], max_lvl_right = lvl_bound[1];
+    // int max_lvl_left = lvl_bound[0], max_lvl_right = lvl_bound[1];
     is_split = is_split | ((mylevel > lvl_bound[0]) && (node_idx - lsize <= 0));
     is_split = is_split | ((mylevel > lvl_bound[1]) && (node_idx + rsize >= nump));
 

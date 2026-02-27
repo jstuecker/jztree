@@ -17,8 +17,8 @@ struct Vec {
         return p;
     }
 
-    __host__ __device__ __forceinline__ tvec& operator[](int i) { return v[i]; }
-    __host__ __device__ __forceinline__ const tvec& operator[](int i) const { return v[i]; }
+    __host__ __device__ __forceinline__ tvec& operator[](const int i) { return v[i]; }
+    __host__ __device__ __forceinline__ const tvec& operator[](const int i) const { return v[i]; }
 
     __host__ __device__ __forceinline__ tvec* data() { return v; }
     __host__ __device__ __forceinline__ const tvec* data() const { return v; }
@@ -91,6 +91,17 @@ __host__ __device__ __forceinline__
 Vec<dim, tvec> operator*(tvec s, Vec<dim, tvec> a) {
     a *= s;
     return a;
+}
+
+template<int dim, typename tvec>
+__host__ __device__ __forceinline__
+Vec<dim, tvec> reversed_vec(const Vec<dim, tvec>& x) {
+    Vec<dim, tvec> y;
+    #pragma unroll
+    for (int i = 0; i < dim; ++i) {
+        y.v[i] = x.v[dim - 1 - i];
+    }
+    return y;
 }
 
 /* ---------------------------------------------------------------------------------------------- */
