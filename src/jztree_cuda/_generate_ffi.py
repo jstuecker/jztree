@@ -99,7 +99,7 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "sort.cuh"),
-    names=["DtypeTest", "PosZorderSortRadix", "PosZorderSort", "SearchSortedZ"],
+    names=["DtypeTest", "PosZorderSort", "SearchSortedZ"],
     only_kernels=False
 )
 
@@ -117,10 +117,6 @@ functions["DtypeTest"].template_par["offset"].instances = (0, 10)
 add_dim_dtype_templates(functions["PosZorderSort"], "pos_in", pos_types=sort_types)
 functions["PosZorderSort"].par["size"].expression = "pos_in.dimensions()[0]"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
-
-add_dim_dtype_templates(functions["PosZorderSortRadix"], "pos_in", pos_types=("int32_t",), dimensions=(3,))
-functions["PosZorderSortRadix"].par["size"].expression = "pos_in.dimensions()[0]"
-functions["PosZorderSortRadix"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
 
 # functions["SearchSortedZ"].template_par["dim"].instances = dimensions
 # functions["SearchSortedZ"].template_par["dim"].expression = "posz_have.dimensions()[1]"

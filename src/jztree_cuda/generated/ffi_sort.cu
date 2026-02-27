@@ -227,111 +227,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: PosZorderSortRadix                        */
-/* ---------------------------------------------------------------------------------------------- */
-
-
-using PosZorderSortRadixDispatchFn = std::string (*) (cudaStream_t stream,
-    const void* pos_in,
-    void* pos_id_out,
-    void* pos_id_tmp,
-    void* tmp_buffer,
-    size_t size,
-    size_t tmp_bytes,
-    size_t block_size
-);
-template<int dim, typename tvec>
-static std::string PosZorderSortRadixDispatchWrapper(cudaStream_t stream,
-    const void* pos_in,
-    void* pos_id_out,
-    void* pos_id_tmp,
-    void* tmp_buffer,
-    size_t size,
-    size_t tmp_bytes,
-    size_t block_size
-) {
-    return PosZorderSortRadix<dim, tvec> (stream,
-        reinterpret_cast<const Vec<dim, tvec>*>(pos_in),
-        reinterpret_cast<PosId<dim, tvec>*>(pos_id_out),
-        reinterpret_cast<PosId<dim, tvec>*>(pos_id_tmp),
-        reinterpret_cast<void*>(tmp_buffer),
-        size,
-        tmp_bytes,
-        block_size
-    );
-}
-
-
-ffi::Error PosZorderSortRadixFFIHost(
-    cudaStream_t stream,
-    ffi::AnyBuffer pos_in,
-    ffi::Result<ffi::AnyBuffer> pos_id_out,
-    ffi::Result<ffi::AnyBuffer> pos_id_tmp,
-    ffi::Result<ffi::AnyBuffer> tmp_buffer,
-    size_t block_size
-) {
-    size_t size = pos_in.dimensions()[0];
-    size_t tmp_bytes = tmp_buffer->size_bytes();
-    int dim = pos_in.dimensions()[1];
-    DT tvec = pos_in.element_type();
-
-
-    // We have template parameters, so we need to instantiate all valid templates.
-    // We select a function pointer through a map with a stable, type-erased signature.
-    using TTuple = std::tuple<int, DT>;
-    using TFunc = PosZorderSortRadixDispatchFn;
-
-    static const std::map<TTuple, TFunc> instance_map = {
-        { {3, DT::S32}, &PosZorderSortRadixDispatchWrapper<3, int32_t> }
-    };
-
-    const TTuple key = TTuple(dim, tvec);
-
-    const auto it = instance_map.find(key);
-    if (it == instance_map.end()) {
-        return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim, tvec)"\
-            " in PosZorderSortRadixFFIHost -- Only supporting:\n"\
-            "(3, int32_t)"
-        );
-    }
-    PosZorderSortRadixDispatchFn instance = it->second;
-
-    // Now call our function
-    std::string result = instance(stream,
-        pos_in.untyped_data(),
-        pos_id_out->untyped_data(),
-        pos_id_tmp->untyped_data(),
-        tmp_buffer->untyped_data(),
-        size,
-        tmp_bytes,
-        block_size
-    );
-    // Check if the function returned an error string
-    if (!result.empty()) {
-        return ffi::Error::Internal(result);
-    }
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    PosZorderSortRadixFFI, PosZorderSortRadixFFIHost,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // pos_in
-        .Ret<ffi::AnyBuffer>() // pos_id_out
-        .Ret<ffi::AnyBuffer>() // pos_id_tmp
-        .Ret<ffi::AnyBuffer>() // tmp_buffer
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible}
-);
-
-/* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: SearchSortedZ                             */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -429,6 +324,5 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 NB_MODULE(ffi_sort, m) {
     m.def("DtypeTest", []() { return EncapsulateFfiCall(&DtypeTestFFI); });
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(&PosZorderSortFFI); });
-    m.def("PosZorderSortRadix", []() { return EncapsulateFfiCall(&PosZorderSortRadixFFI); });
     m.def("SearchSortedZ", []() { return EncapsulateFfiCall(&SearchSortedZFFI); });
 }
