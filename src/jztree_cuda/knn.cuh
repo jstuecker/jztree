@@ -86,20 +86,23 @@ struct SortedNearestK {
 };
 
 
-template<int K>
+template<int kbins>
 struct SortedNearestKWithCounts {
     // Keeps track of the nearest K neighbor radii in ascending order of r2.
     // Allows to insert multiple entries with the same radius
 
-    float r2s[K];
-    int cts[K];
+    float r2s[kbins];
+    int cts[kbins];
+    int total_count, target_count;
 
-    __device__ __forceinline__ SortedNearestKWithCounts(float r2=INFINITY){
+    __device__ __forceinline__ SortedNearestKWithCounts(int _target_count, float r2=INFINITY){
         #pragma unroll
-        for (int i=0; i<K; i++){ 
+        for (int i=0; i<kbins; i++){ 
             r2s[i] = r2;
             cts[i] = 0;
         }
+        total_count = 0;
+        target_count = _target_count;
     }
 
     __device__ __forceinline__ float max_r2(int count) const {
@@ -107,7 +110,7 @@ struct SortedNearestKWithCounts {
         int sum = 0;
         float r2 = INFINITY;
         #pragma unroll
-        for(int i=0; i<K; i++) {
+        for(int i=0; i<kbins; i++) {
             sum += cts[i];
             r2 = (active && (sum >= count)) ? r2s[i] : r2;
             active = sum < count;
@@ -115,14 +118,30 @@ struct SortedNearestKWithCounts {
         return r2;
     }
 
-
-    __device__ __forceinline__ void consider_num(float r2, int num) {
-        if (r2 > r2s[K-1]) return;
+    __device__ __forceinline__ void insert_add(float r2, int num) {
+        // Insertion by adding count to the smallest bin that is >= ours
+        total_count += num;
 
         bool active = true;  // true until we've placed the item
 
         #pragma unroll
-        for (int i = K-2; i >= 0; i--) {
+        for (int i = 0; i < kbins; i++) {
+            bool add = active && (r2s[i] >= r2);
+
+            cts[i] = add ? (cts[i] + num) : cts[i];
+
+            active = active && !add;
+        }
+    }
+
+    __device__ __forceinline__ void insert_shift(float r2, int num) {
+        // Insertion by shifting and discarding the last element
+        total_count = total_count + num - cts[kbins-1];
+
+        bool active = true;  // true until we've placed the item
+
+        #pragma unroll
+        for (int i = kbins-2; i >= 0; i--) {
             bool take = active && (r2 < r2s[i]);
 
             r2s[i+1] = active ? (take ? r2s[i] : r2) : r2s[i+1];
@@ -134,6 +153,23 @@ struct SortedNearestKWithCounts {
         // If we never placed, item belongs at slot 0
         r2s[0] = active ? r2 : r2s[0];
         cts[0] = active ? num : cts[0];
+    }
+
+    __device__ __forceinline__ void consider_num(float r2, int num) {
+        if (r2 > r2s[kbins-1]) return;
+
+        // We have to insert in such a way that we have in total >= target_count at all times
+        // after an initial filling phase.
+        // We prefer to shift, but if it doesn't guarantee this constraint, we add instead 
+        // (loosing a bit of accuracy)
+
+        bool need_add = (cts[kbins-1] > 0) && (total_count + num - cts[kbins-1] < target_count);
+        need_add |= r2 == r2s[kbins-1];
+
+        if(need_add)
+            insert_add(r2, num);
+        else
+            insert_shift(r2, num);
     }
 };
 
@@ -151,7 +187,7 @@ __global__ void KnnLeaf2Leaf(
     const int* splQ,            // leaf-ranges in B
     const Vec<dim,tvec>* xQ,    // query positions
     const tvec* rmin2_in,       // Optional, if provided find the find the first k neighbours
-    const int* skipequals_in,       // that have r2 > rmin2 or (r2 == rmin2 and i > idmin)
+    const int* skipequals_in,   // that have r2 > rmin2 or (r2 == rmin2 and i > idmin)
     tvec* knn_rad2,             // output knn radii
     int* knn_id,                // output knn ids
     int k,                      // Actual k, has to be <= kmax
@@ -313,7 +349,7 @@ struct LogBinMap {
 /*                                    Interaction list Building                                   */
 /* ---------------------------------------------------------------------------------------------- */
 
-template <int kmax, int dim, typename tvec>
+template <int kbins, int dim, typename tvec>
 __global__ void KnnNode2NodeFindRmax(
     ConstInteractionList par_ilist,
     const int* parent_spl,
@@ -338,7 +374,7 @@ __global__ void KnnNode2NodeFindRmax(
         Vec<dim,tvec> xQ = nodeQ.center;
         Vec<dim,tvec> extQ = LvlToHalfExt<dim,tvec>((int)nodeQ.level);
 
-        SortedNearestKWithCounts<kmax> nearestK(INFINITY);
+        SortedNearestKWithCounts<kbins> nearestK(k, INFINITY);
 
         PrefetchList2<int,float> pf_ilist(
             par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
@@ -511,23 +547,20 @@ ffi::Error KnnNode2Node(
 
     size_t smem_alloc_size = blocksize_fill * (2*sizeof(Vec<dim,tvec>) + sizeof(int));
 
-    if(k <= 4) {
-        KnnNode2NodeFindRmax<4,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+    if(k <= 16) {
+        KnnNode2NodeFindRmax<8,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
     }
-    if(k <= 16) {
+    if(k <= 32) {
         KnnNode2NodeFindRmax<16,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
     }
-    else if(k <= 64) {
-        KnnNode2NodeFindRmax<64,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
+    else {
+        KnnNode2NodeFindRmax<32,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
-    }
-    else {
-        return ffi::Error(ffi::ErrorCode::kOutOfRange, "Only supporting k up to 64 for now");
     }
 
     smem_alloc_size = blocksize_fill * 2*sizeof(Vec<dim,tvec>);

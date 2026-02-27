@@ -38,7 +38,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
     ffi::AnyBuffer splQ,
     ffi::AnyBuffer xQ,
     ffi::AnyBuffer rmin2_in,
-    ffi::AnyBuffer idmin_in,
+    ffi::AnyBuffer skipequals_in,
     ffi::Result<ffi::AnyBuffer> knn_rad2,
     ffi::Result<ffi::AnyBuffer> knn_id,
     int k,
@@ -61,7 +61,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
     void* splQ_arg = splQ.untyped_data();
     void* xQ_arg = xQ.untyped_data();
     void* rmin2_in_arg = rmin2_in.untyped_data();
-    void* idmin_in_arg = idmin_in.untyped_data();
+    void* skipequals_in_arg = skipequals_in.untyped_data();
     void* knn_rad2_arg = knn_rad2->untyped_data();
     void* knn_id_arg = knn_id->untyped_data();
     void* args[] = {
@@ -73,7 +73,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
         &splQ_arg,
         &xQ_arg,
         &rmin2_in_arg,
-        &idmin_in_arg,
+        &skipequals_in_arg,
         &knn_rad2_arg,
         &knn_id_arg,
         &k,
@@ -96,10 +96,6 @@ ffi::Error KnnLeaf2LeafFFIHost(
         { {8, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 2, double>) },
         { {8, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 3, float>) },
         { {8, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 3, double>) },
-        { {12, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 2, float>) },
-        { {12, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 2, double>) },
-        { {12, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 3, float>) },
-        { {12, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<12, 3, double>) },
         { {16, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 2, float>) },
         { {16, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 2, double>) },
         { {16, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 3, float>) },
@@ -107,11 +103,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
         { {32, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 2, float>) },
         { {32, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 2, double>) },
         { {32, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, float>) },
-        { {32, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, double>) },
-        { {64, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 2, float>) },
-        { {64, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 2, double>) },
-        { {64, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 3, float>) },
-        { {64, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<64, 3, double>) }
+        { {32, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, double>) }
     };
 
     const TTuple key = TTuple(kmax, dim, tvec);
@@ -121,7 +113,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (kmax, dim, tvec)"\
             " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(4, 2, float), (4, 2, double), (4, 3, float), (4, 3, double), (8, 2, float), (8, 2, double), (8, 3, float), (8, 3, double), (12, 2, float), (12, 2, double), (12, 3, float), (12, 3, double), (16, 2, float), (16, 2, double), (16, 3, float), (16, 3, double), (32, 2, float), (32, 2, double), (32, 3, float), (32, 3, double), (64, 2, float), (64, 2, double), (64, 3, float), (64, 3, double)"
+            "(4, 2, float), (4, 2, double), (4, 3, float), (4, 3, double), (8, 2, float), (8, 2, double), (8, 3, float), (8, 3, double), (16, 2, float), (16, 2, double), (16, 3, float), (16, 3, double), (32, 2, float), (32, 2, double), (32, 3, float), (32, 3, double)"
         );
     }
     const void* instance = it->second;
@@ -154,7 +146,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // splQ
         .Arg<ffi::AnyBuffer>() // xQ
         .Arg<ffi::AnyBuffer>() // rmin2_in
-        .Arg<ffi::AnyBuffer>() // idmin_in
+        .Arg<ffi::AnyBuffer>() // skipequals_in
         .Ret<ffi::AnyBuffer>() // knn_rad2
         .Ret<ffi::AnyBuffer>() // knn_id
         .Attr<int>("k")

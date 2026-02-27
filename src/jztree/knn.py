@@ -38,13 +38,12 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     assert splT.dtype == splQ.dtype == jnp.int32
     assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
 
-    assert k <= 64
     # We don't compile the knn kernel for every k, so we need to find the closest one
     # that we have compiled
     if k >= 32:
         kmax = 32
     else:
-        kmax = min([kmax for kmax in (4,8,12,16,32,64) if kmax >= k])
+        kmax = min([kmax for kmax in (4, 8, 16, 32) if kmax >= k])
 
     def call(k, rmin2, skipeq, use_rmin=False):
         outputs = (
@@ -62,7 +61,7 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     rknn2, iknn = call(min(k, kmax), rmin2, skipeq)
 
     # if we couldn't fit all neighbours at once, have to repeat
-    if k >= kmax:
+    if k > kmax:
         koffset = kmax
         resr, resi = [rknn2], [iknn]
         while koffset < k:

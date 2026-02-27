@@ -24,7 +24,6 @@ jax.ffi.register_ffi_target("GetNodeGeometry", ffi_tree.GetNodeGeometry(), platf
 jax.ffi.register_ffi_target("GetBoundaryExtendPerLevel", ffi_tree.GetBoundaryExtendPerLevel(), platform="CUDA")
 jax.ffi.register_ffi_target("CenterOfMass", ffi_tree.CenterOfMass(), platform="CUDA")
 
-
 # ------------------------------------------------------------------------------------------------ #
 #                                         Helper Functions                                         #
 # ------------------------------------------------------------------------------------------------ #

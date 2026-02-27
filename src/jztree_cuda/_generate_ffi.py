@@ -14,7 +14,7 @@ sort_types = ("float", "double", "int32_t", "int64_t")
 dimensions = (2,3)
 
 # knn
-kmax_instance_values = (4, 8, 12, 16, 32, 64)
+kmax_instance_values = (4, 8, 16, 32)
 knn_dim = (2,3)
 
 default_includes = ["../common/math.cuh"]
