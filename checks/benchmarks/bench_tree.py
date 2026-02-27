@@ -31,7 +31,9 @@ def bench_zsort(jax_bench, npart):
     pos_mass = ics.uniform_particles(npart)
     jb = jax_bench(jit_rounds=50, jit_warmup=5)
 
-    jb.measure(fn_jit=pos_zorder_sort.jit, x=pos_mass.pos, tag="zsort")
+    jb.measure(fn_jit=pos_zorder_sort.jit, x=pos_mass.pos, radix=False, tag="zsort")
+
+    jb.measure(fn_jit=pos_zorder_sort.jit, x=pos_mass.pos, radix=True, tag="zsort_radix")
 
     irand = jax.random.randint(jax.random.key(0), npart, 0, 128)
     @jax.jit

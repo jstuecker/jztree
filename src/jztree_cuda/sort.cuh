@@ -104,6 +104,223 @@ std::string PosZorderSort(
 }
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                                    Radix based z-order sort                                    */
+/* ---------------------------------------------------------------------------------------------- */
+
+// template<int dim, typename tint>
+// struct RadixKey
+// {
+//     Vec<dim,tint> key;
+//     int32_t  id;
+// };
+
+// Initialization kernel: fill pos_id_out[i] with key parts + id.
+// Replace the logic with your own.
+
+template<typename tvec, typename tint>
+__device__ tint to_int(tvec val) {
+    // define an integer so that  val1 < val2 <=> int1 < int2
+    if constexpr (std::is_same_v<tvec, float>) {
+        // If sign is negative, flip all bits, else flip sign
+        uint32_t b = __float_as_uint(val);
+        uint32_t mask = (b & 0x80000000u) ? 0xFFFFFFFFu : 0x80000000u;
+        return b ^ mask;
+    }
+    else if constexpr (std::is_same_v<tvec, double>) {
+        uint64_t b = (uint64_t)__double_as_longlong(val);
+        uint64_t mask = (b & 0x8000000000000000ull)
+                    ? 0xFFFFFFFFFFFFFFFFull
+                    : 0x8000000000000000ull;
+        return b ^ mask;
+    }
+    else if constexpr (std::is_same_v<tvec, int32_t>) {
+        return (tint) val ^ 0x80000000u; // flip sign bit
+    }
+    else if constexpr (std::is_same_v<tvec, int64_t>) {
+        return (tint) val ^ 0x8000000000000000ull;
+    }
+    else
+        return (tint) val;
+}
+
+template<typename tvec, typename tint>
+__device__ tvec from_int(tint ival) {
+    // define an integer so that  val1 < val2 <=> int1 < int2
+    if constexpr (std::is_same_v<tvec, float>) {
+        // If sign is negative, flip all bits, else flip sign
+        uint32_t b = (ival & 0x80000000u) ? (ival ^ 0x80000000u) : ~ival;
+        return __uint_as_float(b);
+    }
+    else if constexpr (std::is_same_v<tvec, double>) {
+        uint64_t b = (ival & 0x8000000000000000ull) ? (ival ^ 0x8000000000000000ull) : ~ival;
+        return __longlong_as_double((long long)b);
+    }
+    else if constexpr (std::is_same_v<tvec, int32_t>) {
+        return (tvec) ival ^ 0x80000000u;
+    }
+    else if constexpr (std::is_same_v<tvec, int64_t>) {
+        return (tvec) ival ^ 0x8000000000000000ull;
+    }
+    else
+        return (tvec) ival;
+}
+
+template <bool deinterleave, int dim, typename tint>
+__device__ __forceinline__ void interleave_bits(
+    const Vec<dim,tint> &in, Vec<dim,tint> &out)
+{
+    static_assert(std::is_same_v<tint,uint32_t> || std::is_same_v<tint,uint64_t>);
+    constexpr int nbits = sizeof(tint) * 8;
+
+    #pragma unroll
+    for (int k = 0; k < dim; ++k) out[k] = tint{0};
+
+    #pragma unroll
+    for (int i = 0; i < nbits; ++i) {
+        #pragma unroll
+        for (int j = 0; j < dim; ++j) {
+            int p = i * dim + j;
+
+            if constexpr (!deinterleave) {
+                tint bit = (in[j] >> i) & tint{1};
+                out[p/nbits] |= bit << (p % nbits);
+            } else {
+                tint bit = (in[p/nbits] >> (p % nbits)) & tint{1};
+                out[j] |= bit << i;
+            }
+        }
+    }
+}
+
+
+
+template<int dim, typename tvec, typename tint>
+__global__ void InterleaveKernel(
+    const Vec<dim, tvec>* pos_in,
+    PosId<dim, tint>* key_out,
+    size_t n
+) {
+    int32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+
+    Vec<dim,tvec> in = pos_in[i];
+    Vec<dim,tint> tmp;
+
+    #pragma unroll
+    for(int d=0; d<dim; d++)
+        tmp[d] = to_int<tvec,tint>(in[d]);
+    
+    PosId<dim,tint> out{};
+    out.id = i;
+    interleave_bits<false,dim,tint>(reversed_vec(tmp), out.pos); // reverse, since CUB sorts by last
+
+    key_out[i] = out;
+}
+
+
+template<int dim, typename tvec, typename tint>
+__global__ void DeinterleaveKernel(
+    const PosId<dim, tint>* key_in,
+    PosId<dim, tvec>* pos_id_out,
+    size_t n
+) {
+    int32_t i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n) return;
+
+    PosId<dim,tint> in = key_in[i];
+    Vec<dim,tint> tmp;
+
+    interleave_bits<true,dim,tint>(in.pos, tmp); // deinterleave
+    tmp = reversed_vec(tmp); // reverse, since CUB sorts by last
+
+    PosId<dim, tvec> out;
+    out.id = in.id;
+    #pragma unroll
+    for(int d=0; d<dim; d++)
+        out.pos[d] = from_int<tvec,tint>(tmp[d]);
+    
+    pos_id_out[i] = out;
+}
+
+// Decomposer for radix sort.
+// IMPORTANT: return tuple in order (least significant ... most significant).
+template<int dim, typename tint>
+struct PosIdDecomposer
+{
+    __host__ __device__
+    ::cuda::std::tuple<tint&, tint&, tint&>
+    operator()(PosId<dim, tint>& x) const
+    {
+        // Least -> most: k2 (tertiary), k1 (secondary), k0 (primary)
+        return { x.pos[2], x.pos[1], x.pos[0] };
+    }
+
+    // Optional const overload (some toolchains like having it)
+    __host__ __device__
+    ::cuda::std::tuple<const tint&, const tint&, const tint&>
+    operator()(const PosId<dim, tint>& x) const
+    {
+        return { x.pos[2], x.pos[1], x.pos[0] };
+    }
+};
+
+template<int dim, typename tvec>
+std::string PosZorderSortRadix(
+    cudaStream_t stream,
+    const Vec<dim, tvec>* pos_in,
+    PosId<dim, tvec>* pos_id_out,
+    PosId<dim, tvec>* pos_id_tmp,
+    void* tmp_buffer,          // device temp storage
+    size_t size,
+    size_t tmp_bytes,
+    size_t block_size)
+{
+    constexpr bool is32bit = sizeof(tvec) == 4;
+    constexpr bool is64bit = sizeof(tvec) == 8;
+
+    static_assert(is32bit || is64bit, "only 32bit or 64bit types supported");
+
+    using tint = std::conditional_t<is32bit, std::uint32_t, std::uint64_t>;
+
+    // Can use output buffer as temporary
+    PosId<dim, tint> *keys_tmp = reinterpret_cast<PosId<dim, tint>*>(pos_id_tmp);
+    PosId<dim, tint> *keys_tmp2 = reinterpret_cast<PosId<dim, tint>*>(pos_id_out);
+
+    // 1) init
+    InterleaveKernel<dim, tvec, tint> <<< div_ceil(size, block_size), block_size, 0, stream >>>(
+        pos_in, keys_tmp, size
+    );
+
+    // 2) query temp storage bytes
+    cub::DoubleBuffer<PosId<dim, tint>> keys(keys_tmp, keys_tmp2);
+    size_t required_storage_bytes = 0;
+    cub::DeviceRadixSort::SortKeys(
+        nullptr, required_storage_bytes, keys, (int64_t)size, PosIdDecomposer<dim, tint>{}, stream
+    );
+
+    if (tmp_bytes < required_storage_bytes) {
+        return std::string("CUB temp buffer too small. Have: ")
+        + std::to_string(tmp_bytes) + " Required: " + std::to_string(required_storage_bytes);
+    }
+
+    keys.selector = 0;
+    cub::DeviceRadixSort::SortKeys(
+        tmp_buffer, required_storage_bytes, keys, static_cast<int64_t>(size), 
+        PosIdDecomposer<dim, tint>{}, stream
+    );
+
+    // If the sorted data ended up in the alternate buffer, copy back.
+    if (keys.selector == 0)
+        DeinterleaveKernel<dim,tvec,tint><<< div_ceil(size, block_size), block_size, 0, stream >>>(
+            keys_tmp, pos_id_out, size);
+    else
+        DeinterleaveKernel<dim,tvec,tint><<< div_ceil(size, block_size), block_size, 0, stream >>>(
+            keys_tmp2, pos_id_out, size);
+
+    return std::string();
+}
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                                          SearchSortedZ                                         */
 /* ---------------------------------------------------------------------------------------------- */
 

@@ -16,6 +16,7 @@ from .stats import statistics, stats_callback, AllocStats
 from jztree_cuda import ffi_tree, ffi_sort
 
 jax.ffi.register_ffi_target("PosZorderSort", ffi_sort.PosZorderSort(), platform="CUDA")
+jax.ffi.register_ffi_target("PosZorderSortRadix", ffi_sort.PosZorderSortRadix(), platform="CUDA")
 jax.ffi.register_ffi_target("DtypeTest", ffi_sort.DtypeTest(), platform="CUDA")
 jax.ffi.register_ffi_target("SearchSortedZ", ffi_sort.SearchSortedZ(), platform="CUDA")
 jax.ffi.register_ffi_target("FlagLeafBoundaries", ffi_tree.FlagLeafBoundaries(), platform="CUDA")
@@ -51,28 +52,40 @@ def dtype_test(x: jax.Array, offset: int, mode=True, dtype=jnp.float32):
         size=np.uint64(len(x)), offset=np.int32(offset), mode=mode
     )[0]
 
-def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
+def _pos_zorder_sort_impl(x: jax.Array, block_size=64, radix: bool = False):
     # assert x.dtype == jnp.float32
     assert x.ndim == 2
     dim = x.shape[-1]
     assert dim in (2,3)
 
-    # To optimize memory layout, we bundle position and id together into a single array
-    # We later need to reinterprete the output to extract positions and ids
-    out_type = jax.ShapeDtypeStruct((x.shape[0],dim+1), x.dtype)
-    # This is a guess, how much a temporary storage in cub::DeviceMergeSort::SortKeys requires
-    # If we estimate too little, an error will be thrown from the C++ code:
-    tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), dim+1), x.dtype)
-    isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type), vmap_method="sequential")(
-        x, block_size=np.uint64(block_size)
-    )[0]
+    if radix:
+        outputs = (
+            jax.ShapeDtypeStruct((x.shape[0],dim+1), x.dtype),
+            jax.ShapeDtypeStruct((x.shape[0],dim+1), x.dtype),
+            jax.ShapeDtypeStruct((1024*1024*16,), jnp.uint32)
+        )
+        isort = jax.ffi.ffi_call("PosZorderSortRadix", outputs, vmap_method="sequential")(
+            x, block_size=np.uint64(block_size)
+        )[0]
+
+        # PosZorderSortRadix
+    else:
+        # To optimize memory layout, we bundle position and id together into a single array
+        # We later need to reinterprete the output to extract positions and ids
+        out_type = jax.ShapeDtypeStruct((x.shape[0],dim+1), x.dtype)
+        # This is a guess, how much a temporary storage in cub::DeviceMergeSort::SortKeys requires
+        # If we estimate too little, an error will be thrown from the C++ code:
+        tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), dim+1), x.dtype)
+        isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type), vmap_method="sequential")(
+            x, block_size=np.uint64(block_size)
+        )[0]
 
     pos = isort[:, :dim].view(x.dtype)
     ids = isort[:, dim].view(jnp.int32)
 
     return pos, ids
 
-def pos_zorder_sort(x: jax.Array | Pos):
+def pos_zorder_sort(x: jax.Array | Pos, radix: bool = False):
     """Brings 3d-positions into z-order
 
     If x is a pytree, it needs to have a "pos" attribute which will be used as the sorting key. 
@@ -84,9 +97,9 @@ def pos_zorder_sort(x: jax.Array | Pos):
     @jax.custom_vjp
     def eval(x):
         if isinstance(x, jax.Array):
-            return _pos_zorder_sort_impl(x)
+            return _pos_zorder_sort_impl(x, radix=radix)
         else: # assuming x is a pytree with x.pos attribute
-            posz, idz = _pos_zorder_sort_impl(x.pos)
+            posz, idz = _pos_zorder_sort_impl(x.pos, radix=radix)
             def apply_sort(val):
                 return val[idz]
             out = tree_map_by_len(apply_sort, x, len(posz))
@@ -108,7 +121,7 @@ def pos_zorder_sort(x: jax.Array | Pos):
     eval.defvjp(eval_fwd, eval_bwd)
 
     return eval(x)
-pos_zorder_sort.jit = jax.jit(pos_zorder_sort)
+pos_zorder_sort.jit = jax.jit(pos_zorder_sort, static_argnames="radix")
 
 def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
     """Finds the indices in xz where elements of xz_query would be inserted to keep order.
