@@ -28,104 +28,124 @@ using DT = ffi::DataType;
 /* ---------------------------------------------------------------------------------------------- */
 
 
+using KnnLeaf2LeafDispatchFn = std::string (*) (cudaStream_t stream,
+    const void* ilist_spl,
+    const void* ilist_iother,
+    const void* ilist_r2,
+    const void* splT,
+    const void* xT,
+    const void* splQ,
+    const void* xQ,
+    void* knn_rad,
+    void* knn_id,
+    void* rinfo_buf,
+    int k,
+    float boxsize,
+    size_t size_leaves_query,
+    size_t size_part_query
+);
+template<int dim, typename tvec>
+static std::string KnnLeaf2LeafDispatchWrapper(cudaStream_t stream,
+    const void* ilist_spl,
+    const void* ilist_iother,
+    const void* ilist_r2,
+    const void* splT,
+    const void* xT,
+    const void* splQ,
+    const void* xQ,
+    void* knn_rad,
+    void* knn_id,
+    void* rinfo_buf,
+    int k,
+    float boxsize,
+    size_t size_leaves_query,
+    size_t size_part_query
+) {
+    return KnnLeaf2Leaf<dim, tvec> (stream,
+        reinterpret_cast<const int*>(ilist_spl),
+        reinterpret_cast<const int*>(ilist_iother),
+        reinterpret_cast<const float*>(ilist_r2),
+        reinterpret_cast<const int*>(splT),
+        reinterpret_cast<const Vec<dim,tvec>*>(xT),
+        reinterpret_cast<const int*>(splQ),
+        reinterpret_cast<const Vec<dim,tvec>*>(xQ),
+        reinterpret_cast<tvec*>(knn_rad),
+        reinterpret_cast<int*>(knn_id),
+        reinterpret_cast<void*>(rinfo_buf),
+        k,
+        boxsize,
+        size_leaves_query,
+        size_part_query
+    );
+}
+
+
 ffi::Error KnnLeaf2LeafFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer ilist_spl,
-    ffi::AnyBuffer ilist,
+    ffi::AnyBuffer ilist_iother,
     ffi::AnyBuffer ilist_r2,
     ffi::AnyBuffer splT,
     ffi::AnyBuffer xT,
     ffi::AnyBuffer splQ,
     ffi::AnyBuffer xQ,
-    ffi::AnyBuffer rmin2_in,
-    ffi::AnyBuffer skipequals_in,
-    ffi::Result<ffi::AnyBuffer> knn_rad2,
+    ffi::Result<ffi::AnyBuffer> knn_rad,
     ffi::Result<ffi::AnyBuffer> knn_id,
+    ffi::Result<ffi::AnyBuffer> rinfo_buf,
     int k,
-    float boxsize,
-    bool use_rmin,
-    int kmax
+    float boxsize
 ) {
+    size_t size_leaves_query = splQ.element_count() - 1;
+    size_t size_part_query = xQ.dimensions()[0];
     int dim = xT.dimensions()[1];
     DT tvec = xT.element_type();
-    dim3 blockDim(32);
-    dim3 gridDim(splQ.element_count() - 1);
-    size_t smem = blockDim.x * (dim*ffi::ByteWidth(xT.element_type()) + sizeof(int32_t));
-    
-    // Build a bundled argument list for cudaLaunchKernel
-    void* ilist_spl_arg = ilist_spl.untyped_data();
-    void* ilist_arg = ilist.untyped_data();
-    void* ilist_r2_arg = ilist_r2.untyped_data();
-    void* splT_arg = splT.untyped_data();
-    void* xT_arg = xT.untyped_data();
-    void* splQ_arg = splQ.untyped_data();
-    void* xQ_arg = xQ.untyped_data();
-    void* rmin2_in_arg = rmin2_in.untyped_data();
-    void* skipequals_in_arg = skipequals_in.untyped_data();
-    void* knn_rad2_arg = knn_rad2->untyped_data();
-    void* knn_id_arg = knn_id->untyped_data();
-    void* args[] = {
-        &ilist_spl_arg,
-        &ilist_arg,
-        &ilist_r2_arg,
-        &splT_arg,
-        &xT_arg,
-        &splQ_arg,
-        &xQ_arg,
-        &rmin2_in_arg,
-        &skipequals_in_arg,
-        &knn_rad2_arg,
-        &knn_id_arg,
-        &k,
-        &boxsize,
-        &use_rmin
-    };
-    
+
 
     // We have template parameters, so we need to instantiate all valid templates.
     // We select a function pointer through a map with a stable, type-erased signature.
-    using TTuple = std::tuple<int, int, DT>;
-    using TFunc = const void*;
+    using TTuple = std::tuple<int, DT>;
+    using TFunc = KnnLeaf2LeafDispatchFn;
 
     static const std::map<TTuple, TFunc> instance_map = {
-        { {4, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 2, float>) },
-        { {4, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 2, double>) },
-        { {4, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 3, float>) },
-        { {4, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<4, 3, double>) },
-        { {8, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 2, float>) },
-        { {8, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 2, double>) },
-        { {8, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 3, float>) },
-        { {8, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<8, 3, double>) },
-        { {16, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 2, float>) },
-        { {16, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 2, double>) },
-        { {16, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 3, float>) },
-        { {16, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<16, 3, double>) },
-        { {32, 2, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 2, float>) },
-        { {32, 2, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 2, double>) },
-        { {32, 3, DT::F32}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, float>) },
-        { {32, 3, DT::F64}, reinterpret_cast<TFunc>(&KnnLeaf2Leaf<32, 3, double>) }
+        { {2, DT::F32}, &KnnLeaf2LeafDispatchWrapper<2, float> },
+        { {2, DT::F64}, &KnnLeaf2LeafDispatchWrapper<2, double> },
+        { {3, DT::F32}, &KnnLeaf2LeafDispatchWrapper<3, float> },
+        { {3, DT::F64}, &KnnLeaf2LeafDispatchWrapper<3, double> }
     };
 
-    const TTuple key = TTuple(kmax, dim, tvec);
+    const TTuple key = TTuple(dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (kmax, dim, tvec)"\
+            "\nUnsupported template parameter combination for (dim, tvec)"\
             " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(4, 2, float), (4, 2, double), (4, 3, float), (4, 3, double), (8, 2, float), (8, 2, double), (8, 3, float), (8, 3, double), (16, 2, float), (16, 2, double), (16, 3, float), (16, 3, double), (32, 2, float), (32, 2, double), (32, 3, float), (32, 3, double)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
-    const void* instance = it->second;
+    KnnLeaf2LeafDispatchFn instance = it->second;
 
-    cudaLaunchKernel(
-        instance,
-        gridDim,
-        blockDim,
-        args,
-        smem,
-        stream
+    // Now call our function
+    std::string result = instance(stream,
+        ilist_spl.untyped_data(),
+        ilist_iother.untyped_data(),
+        ilist_r2.untyped_data(),
+        splT.untyped_data(),
+        xT.untyped_data(),
+        splQ.untyped_data(),
+        xQ.untyped_data(),
+        knn_rad->untyped_data(),
+        knn_id->untyped_data(),
+        rinfo_buf->untyped_data(),
+        k,
+        boxsize,
+        size_leaves_query,
+        size_part_query
     );
+    // Check if the function returned an error string
+    if (!result.empty()) {
+        return ffi::Error::Internal(result);
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -139,20 +159,17 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // ilist_spl
-        .Arg<ffi::AnyBuffer>() // ilist
+        .Arg<ffi::AnyBuffer>() // ilist_iother
         .Arg<ffi::AnyBuffer>() // ilist_r2
         .Arg<ffi::AnyBuffer>() // splT
         .Arg<ffi::AnyBuffer>() // xT
         .Arg<ffi::AnyBuffer>() // splQ
         .Arg<ffi::AnyBuffer>() // xQ
-        .Arg<ffi::AnyBuffer>() // rmin2_in
-        .Arg<ffi::AnyBuffer>() // skipequals_in
-        .Ret<ffi::AnyBuffer>() // knn_rad2
+        .Ret<ffi::AnyBuffer>() // knn_rad
         .Ret<ffi::AnyBuffer>() // knn_id
+        .Ret<ffi::AnyBuffer>() // rinfo_buf
         .Attr<int>("k")
-        .Attr<float>("boxsize")
-        .Attr<bool>("use_rmin")
-        .Attr<int>("kmax"),
+        .Attr<float>("boxsize"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );
 

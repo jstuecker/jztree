@@ -37,46 +37,66 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     assert xT.shape[-1] == xQ.shape[-1]
     assert splT.dtype == splQ.dtype == jnp.int32
     assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
+    assert len(ilist.ispl) == len(splQ)
+
+    dtype = xT.dtype
+
+    if k > 32:
+        tmp_buf = jax.ShapeDtypeStruct((xQ.shape[0], dtype.itemsize + 4), jnp.uint8)
+    else:
+        tmp_buf = jax.ShapeDtypeStruct((), jnp.uint4)
+
+    outputs = (
+        jax.ShapeDtypeStruct((xQ.shape[0], k), xT.dtype),
+        jax.ShapeDtypeStruct((xQ.shape[0], k), jnp.int32),
+        tmp_buf
+    )
+
+    rnn, inn = jax.ffi.ffi_call("KnnLeaf2Leaf", outputs)(
+        ilist.ispl, ilist.iother, ilist.rad2, splT, xT, splQ, xQ,
+        boxsize=np.float32(boxsize), k=np.int32(k)
+    )[0:2]
+    return rnn, inn
 
     # We don't compile the knn kernel for every k, so we need to find the closest one
     # that we have compiled
-    if k >= 32:
-        kmax = 32
-    else:
-        kmax = min([kmax for kmax in (4, 8, 16, 32) if kmax >= k])
+    # if k >= 32:
+    #     kmax = 32
+    # else:
+    #     kmax = min([kmax for kmax in (4, 8, 16, 32) if kmax >= k])
 
-    def call(k, rmin2, skipeq, use_rmin=False):
-        outputs = (
-            jax.ShapeDtypeStruct((xQ.shape[0], k), xT.dtype),
-            jax.ShapeDtypeStruct((xQ.shape[0], k), jnp.int32)
-        )
-        return jax.ffi.ffi_call("KnnLeaf2Leaf", outputs)(
-            ilist.ispl, ilist.iother, ilist.rad2, splT, xT, splQ, xQ, rmin2, skipeq,
-            boxsize=np.float32(boxsize), k=np.int32(k), kmax=np.int32(kmax),
-            use_rmin=np.bool(use_rmin)
-        )
+    # def call(k, rmin2, skipeq, use_rmin=False):
+    #     outputs = (
+    #         jax.ShapeDtypeStruct((xQ.shape[0], k), xT.dtype),
+    #         jax.ShapeDtypeStruct((xQ.shape[0], k), jnp.int32)
+    #     )
+    #     return jax.ffi.ffi_call("KnnLeaf2Leaf", outputs)(
+    #         ilist.ispl, ilist.iother, ilist.rad2, splT, xT, splQ, xQ, rmin2, skipeq,
+    #         boxsize=np.float32(boxsize), k=np.int32(k), kmax=np.int32(kmax),
+    #         use_rmin=np.bool(use_rmin)
+    #     )
     
-    rmin2 = jnp.zeros(1, xT.dtype)
-    skipeq = jnp.full(1, 0, jnp.int32)
-    rknn2, iknn = call(min(k, kmax), rmin2, skipeq)
+    # rmin2 = jnp.zeros(1, xT.dtype)
+    # skipeq = jnp.full(1, 0, jnp.int32)
+    # rknn2, iknn = call(min(k, kmax), rmin2, skipeq)
 
-    # if we couldn't fit all neighbours at once, have to repeat
-    if k > kmax:
-        koffset = kmax
-        resr, resi = [rknn2], [iknn]
-        while koffset < k:
-            # skipeq corresponds to the number of consequitive last neighbours that have r2==rmin2
-            # this number of equal radii occurences will be skipped inside of the knn kernel
-            # to not get double occurences on ties with rmin2
-            skipeq = jnp.sum((rknn2 == rknn2[:,-1:]), axis=-1) + (skipeq * (rmin2 == rknn2[:,-1]))
-            rmin2 = rknn2[:,-1]
-            rknn2, iknn = call(min(k - koffset, kmax), rmin2, skipeq, use_rmin=True)
-            resr.append(rknn2)
-            resi.append(iknn)
-            koffset += kmax
-        rknn2, iknn = jnp.concatenate(resr, axis=-1), jnp.concatenate(resi, axis=-1)
+    # # if we couldn't fit all neighbours at once, have to repeat
+    # if k > kmax:
+    #     koffset = kmax
+    #     resr, resi = [rknn2], [iknn]
+    #     while koffset < k:
+    #         # skipeq corresponds to the number of consequitive last neighbours that have r2==rmin2
+    #         # this number of equal radii occurences will be skipped inside of the knn kernel
+    #         # to not get double occurences on ties with rmin2
+    #         skipeq = jnp.sum((rknn2 == rknn2[:,-1:]), axis=-1) + (skipeq * (rmin2 == rknn2[:,-1]))
+    #         rmin2 = rknn2[:,-1]
+    #         rknn2, iknn = call(min(k - koffset, kmax), rmin2, skipeq, use_rmin=True)
+    #         resr.append(rknn2)
+    #         resi.append(iknn)
+    #         koffset += kmax
+    #     rknn2, iknn = jnp.concatenate(resr, axis=-1), jnp.concatenate(resi, axis=-1)
  
-    return jnp.sqrt(rknn2), iknn
+    # return jnp.sqrt(rknn2), iknn
 _knn_leaf2leaf.jit = jax.jit(_knn_leaf2leaf, static_argnames=("k", "boxsize"))
 
 def _knn_node2node_ilist(

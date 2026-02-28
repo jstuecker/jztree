@@ -57,6 +57,26 @@ struct SortedNearestK {
         return r2s[K-1];
     }
 
+    __device__ __forceinline__ trad r2_at(int k) const {
+        // Access with dynamic indexing that can stay in registers
+        trad val = static_cast<trad>(0);
+        #pragma unroll
+        for(int i=0; i<K; i++) {
+            val = i==k ? r2s[i] : val;
+        }
+        return val;
+    }
+
+    __device__ __forceinline__ int count_equal_up_to(int imax, trad r2) const {
+        // Access with dynamic indexing that can stay in registers
+        int count = 0;
+        #pragma unroll
+        for(int i=0; i<K; i++) {
+            count += (r2s[i] == r2) && (i<=imax) ? 1 : 0;
+        }
+        return count;
+    }
+
     // Insert (r2,id) into ascending r2s[], evicting the largest.
     // I have tried many different variants of this function and this turned out to be the fastest.
     // Important aspects:
@@ -174,40 +194,41 @@ struct SortedNearestKWithCounts {
 };
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                                     Ilist based KNN kernel                                     */
+/*                                          Leaf2Leaf KNN                                         */
 /* ---------------------------------------------------------------------------------------------- */
 
+template <typename tvec>
+struct RminInfo {
+    tvec rmin2;
+    int nskip_equals;
+};
+
 template <int kmax, int dim, typename tvec>
-__global__ void KnnLeaf2Leaf(
-    const int* ilist_spl,       // leaf-ranges in ilist
-    const int* ilist,           // interaction list
-    const float* ilist_r2,      // (lower) interaction rmax2
+__global__ void KnnLeaf2LeafKernel(
+    ConstInteractionList ilist,
     const int* splT,            // leaf-ranges in A
     const Vec<dim,tvec>* xT,    // input positions
     const int* splQ,            // leaf-ranges in B
     const Vec<dim,tvec>* xQ,    // query positions
-    const tvec* rmin2_in,       // Optional, if provided find the find the first k neighbours
-    const int* skipequals_in,   // that have r2 > rmin2 or (r2 == rmin2 and i > idmin)
-    tvec* knn_rad2,             // output knn radii
+    tvec* knn_rad,             // output knn radii
     int* knn_id,                // output knn ids
-    int k,                      // Actual k, has to be <= kmax
-    float boxsize,              // if > 0, use for periodic wrapping
-    bool use_rmin
+    RminInfo<tvec>* rmin_info,  // Optional I/O, allows to skip nodes that are <= a given radius
+    int koffset,                // point where we start filling the output
+    int ksize,                  // total k we want to fill in (possibly) multiple passes
+    float boxsize               // if > 0, use for periodic wrapping
 ) {
     int ileafQ = blockIdx.x;
     int iqstart = splQ[ileafQ], iqend = splQ[ileafQ + 1];
     int max_part_smem = blockDim.x;
 
-    tvec rmin2 = static_cast<tvec>(0);
-    int skipeq = 0;
+    bool use_rmin = rmin_info != nullptr;
+    RminInfo<tvec> rinfo;
 
     for(int qoff=iqstart; qoff < iqend; qoff+=blockDim.x) {
         int ipartQ = min(qoff + threadIdx.x, iqend - 1);
 
-        if(use_rmin) {
-            rmin2 = rmin2_in[ipartQ];
-            skipeq = skipequals_in[ipartQ];
-        }
+        if(use_rmin)
+            rinfo = rmin_info[ipartQ];
 
         Vec<dim,tvec> posQ = xQ[ipartQ];
 
@@ -217,7 +238,7 @@ __global__ void KnnLeaf2Leaf(
         PosId<dim, tvec>* particles = reinterpret_cast<PosId<dim, tvec>*>(shared_mem);
 
         PrefetchList2<int,float> pf_ilist(
-            ilist, ilist_r2, ilist_spl[ileafQ], ilist_spl[ileafQ + 1]
+            ilist.iother, ilist.rad2, ilist.spl[ileafQ], ilist.spl[ileafQ + 1]
         );
 
         while(!pf_ilist.finished()) {
@@ -246,12 +267,12 @@ __global__ void KnnLeaf2Leaf(
                     PosId<dim,tvec> p = particles[j];
                     tvec r2 = distance_squared<dim,tvec>(p.pos, posQ, boxsize);
 
-                    if(!use_rmin || (r2 > rmin2)) {
+                    if(!use_rmin || (r2 > rinfo.rmin2)) {
                         nearestK.consider(r2, p.id);
                     }
-                    else if(r2 == rmin2) {
-                        if(skipeq > 0)
-                            skipeq -= 1;
+                    else if(r2 == rinfo.rmin2) {
+                        if(rinfo.nskip_equals > 0)
+                            rinfo.nskip_equals -= 1;
                         else
                             nearestK.consider(r2, p.id);
                     }
@@ -263,13 +284,77 @@ __global__ void KnnLeaf2Leaf(
         
         if(qoff + threadIdx.x < iqend) {
             #pragma unroll
-            for(int i = 0; i < k; i++) {
-                knn_rad2[ipartQ * k + i] = nearestK.r2s[i];
-                knn_id[ipartQ * k + i] = nearestK.ids[i];
+            for(size_t dk = 0; dk < min(kmax, ksize-koffset); dk++) {
+                size_t iout = (size_t)ipartQ * (size_t)ksize + (size_t)koffset + dk;
+                knn_rad[iout] = sqrt(nearestK.r2s[dk]);
+                knn_id[iout] = nearestK.ids[dk];
+            }
+
+            if(use_rmin) {
+                // Also write out information of up to which radius we need to skip in next pass
+                // Additionally we need to keep track of the number of neighbours that are 
+                // exactly equal to rmin2 so that we can skip them in the next pass
+                int dk = min(kmax-1, ksize-koffset-1);
+                tvec rmax2 = nearestK.r2_at(dk);
+                RminInfo<tvec> new_info = {rmax2, nearestK.count_equal_up_to(dk, rmax2)};
+                new_info.nskip_equals += rmax2 == rinfo.rmin2 ? rinfo.nskip_equals : 0;
+
+                rmin_info[ipartQ] = new_info;
             }
         }
         __syncthreads();
     }
+}
+
+
+// template<int dim, typename tvec>
+template <int dim, typename tvec>
+std::string KnnLeaf2Leaf(
+    cudaStream_t stream,
+    const int* ilist_spl,       // leaf-ranges in ilist
+    const int* ilist_iother,           // interaction list
+    const float* ilist_r2,      // (lower) interaction rmax2
+    const int* splT,            // leaf-ranges in A
+    const Vec<dim,tvec>* xT,    // input positions
+    const int* splQ,            // leaf-ranges in B
+    const Vec<dim,tvec>* xQ,    // query positions
+    tvec* knn_rad,             // output knn radii
+    int* knn_id,                // output knn ids
+    void* rinfo_buf,            // Optional temporary buffer to keep track of inter-pass-information
+    int k,                      // Actual k, has to be <= kmax
+    float boxsize,              // if > 0, use for periodic wrapping
+    size_t size_leaves_query,
+    size_t size_part_query
+) {
+    int block_size = 32;
+    int smem_size = block_size*sizeof(PosId<dim, tvec>);
+    ConstInteractionList ilist = {ilist_spl, ilist_iother, ilist_r2};
+
+    constexpr int kmax = 32;
+
+    RminInfo<tvec>* rmin_info = nullptr;
+    if(k > kmax) { // if multiple passes are needed, we need some additional temporary buffer
+        rmin_info = reinterpret_cast<RminInfo<tvec>*>(rinfo_buf);
+        cudaMemsetAsync(rmin_info, 0, size_part_query * sizeof(RminInfo<tvec>), stream);
+    }
+
+    for(int koffset=0; koffset < k; koffset += kmax) {
+        int knext = min(k-koffset, kmax);
+        if(knext <= 8)
+            KnnLeaf2LeafKernel<8,dim,tvec><<<size_leaves_query, block_size, smem_size, stream>>>(
+                ilist, splT, xT, splQ, xQ, knn_rad, knn_id, rmin_info, koffset, k, boxsize
+            );
+        else if(knext <= 16)
+            KnnLeaf2LeafKernel<16,dim,tvec><<<size_leaves_query, block_size, smem_size, stream>>>(
+                ilist, splT, xT, splQ, xQ, knn_rad, knn_id, rmin_info, koffset, k, boxsize
+            );
+        else
+            KnnLeaf2LeafKernel<kmax,dim,tvec><<<size_leaves_query, block_size, smem_size, stream>>>(
+                ilist, splT, xT, splQ, xQ, knn_rad, knn_id, rmin_info, koffset, k, boxsize
+            );
+    }
+    
+    return std::string();
 }
 
 /* ---------------------------------------------------------------------------------------------- */

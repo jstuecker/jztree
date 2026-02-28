@@ -36,10 +36,8 @@ functions = parse.get_functions_from_file(
 )
 
 add_dim_dtype_templates(functions["KnnLeaf2Leaf"], "xT", knn_dim, knn_types)
-functions["KnnLeaf2Leaf"].template_par["kmax"].instances = kmax_instance_values
-functions["KnnLeaf2Leaf"].block_size_expression = 32
-functions["KnnLeaf2Leaf"].smem_size_expression = "blockDim.x * (dim*ffi::ByteWidth(xT.element_type()) + sizeof(int32_t))"
-functions["KnnLeaf2Leaf"].grid_size_expression = "splQ.element_count() - 1"
+functions["KnnLeaf2Leaf"].par["size_leaves_query"].expression = "splQ.element_count() - 1"
+functions["KnnLeaf2Leaf"].par["size_part_query"].expression = "xQ.dimensions()[0]"
 
 add_dim_dtype_templates(functions["KnnNode2Node"], "nodes", knn_dim, knn_types)
 functions["KnnNode2Node"].template_par["dim"].expression = None # need explicit input

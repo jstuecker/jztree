@@ -55,7 +55,7 @@ def test_domain(xmin, xmax):
 
     check_against_ckdtree(posz)
 
-@pytest.mark.shrink_in_quick(keep_index=6)
+# @pytest.mark.shrink_in_quick(keep_index=6)
 @pytest.mark.parametrize("k", [4,8,12,16,32,53,133])
 def test_k(k):
     posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10.))
