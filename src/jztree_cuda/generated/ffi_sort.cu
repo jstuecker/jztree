@@ -30,7 +30,8 @@ using DT = ffi::DataType;
 
 using PosZorderSortDispatchFn = std::string (*) (cudaStream_t stream,
     const void* pos_in,
-    void* pos_id_out,
+    void* pos_out,
+    void* id_out,
     void* tmp_buffer,
     size_t size,
     size_t tmp_bytes,
@@ -39,7 +40,8 @@ using PosZorderSortDispatchFn = std::string (*) (cudaStream_t stream,
 template<int dim, typename tvec>
 static std::string PosZorderSortDispatchWrapper(cudaStream_t stream,
     const void* pos_in,
-    void* pos_id_out,
+    void* pos_out,
+    void* id_out,
     void* tmp_buffer,
     size_t size,
     size_t tmp_bytes,
@@ -47,7 +49,8 @@ static std::string PosZorderSortDispatchWrapper(cudaStream_t stream,
 ) {
     return PosZorderSort<dim, tvec> (stream,
         reinterpret_cast<const Vec<dim, tvec>*>(pos_in),
-        reinterpret_cast<PosId<dim, tvec>*>(pos_id_out),
+        reinterpret_cast<Vec<dim, tvec>*>(pos_out),
+        reinterpret_cast<same_width_int<tvec>*>(id_out),
         reinterpret_cast<int*>(tmp_buffer),
         size,
         tmp_bytes,
@@ -59,7 +62,8 @@ static std::string PosZorderSortDispatchWrapper(cudaStream_t stream,
 ffi::Error PosZorderSortFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer pos_in,
-    ffi::Result<ffi::AnyBuffer> pos_id_out,
+    ffi::Result<ffi::AnyBuffer> pos_out,
+    ffi::Result<ffi::AnyBuffer> id_out,
     ffi::Result<ffi::AnyBuffer> tmp_buffer,
     size_t block_size
 ) {
@@ -100,7 +104,8 @@ ffi::Error PosZorderSortFFIHost(
     // Now call our function
     std::string result = instance(stream,
         pos_in.untyped_data(),
-        pos_id_out->untyped_data(),
+        pos_out->untyped_data(),
+        id_out->untyped_data(),
         tmp_buffer->untyped_data(),
         size,
         tmp_bytes,
@@ -123,7 +128,8 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // pos_in
-        .Ret<ffi::AnyBuffer>() // pos_id_out
+        .Ret<ffi::AnyBuffer>() // pos_out
+        .Ret<ffi::AnyBuffer>() // id_out
         .Ret<ffi::AnyBuffer>() // tmp_buffer
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}

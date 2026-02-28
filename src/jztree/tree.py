@@ -50,18 +50,15 @@ def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
 
     idtype = same_width_int(x.dtype)
 
-    # To optimize memory layout, we bundle position and id together into a single array
-    # We later need to reinterprete the output to extract positions and ids
-    out_type = jax.ShapeDtypeStruct((x.shape[0],dim+1), x.dtype)
-    # This is a guess, how much a temporary storage in cub::DeviceMergeSort::SortKeys requires
-    # If we estimate too little, an error will be thrown from the C++ code:
-    tmp_buff_type = jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), dim+1), x.dtype)
-    isort = jax.ffi.ffi_call("PosZorderSort", (out_type, tmp_buff_type), vmap_method="sequential")(
+    outputs = (
+        jax.ShapeDtypeStruct((x.shape[0],dim), x.dtype),
+        jax.ShapeDtypeStruct((x.shape[0],), idtype),
+        jax.ShapeDtypeStruct((x.shape[0] + np.maximum(1024, x.shape[0]//16), dim+1), idtype)
+    )
+    pos, ids = jax.ffi.ffi_call("PosZorderSort", outputs, vmap_method="sequential",
+                                input_output_aliases={0:0})(
         x, block_size=np.uint64(block_size)
-    )[0]
-
-    pos = isort[:, :dim].view(x.dtype)
-    ids = isort[:, dim].view(idtype)
+    )[0:2]
 
     return pos, ids
 

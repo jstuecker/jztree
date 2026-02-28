@@ -15,63 +15,51 @@
 /*                                           Zorder Sort                                          */
 /* ---------------------------------------------------------------------------------------------- */
 
-// Wrapper of the z-order comparison function to use with CUB
 template <int dim, typename tvec>
-struct PosIdLess {
+struct PosLess {
     __device__ __forceinline__
-    bool operator()(const PosId<dim,tvec> &a, const PosId<dim,tvec> &b) {
-        return z_pos_less<dim,tvec>(a.pos, b.pos);
+    bool operator()(const Vec<dim,tvec> &a, const Vec<dim,tvec> &b) {
+        return z_pos_less<dim,tvec>(a, b);
     }
 };
 
-// Prepare keys and ids for sorting
 template <int dim=3, typename tvec>
-__global__ void PosKeyArangeKernel(
+__global__ void PosKeyIdArangeKernel(
     const Vec<dim, tvec>* pos_in,
-    PosId<dim, tvec> *keyid_out,
+    Vec<dim, tvec>* pos_out,
+    same_width_int<tvec>* id_out,
     size_t n
 ) {
     same_width_int<tvec> idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
-        keyid_out[idx].pos = pos_in[idx];
-        keyid_out[idx].id = idx;
+        pos_out[idx] = pos_in[idx];
+        id_out[idx] = idx;
     }
 }
 
 template<int dim, typename tvec>
 std::string PosZorderSort(
-    cudaStream_t stream, 
-    const Vec<dim, tvec>* pos_in, 
-    PosId<dim, tvec>* pos_id_out,
+    cudaStream_t stream,
+    const Vec<dim, tvec>* pos_in,
+    Vec<dim, tvec>* pos_out,
+    same_width_int<tvec>* id_out,
     int* tmp_buffer,
     size_t size,
     size_t tmp_bytes,
     size_t block_size
 ) {
-    static_assert(sizeof(PosId<dim, tvec>) == (dim+1) * sizeof(tvec), "Unexpected PosId layout");
-
-    // Initialize indices 0, 1, 2, ..., size-1
-    PosKeyArangeKernel<dim, tvec><<< div_ceil(size, block_size), block_size, 0, stream>>>(
-        pos_in, pos_id_out, size
+    PosKeyIdArangeKernel<dim, tvec><<< div_ceil(size, block_size), block_size, 0, stream>>>(
+        pos_in, pos_out, id_out, size
     );
 
-    // We have an annoying problem here:
-    // CUB requires a temporary storage buffer and it will usually tell us dynamically what the
-    // size of it is (On first call with zero pointer).
-    // Unfortunately, we may not allocate storage dynamically in an FFI call
-    // Therefore, we have to estimate the storage requirements in advance in python/jax and pass
-    // a sufficiently large buffer to the function (via "tmp_buffer").
-    // Empirically I have found that the storage tends to be a bit larger than n * sizeof(PosId)
-    // that is why we will pre-allocate something that is a few percent larger than that.
-    // However, below we throw an error if our assumption ever turns out wrong.
-
-    // find out the required storage size
     size_t required_storage_bytes = 0;
-    cub::DeviceMergeSort::SortKeys<PosId<dim, tvec>*, int64_t, PosIdLess<dim, tvec>>(
-        nullptr, required_storage_bytes, pos_id_out, size, PosIdLess<dim, tvec>()
+    cub::DeviceMergeSort::SortPairs<Vec<dim, tvec>*, same_width_int<tvec>*, int64_t, PosLess<dim, tvec>>(
+        nullptr, required_storage_bytes, pos_out, id_out, size, PosLess<dim, tvec>()
     );
-    
-    // Check if the provided buffer is large enough
+
+    // Since jax doesn't allow us to allocate dynamically, we have to check whether the
+    // our guess for the buffer allocation was sufficiently large:
+
     if (tmp_bytes < required_storage_bytes) {
         return std::string(
             "The buffer in ZorderSort is too small. Please contact me if this check fails.") +
@@ -80,11 +68,10 @@ std::string PosZorderSort(
             std::string(". Diff: ") + std::to_string((long long)required_storage_bytes - (long long)tmp_bytes);
     }
 
-    // Run the sort
-    cub::DeviceMergeSort::SortKeys<PosId<dim, tvec>*, int64_t, PosIdLess<dim, tvec>>(
-        tmp_buffer, required_storage_bytes, pos_id_out, size, PosIdLess<dim, tvec>(), stream
+    cub::DeviceMergeSort::SortPairs<Vec<dim, tvec>*, same_width_int<tvec>*, int64_t, PosLess<dim, tvec>>(
+        tmp_buffer, required_storage_bytes, pos_out, id_out, size, PosLess<dim, tvec>(), stream
     );
-    
+
     return std::string();
 }
 
