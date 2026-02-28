@@ -44,7 +44,7 @@ def _fof_node2node(
         jax.ShapeDtypeStruct((ilist.size(),), jnp.int32) # node-node ilist
     )
 
-    res = jax.ffi.ffi_call("FofNode2Node", outputs)(
+    res = jax.ffi.ffi_call("FofNode2Node", outputs, input_output_aliases={4:0})(
         ilist.ispl, ilist.iother, spl_parent, node_data.pos_lvl(), node_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size),
         dim=np.int32(node_data.pos.shape[-1])

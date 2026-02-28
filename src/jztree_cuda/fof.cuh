@@ -213,14 +213,14 @@ __global__ void KernelContractLinks(
 template <int dim, typename tvec>
 ffi::Error FofNode2Node(
     cudaStream_t stream,
-    const int* __restrict__ parent_ilist_spl,
-    const int* __restrict__ parent_ilist,
-    const int* __restrict__ parent_spl,
-    const Node<dim,tvec>* __restrict__ nodes,
-    const int* __restrict__ node_igroup_in,
-    int* __restrict__ node_igroup,
-    int* __restrict__ node_ilist_spl,
-    int* __restrict__ node_ilist,
+    const int*  parent_ilist_spl,
+    const int*  parent_ilist,
+    const int*  parent_spl,
+    const Node<dim,tvec>*  nodes,
+    const int*  node_igroup_in,
+    int*  node_igroup,
+    int*  node_ilist_spl,
+    int*  node_ilist,
     // Parameters:
     const float r2link,
     const float boxsize,
@@ -232,12 +232,12 @@ ffi::Error FofNode2Node(
     size_t smem_alloc_bytes = block_size * (sizeof(NodeWithExt<dim,tvec>) + sizeof(int));
 
     cudaMemsetAsync(node_ilist_spl, 0, sizeof(int)*(size_node+1), stream);
-    cudaMemsetAsync(node_igroup, 0, sizeof(int)*(size_node), stream);
     cudaMemsetAsync(node_ilist, 0, sizeof(int)*size_node_ilist, stream);
 
     int* interaction_count = node_ilist_spl + 1; // use the node_ilist_spl as temporary storage
 
-    cudaMemcpyAsync(node_igroup, node_igroup_in, size_node*sizeof(int), cudaMemcpyDeviceToDevice, stream);
+    if (node_igroup != node_igroup_in)
+        cudaMemcpyAsync(node_igroup, node_igroup_in, size_node*sizeof(int), cudaMemcpyDeviceToDevice, stream);
 
     // pass 0: link
     NodeFof_Link_Count_Insert<0,dim,tvec><<< size_parent, block_size, smem_alloc_bytes, stream >>>(
