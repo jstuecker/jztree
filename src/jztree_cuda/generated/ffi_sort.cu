@@ -24,103 +24,6 @@ namespace ffi = xla::ffi;
 using DT = ffi::DataType;
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                             FFI call to CUDA kernel: DtypeTest                                 */
-/* ---------------------------------------------------------------------------------------------- */
-
-
-ffi::Error DtypeTestFFIHost(
-    cudaStream_t stream,
-    ffi::AnyBuffer in,
-    ffi::Result<ffi::AnyBuffer> out,
-    size_t size,
-    bool mode,
-    int offset,
-    size_t grid_size,
-    size_t block_size
-) {
-    DT in_type = in.element_type();
-    DT out_type = out->element_type();
-    dim3 blockDim(block_size);
-    dim3 gridDim(grid_size);
-    size_t smem = 0;
-    
-    // Build a bundled argument list for cudaLaunchKernel
-    void* in_arg = in.untyped_data();
-    void* out_arg = out->untyped_data();
-    void* args[] = {
-        &in_arg,
-        &out_arg,
-        &size
-    };
-    
-
-    // We have template parameters, so we need to instantiate all valid templates.
-    // We select a function pointer through a map with a stable, type-erased signature.
-    using TTuple = std::tuple<bool, DT, DT, int>;
-    using TFunc = const void*;
-
-    static const std::map<TTuple, TFunc> instance_map = {
-        { {true, DT::F32, DT::F32, 0}, reinterpret_cast<TFunc>(&DtypeTest<true, float, float, 0>) },
-        { {true, DT::F32, DT::F32, 10}, reinterpret_cast<TFunc>(&DtypeTest<true, float, float, 10>) },
-        { {true, DT::F32, DT::F64, 0}, reinterpret_cast<TFunc>(&DtypeTest<true, float, double, 0>) },
-        { {true, DT::F32, DT::F64, 10}, reinterpret_cast<TFunc>(&DtypeTest<true, float, double, 10>) },
-        { {true, DT::F64, DT::F32, 0}, reinterpret_cast<TFunc>(&DtypeTest<true, double, float, 0>) },
-        { {true, DT::F64, DT::F32, 10}, reinterpret_cast<TFunc>(&DtypeTest<true, double, float, 10>) },
-        { {true, DT::F64, DT::F64, 0}, reinterpret_cast<TFunc>(&DtypeTest<true, double, double, 0>) },
-        { {true, DT::F64, DT::F64, 10}, reinterpret_cast<TFunc>(&DtypeTest<true, double, double, 10>) },
-        { {false, DT::F32, DT::F32, 0}, reinterpret_cast<TFunc>(&DtypeTest<false, float, float, 0>) },
-        { {false, DT::F32, DT::F32, 10}, reinterpret_cast<TFunc>(&DtypeTest<false, float, float, 10>) },
-        { {false, DT::F32, DT::F64, 0}, reinterpret_cast<TFunc>(&DtypeTest<false, float, double, 0>) },
-        { {false, DT::F32, DT::F64, 10}, reinterpret_cast<TFunc>(&DtypeTest<false, float, double, 10>) },
-        { {false, DT::F64, DT::F32, 0}, reinterpret_cast<TFunc>(&DtypeTest<false, double, float, 0>) },
-        { {false, DT::F64, DT::F32, 10}, reinterpret_cast<TFunc>(&DtypeTest<false, double, float, 10>) },
-        { {false, DT::F64, DT::F64, 0}, reinterpret_cast<TFunc>(&DtypeTest<false, double, double, 0>) },
-        { {false, DT::F64, DT::F64, 10}, reinterpret_cast<TFunc>(&DtypeTest<false, double, double, 10>) }
-    };
-
-    const TTuple key = TTuple(mode, in_type, out_type, offset);
-
-    const auto it = instance_map.find(key);
-    if (it == instance_map.end()) {
-        return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (mode, in_type, out_type, offset)"\
-            " in DtypeTestFFIHost -- Only supporting:\n"\
-            "(true, float, float, 0), (true, float, float, 10), (true, float, double, 0), (true, float, double, 10), (true, double, float, 0), (true, double, float, 10), (true, double, double, 0), (true, double, double, 10), (false, float, float, 0), (false, float, float, 10), (false, float, double, 0), (false, float, double, 10), (false, double, float, 0), (false, double, float, 10), (false, double, double, 0), (false, double, double, 10)"
-        );
-    }
-    const void* instance = it->second;
-
-    cudaLaunchKernel(
-        instance,
-        gridDim,
-        blockDim,
-        args,
-        smem,
-        stream
-    );
-
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
-}
-
-XLA_FFI_DEFINE_HANDLER_SYMBOL(
-    DtypeTestFFI, DtypeTestFFIHost,
-    ffi::Ffi::Bind()
-        .Ctx<ffi::PlatformStream<cudaStream_t>>()
-        .Arg<ffi::AnyBuffer>() // in
-        .Ret<ffi::AnyBuffer>() // out
-        .Attr<size_t>("size")
-        .Attr<bool>("mode")
-        .Attr<int>("offset")
-        .Attr<size_t>("grid_size")
-        .Attr<size_t>("block_size"),
-    {xla::ffi::Traits::kCmdBufferCompatible}
-);
-
-/* ---------------------------------------------------------------------------------------------- */
 /*                             FFI call to CUDA kernel: PosZorderSort                             */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -322,7 +225,6 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_sort, m) {
-    m.def("DtypeTest", []() { return EncapsulateFfiCall(&DtypeTestFFI); });
     m.def("PosZorderSort", []() { return EncapsulateFfiCall(&PosZorderSortFFI); });
     m.def("SearchSortedZ", []() { return EncapsulateFfiCall(&SearchSortedZFFI); });
 }

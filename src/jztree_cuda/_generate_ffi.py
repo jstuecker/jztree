@@ -97,29 +97,14 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "sort.cuh"),
-    names=["DtypeTest", "PosZorderSort", "SearchSortedZ"],
+    names=["PosZorderSort", "SearchSortedZ"],
     only_kernels=False
 )
 
-# For DtypeTest: float_type is a dtype parameter that maps types to ffi::DataType enum values
-functions["DtypeTest"].template_par["in_type"].instances = ("float", "double")
-functions["DtypeTest"].template_par["in_type"].expression = "in.element_type()"
-functions["DtypeTest"].template_par["out_type"].instances = ("float", "double")
-functions["DtypeTest"].template_par["out_type"].expression = "out->element_type()"
-functions["DtypeTest"].template_par["offset"].instances = (0, 10)
-
-# functions["PosZorderSort"].template_par["dim"].instances = dimensions
-# functions["PosZorderSort"].template_par["dim"].expression = "pos_in.dimensions()[1]"
-# functions["PosZorderSort"].template_par["tvec"].instances = pos_types_sort
-# functions["PosZorderSort"].template_par["tvec"].expression = "pos_in.element_type()"
 add_dim_dtype_templates(functions["PosZorderSort"], "pos_in", pos_types=sort_types)
 functions["PosZorderSort"].par["size"].expression = "pos_in.dimensions()[0]"
 functions["PosZorderSort"].par["tmp_bytes"].expression = "tmp_buffer->size_bytes()"
 
-# functions["SearchSortedZ"].template_par["dim"].instances = dimensions
-# functions["SearchSortedZ"].template_par["dim"].expression = "posz_have.dimensions()[1]"
-# functions["SearchSortedZ"].template_par["tvec"].instances = pos_types
-# functions["SearchSortedZ"].template_par["tvec"].expression = "posz_have.element_type()"
 add_dim_dtype_templates(functions["SearchSortedZ"], "posz_have", pos_types=sort_types)
 functions["SearchSortedZ"].par["n_have"].expression = "posz_have.dimensions()[0]"
 functions["SearchSortedZ"].par["n_query"].expression = "posz_query.dimensions()[0]"
