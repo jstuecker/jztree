@@ -7,14 +7,11 @@
 #include "common/data.cuh"
 #include "common/math.cuh"
 #include "common/iterators.cuh"
-#include "xla/ffi/api/ffi.h"
 #include "sort.cuh"
 
 #if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2
 #error "CUB version 2.0.0 or higher required"
 #endif
-
-namespace ffi = xla::ffi;
 
 struct PosR {
     float3 pos;
@@ -602,7 +599,7 @@ __global__ void KnnNode2NodeCountInsert(
 /* ---------------------------------------------------------------------------------------------- */
 
 template<int dim, typename tvec>
-ffi::Error KnnNode2Node(
+std::string KnnNode2Node(
     cudaStream_t stream,
     const int32_t* parent_ilist_spl,
     const int32_t* parent_ilist_ioth,
@@ -664,9 +661,10 @@ ffi::Error KnnNode2Node(
     ); // determine the needed allocation size for CUB:
 
     if (tmp_bytes > node_ilist_size * sizeof(int)) {
-        return ffi::Error(ffi::ErrorCode::kOutOfRange,
+        return std::string(
             "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
-            "Have:" + std::to_string(node_ilist_size * sizeof(int)) + " bytes. ");
+            "Have:" + std::to_string(node_ilist_size * sizeof(int)) + " bytes. "
+        );
     }
     cub::DeviceScan::InclusiveSum(
         node_ilist_ioth, tmp_bytes, node_ilist.spl + 1, node_ilist.spl + 1, size_nodes, stream
@@ -691,18 +689,14 @@ ffi::Error KnnNode2Node(
         node_ilist_r2, node_ilist_ioth, node_ilist.spl, size_nodes, smem_size
     );
     
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
+    return std::string();
 }
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                           SegmentSort                                          */
 /* ---------------------------------------------------------------------------------------------- */
 
-ffi::Error SegmentSort(
+std::string SegmentSort(
     cudaStream_t stream,
     const int32_t* spl,
     const float* key,
@@ -723,11 +717,7 @@ ffi::Error SegmentSort(
         key_out, val_out, spl, size_segs, smem_size
     );
 
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
+    return std::string();
 }
 
 #endif // KNN_H

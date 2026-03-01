@@ -122,7 +122,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 
-using FofNode2NodeDispatchFn = ffi::Error (*) (cudaStream_t stream,
+using FofNode2NodeDispatchFn = std::string (*) (cudaStream_t stream,
     const void* parent_ilist_spl,
     const void* parent_ilist,
     const void* parent_spl,
@@ -139,7 +139,7 @@ using FofNode2NodeDispatchFn = ffi::Error (*) (cudaStream_t stream,
     int block_size
 );
 template<int dim, typename tvec>
-static ffi::Error FofNode2NodeDispatchWrapper(cudaStream_t stream,
+static std::string FofNode2NodeDispatchWrapper(cudaStream_t stream,
     const void* parent_ilist_spl,
     const void* parent_ilist,
     const void* parent_spl,
@@ -218,7 +218,7 @@ ffi::Error FofNode2NodeFFIHost(
     FofNode2NodeDispatchFn instance = it->second;
 
     // Now call our function
-    ffi::Error result = instance(stream,
+    std::string result = instance(stream,
         parent_ilist_spl.untyped_data(),
         parent_ilist.untyped_data(),
         parent_spl.untyped_data(),
@@ -234,9 +234,9 @@ ffi::Error FofNode2NodeFFIHost(
         size_node_ilist,
         block_size
     );
-    // Check if the function returned an error
-    if (!result.success()) {
-        return result;
+    // Check if the function returned an error string
+    if (!result.empty()) {
+        return ffi::Error::Internal(result);
     }
 
     cudaError_t last_error = cudaGetLastError();
@@ -270,7 +270,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 
-using FofLeaf2LeafDispatchFn = ffi::Error (*) (cudaStream_t stream,
+using FofLeaf2LeafDispatchFn = std::string (*) (cudaStream_t stream,
     const void* ilist_spl,
     const void* ilist,
     const void* spl,
@@ -284,7 +284,7 @@ using FofLeaf2LeafDispatchFn = ffi::Error (*) (cudaStream_t stream,
     int block_size
 );
 template<int dim, typename tvec>
-static ffi::Error FofLeaf2LeafDispatchWrapper(cudaStream_t stream,
+static std::string FofLeaf2LeafDispatchWrapper(cudaStream_t stream,
     const void* ilist_spl,
     const void* ilist,
     const void* spl,
@@ -354,7 +354,7 @@ ffi::Error FofLeaf2LeafFFIHost(
     FofLeaf2LeafDispatchFn instance = it->second;
 
     // Now call our function
-    ffi::Error result = instance(stream,
+    std::string result = instance(stream,
         ilist_spl.untyped_data(),
         ilist.untyped_data(),
         spl.untyped_data(),
@@ -367,9 +367,9 @@ ffi::Error FofLeaf2LeafFFIHost(
         size_part,
         block_size
     );
-    // Check if the function returned an error
-    if (!result.success()) {
-        return result;
+    // Check if the function returned an error string
+    if (!result.empty()) {
+        return ffi::Error::Internal(result);
     }
 
     cudaError_t last_error = cudaGetLastError();
@@ -413,7 +413,7 @@ ffi::Error InsertLinksFFIHost(
     int size_groups = igroup_in.element_count();
 
     // Now call our function
-    ffi::Error result = InsertLinks(stream,
+    std::string result = InsertLinks(stream,
         reinterpret_cast<const int*>(igroup_in.untyped_data()),
         reinterpret_cast<const int*>(igroupLinkA.untyped_data()),
         reinterpret_cast<const int*>(igroupLinkB.untyped_data()),
@@ -423,9 +423,9 @@ ffi::Error InsertLinksFFIHost(
         size_groups,
         block_size
     );
-    // Check if the function returned an error
-    if (!result.success()) {
-        return result;
+    // Check if the function returned an error string
+    if (!result.empty()) {
+        return ffi::Error::Internal(result);
     }
 
     cudaError_t last_error = cudaGetLastError();

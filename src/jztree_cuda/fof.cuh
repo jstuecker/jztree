@@ -7,13 +7,9 @@
 #include "common/math.cuh"
 #include "common/iterators.cuh"
 
-#include "xla/ffi/api/ffi.h"
-
 #if !defined(CUB_VERSION) || CUB_MAJOR_VERSION < 2
 #error "CUB version 2.0.0 or higher required"
 #endif
-
-namespace ffi = xla::ffi;
 
 __device__ __forceinline__ int find_root(const int* __restrict__ igroup, int x) {
     while (true) {
@@ -211,7 +207,7 @@ __global__ void KernelContractLinks(
 }
 
 template <int dim, typename tvec>
-ffi::Error FofNode2Node(
+std::string FofNode2Node(
     cudaStream_t stream,
     const int*  parent_ilist_spl,
     const int*  parent_ilist,
@@ -266,10 +262,11 @@ ffi::Error FofNode2Node(
     ); // determine the needed allocation size for CUB:
 
     if (tmp_bytes > size_node_ilist * sizeof(int)) {
-        return ffi::Error(ffi::ErrorCode::kOutOfRange,
+        return std::string(
             "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes. " + 
             "Have:" + std::to_string(size_node_ilist * sizeof(int)) + " bytes. " +
-            "Hint: Increase alloc_fac_ilist");
+            "Hint: Increase alloc_fac_ilist"
+        );
     }
     cub::DeviceScan::InclusiveSum(
         node_ilist, tmp_bytes, interaction_count, node_ilist_spl + 1, size_node, stream
@@ -282,11 +279,7 @@ ffi::Error FofNode2Node(
         r2link, boxsize, size_node_ilist
     );
     
-    cudaError_t last_error = cudaGetLastError();
-    if (last_error != cudaSuccess) {
-        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
-    }
-    return ffi::Error::Success();
+    return std::string();
 }
 
 /* ---------------------------------------------------------------------------------------------- */
@@ -353,7 +346,7 @@ __global__ void FofLeaf2LeafLink(
 }
 
 template<int dim, typename tvec>
-ffi::Error FofLeaf2Leaf(
+std::string FofLeaf2Leaf(
     cudaStream_t stream,
     const int* __restrict__ ilist_spl,
     const int* __restrict__ ilist,
@@ -381,7 +374,7 @@ ffi::Error FofLeaf2Leaf(
     int contract_blocks = (size_part + block_size - 1) / block_size;
     KernelContractLinks<<< contract_blocks, block_size, 0, stream >>>(part_igroup, size_part);
     
-    return ffi::Error::Success();
+    return std::string();
 }
 
 __global__ void KernelInsertLinks(
@@ -399,7 +392,7 @@ __global__ void KernelInsertLinks(
 }
 
 
-ffi::Error InsertLinks(
+std::string InsertLinks(
     cudaStream_t stream,
     const int* igroup_in,    
     const int* __restrict__ igroupLinkA,
@@ -421,7 +414,7 @@ ffi::Error InsertLinks(
         igroup, size_groups
     );
     
-    return ffi::Error::Success();
+    return std::string();
 }
 
 #endif // FOF_H

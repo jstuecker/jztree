@@ -178,7 +178,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 /* ---------------------------------------------------------------------------------------------- */
 
 
-using KnnNode2NodeDispatchFn = ffi::Error (*) (cudaStream_t stream,
+using KnnNode2NodeDispatchFn = std::string (*) (cudaStream_t stream,
     const void* parent_ilist_spl,
     const void* parent_ilist_ioth,
     const void* parent_ilist_r2,
@@ -198,7 +198,7 @@ using KnnNode2NodeDispatchFn = ffi::Error (*) (cudaStream_t stream,
     size_t node_ilist_size
 );
 template<int dim, typename tvec>
-static ffi::Error KnnNode2NodeDispatchWrapper(cudaStream_t stream,
+static std::string KnnNode2NodeDispatchWrapper(cudaStream_t stream,
     const void* parent_ilist_spl,
     const void* parent_ilist_ioth,
     const void* parent_ilist_r2,
@@ -288,7 +288,7 @@ ffi::Error KnnNode2NodeFFIHost(
     KnnNode2NodeDispatchFn instance = it->second;
 
     // Now call our function
-    ffi::Error result = instance(stream,
+    std::string result = instance(stream,
         parent_ilist_spl.untyped_data(),
         parent_ilist_ioth.untyped_data(),
         parent_ilist_r2.untyped_data(),
@@ -307,9 +307,9 @@ ffi::Error KnnNode2NodeFFIHost(
         size_nodes,
         node_ilist_size
     );
-    // Check if the function returned an error
-    if (!result.success()) {
-        return result;
+    // Check if the function returned an error string
+    if (!result.empty()) {
+        return ffi::Error::Internal(result);
     }
 
     cudaError_t last_error = cudaGetLastError();
@@ -359,7 +359,7 @@ ffi::Error SegmentSortFFIHost(
     int32_t size_keys = key.element_count();
 
     // Now call our function
-    ffi::Error result = SegmentSort(stream,
+    std::string result = SegmentSort(stream,
         reinterpret_cast<const int32_t*>(spl.untyped_data()),
         reinterpret_cast<const float*>(key.untyped_data()),
         reinterpret_cast<const int32_t*>(val.untyped_data()),
@@ -369,9 +369,9 @@ ffi::Error SegmentSortFFIHost(
         size_keys,
         smem_size
     );
-    // Check if the function returned an error
-    if (!result.success()) {
-        return result;
+    // Check if the function returned an error string
+    if (!result.empty()) {
+        return ffi::Error::Internal(result);
     }
 
     cudaError_t last_error = cudaGetLastError();
