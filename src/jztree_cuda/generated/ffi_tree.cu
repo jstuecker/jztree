@@ -355,9 +355,10 @@ ffi::Error GetNodeGeometryFFIHost(
     ffi::Result<ffi::AnyBuffer> center,
     ffi::Result<ffi::AnyBuffer> extent,
     int lvl_invalid,
+    uint32_t mode_flags,
     size_t block_size
 ) {
-    int size_nodes = level->element_count();
+    int size_nodes = lbound.element_count();
     int size_part = pos.dimensions()[0];
     int dim = pos.dimensions()[1];
     DT tvec = pos.element_type();
@@ -383,7 +384,8 @@ ffi::Error GetNodeGeometryFFIHost(
         &extent_arg,
         &size_nodes,
         &size_part,
-        &lvl_invalid
+        &lvl_invalid,
+        &mode_flags
     };
     
 
@@ -439,6 +441,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Ret<ffi::AnyBuffer>() // center
         .Ret<ffi::AnyBuffer>() // extent
         .Attr<int>("lvl_invalid")
+        .Attr<uint32_t>("mode_flags")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

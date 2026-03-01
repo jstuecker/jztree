@@ -208,24 +208,47 @@ def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: j
 determine_znode_boundaries.jit = jax.jit(determine_znode_boundaries)
 
 def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array, 
-                      num: jnp.array = None, block_size: int = 64
+                      num: jnp.array = None, block_size: int = 64, result: str = "lvl_cent_ext"
                       ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     assert lbound.shape == rbound.shape
     assert lbound.dtype == rbound.dtype == jnp.int32
 
+    mode_flags = 0
+
+    if "lvl" in result:
+        mode_flags += 1
+    if "cent" in result:
+        mode_flags += 2
+    if "ext" in result:
+        mode_flags += 4
+
     if num is None:
         num = jnp.array(len(lbound))
 
-    out_types = (jax.ShapeDtypeStruct((lbound.shape[0],), jnp.int32),
-                 jax.ShapeDtypeStruct((lbound.shape[0], posz.shape[-1]), posz.dtype),
-                 jax.ShapeDtypeStruct((lbound.shape[0], posz.shape[-1]), posz.dtype))
-    
-    lvl, node_cent, node_ext = jax.ffi.ffi_call("GetNodeGeometry", out_types)(
-        posz, lbound, rbound, num, block_size=np.uint64(block_size),
-        lvl_invalid=np.int32(-2000)
+    def rlen(flag):
+        return lbound.shape[0] if flag else 1
+
+    out_types = (
+        jax.ShapeDtypeStruct((rlen("lvl" in result),), jnp.int32),
+        jax.ShapeDtypeStruct((rlen("cent" in result), posz.shape[-1]), posz.dtype),
+        jax.ShapeDtypeStruct((rlen("ext" in result), posz.shape[-1]), posz.dtype)
     )
 
-    return lvl, node_cent, node_ext
+    rdict = {}
+    
+    rdict["lvl"], rdict["cent"], rdict["ext"] = jax.ffi.ffi_call("GetNodeGeometry", out_types)(
+        posz, lbound, rbound, num, block_size=np.uint64(block_size),
+        lvl_invalid=np.int32(-2000), mode_flags=np.uint32(mode_flags)
+    )
+
+    res = []
+    for key in result.split("_"):
+        res.append(rdict[key])
+
+    if len(res) == 1:
+        return res[0]
+    else:
+        return tuple(res)
 get_node_geometry.jit = jax.jit(get_node_geometry)
 
 def distr_boundary_extend(posz, npart=None, block_size: int = 64):
@@ -393,8 +416,9 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int, dataz: Any | None
 
     lvl_bound = get_node_geometry(
         jnp.array([xl, posz[0], posz[npart-1], xr]), 
-        lbound=jnp.array([0,2], dtype=jnp.int32), rbound=jnp.array([2,4], dtype=jnp.int32), num=2
-    )[0]
+        lbound=jnp.array([0,2], dtype=jnp.int32), rbound=jnp.array([2,4], dtype=jnp.int32), num=2,
+        result="lvl"
+    )
 
     return partz, dataz, lvl_bound
 adjust_domain_for_nodesize.jit = jax.jit(adjust_domain_for_nodesize, static_argnames="max_node_size")
@@ -563,8 +587,8 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
 
     # We can handle all levels at once for node geometry:
     ispl_n2p = ispl[ispl_n2l.data] # node to particle relation
-    lvl, geom_cent, ext = get_node_geometry(
-        posz, ispl_n2p[:-1], ispl_n2p[1:], num=ispl_n2l.nfilled()-1
+    lvl, geom_cent = get_node_geometry(
+        posz, ispl_n2p[:-1], ispl_n2p[1:], num=ispl_n2l.nfilled()-1, result="lvl_cent"
     )
     # However, the splits are discontinuous at level boundaries. We have to delete the extra entries
     lvl = jnp.delete(lvl, ispl_n2l.ispl[1:-1]-1, assume_unique_indices=True)

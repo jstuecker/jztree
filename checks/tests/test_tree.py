@@ -31,7 +31,7 @@ def test_node_geometry(pos_mass_z: PosMass):
     pos = pos[::500]
     ispl = jnp.sort(jax.random.randint(jax.random.PRNGKey(42), (50,), 0, pos.shape[0]))
 
-    lvl, cent, ext = get_node_geometry(pos, ispl[:-1], ispl[1:])
+    cent, ext = get_node_geometry(pos, ispl[:-1], ispl[1:], result="cent_ext")
 
     for i in range(len(ispl)-1):
         if ispl[i+1] - ispl[i] <= 1:

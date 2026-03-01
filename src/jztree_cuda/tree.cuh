@@ -303,7 +303,8 @@ __global__ void GetNodeGeometry(
     Vec<dim,tvec>* extent,
     const int size_nodes,
     const int size_part,
-    const int lvl_invalid
+    const int lvl_invalid,
+    uint32_t mode_flags
 ) {
     // Gets the properties of the smallest node that contains pos[lbound[idx]] and pos[rbound[idx]-1]
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -311,9 +312,9 @@ __global__ void GetNodeGeometry(
     if(idx >= size_nodes)
         return;
     if(idx >= nnodes[0]) {
-        level[idx] = -1000;
-        center[idx] = Vec<dim,tvec>::constant(invalid_val<tvec>()); // !!! Fix later
-        extent[idx] = Vec<dim,tvec>::constant(0);
+        if(mode_flags & 1u) level[idx] = lvl_invalid;
+        if(mode_flags & 2u) center[idx] = Vec<dim,tvec>::constant(invalid_val<tvec>()); // !!! Fix later
+        if(mode_flags & 4u) extent[idx] = Vec<dim,tvec>::constant(0);
         return;
     }
     
@@ -323,9 +324,9 @@ __global__ void GetNodeGeometry(
     int lvl = msb_diff_level<dim,tvec>(x0, x1);
     NodeWithExt<dim,tvec> node_ext = get_common_node<dim,tvec>(x0, x1);
 
-    level[idx] = lvl;
-    center[idx] = node_ext.center;
-    extent[idx] = node_ext.extent;
+    if(mode_flags & 1u) level[idx] = lvl;
+    if(mode_flags & 2u) center[idx] = node_ext.center;
+    if(mode_flags & 4u) extent[idx] = node_ext.extent;
 }
 
 /* ---------------------------------------------------------------------------------------------- */

@@ -141,7 +141,7 @@ functions["FindNodeBoundaries"].par["size_nodes"].expression = "nodes_levels->el
 functions["FindNodeBoundaries"].grid_size_expression = "div_ceil(size_nodes, block_size)"
 
 add_dim_dtype_templates(functions["GetNodeGeometry"], "pos")
-functions["GetNodeGeometry"].par["size_nodes"].expression = "level->element_count()"
+functions["GetNodeGeometry"].par["size_nodes"].expression = "lbound.element_count()"
 functions["GetNodeGeometry"].par["size_part"].expression = "pos.dimensions()[0]"
 functions["GetNodeGeometry"].grid_size_expression = "div_ceil(size_nodes, block_size)"
 
