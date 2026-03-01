@@ -72,8 +72,10 @@ def _insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size
     ngroups = len(igroup)
     if num_links is None:
         num_links = jnp.array(len(iA), dtype=jnp.int32)
+    
+    out = (jax.ShapeDtypeStruct((ngroups,), jnp.int32),)
 
-    igr_out = jax.ffi.ffi_call("InsertLinks", (jax.ShapeDtypeStruct((ngroups,), jnp.int32),))(
+    igr_out = jax.ffi.ffi_call("InsertLinks", out, input_output_aliases={0:0})(
         igroup, iA, iB, num_links, block_size=np.int32(block_size)
     )[0]
     

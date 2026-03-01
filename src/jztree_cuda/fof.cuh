@@ -400,16 +400,17 @@ __global__ void KernelInsertLinks(
 
 ffi::Error InsertLinks(
     cudaStream_t stream,
-    const int* __restrict__ igroup_in,    
+    const int* igroup_in,    
     const int* __restrict__ igroupLinkA,
     const int* __restrict__ igroupLinkB,
     const int* num_links,
-    int* __restrict__ igroup,
+    int* igroup,
     const int size_links,
     const int size_groups,
     const int block_size
 ) {
-    cudaMemcpyAsync(igroup, igroup_in, size_groups*sizeof(int), cudaMemcpyDeviceToDevice, stream);
+    if(igroup_in != igroup)
+        cudaMemcpyAsync(igroup, igroup_in, size_groups*sizeof(int), cudaMemcpyDeviceToDevice, stream);
     
     KernelInsertLinks<<< div_ceil(size_links, block_size), block_size, 0, stream>>>(
         igroupLinkA, igroupLinkB, num_links, igroup
