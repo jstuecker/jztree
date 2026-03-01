@@ -31,7 +31,7 @@ class TreeConfig():
 class FofCatalogueConfig():
     npart_min: int = 20
 
-@dataclass(frozen=True)
+@dataclass(unsafe_hash=True)
 class FofConfig:
     alloc_fac_ilist: float = 32.
     alloc_fac_distr_links: float = 0.01
@@ -45,7 +45,7 @@ class FofConfig:
     )
     catalogue: FofCatalogueConfig = FofCatalogueConfig()
 
-@dataclass(frozen=True)
+@dataclass(unsafe_hash=True)
 class KNNConfig:
     alloc_fac_ilist: float = 256.
 

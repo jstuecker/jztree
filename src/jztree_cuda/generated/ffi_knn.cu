@@ -307,6 +307,10 @@ ffi::Error KnnNode2NodeFFIHost(
         size_nodes,
         node_ilist_size
     );
+    // Check if the function returned an error
+    if (!result.success()) {
+        return result;
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -365,6 +369,10 @@ ffi::Error SegmentSortFFIHost(
         size_keys,
         smem_size
     );
+    // Check if the function returned an error
+    if (!result.success()) {
+        return result;
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {

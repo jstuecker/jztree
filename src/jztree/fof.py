@@ -82,11 +82,10 @@ def _insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size
     return pcast_like(igr_out, like=igroup)
 
 def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
-                         rlink: float, num: int | None = None,
+                         rlink: float, dim: int, num: int | None = None,
                          size_child: int | None = None,
                          flag_local: jax.Array | None = None,
-                         block_size: int = 64,
-                         dim: int = 3) -> jax.Array:
+                         block_size: int = 64) -> jax.Array:
     assert len(spl) == len(igroup) + 1 == len(lvl) + 1
 
     if size_child is None:
@@ -105,7 +104,7 @@ def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
         igroup_child = jnp.where(jnp.arange(size_child) < num, igroup_child, 0)
 
     return igroup_child
-_node_to_child_label.jit = jax.jit(_node_to_child_label, static_argnames=("size_child", "rlink", "block_size"))
+_node_to_child_label.jit = jax.jit(_node_to_child_label, static_argnames=("size_child", "rlink", "block_size", "dim"))
 
 # def level_to_extend(lvl, diag=True):
 #     olvl, omod = lvl//3, lvl % 3

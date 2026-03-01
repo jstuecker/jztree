@@ -67,20 +67,20 @@ functions = parse.get_functions_from_file(
 fof_types = ("float",)
 fof_dim = (2,3)
 
-add_dim_dtype_templates(functions["FofNode2Node"], "nodes", knn_dim, knn_types)
+add_dim_dtype_templates(functions["FofNode2Node"], "nodes", fof_dim, fof_types)
 functions["FofNode2Node"].template_par["dim"].expression = None # need explicit input
 functions["FofNode2Node"].par["size_parent"].expression = "parent_spl.element_count() - 1"
 functions["FofNode2Node"].par["size_node"].expression = "node_igroup->element_count()"
 functions["FofNode2Node"].par["size_node_ilist"].expression = "node_ilist->element_count()"
 
-add_dim_dtype_templates(functions["FofLeaf2Leaf"], "pos", knn_dim, knn_types)
+add_dim_dtype_templates(functions["FofLeaf2Leaf"], "pos", fof_dim, fof_types)
 functions["FofLeaf2Leaf"].par["size_leaves"].expression = "spl.element_count() - 1"
 functions["FofLeaf2Leaf"].par["size_part"].expression = "part_igroup->element_count()"
 
 functions["InsertLinks"].par["size_links"].expression = "igroupLinkA.element_count()"
 functions["InsertLinks"].par["size_groups"].expression = "igroup_in.element_count()"
 
-functions["NodeToChildLabel"].template_par["dim"].instances = knn_dim
+functions["NodeToChildLabel"].template_par["dim"].instances = fof_dim
 functions["NodeToChildLabel"].init_outputs_zero = True
 functions["NodeToChildLabel"].grid_size_expression = "parent_igroup.element_count()"
 functions["NodeToChildLabel"].par["size_parent"].expression = "parent_igroup.element_count()"

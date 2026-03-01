@@ -267,8 +267,9 @@ ffi::Error FofNode2Node(
 
     if (tmp_bytes > size_node_ilist * sizeof(int)) {
         return ffi::Error(ffi::ErrorCode::kOutOfRange,
-            "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes." + 
-            "Have:" + std::to_string(size_node_ilist * sizeof(int)) + " bytes. ");
+            "Scan allocation too small!  Needed: " +  std::to_string(tmp_bytes) + " bytes. " + 
+            "Have:" + std::to_string(size_node_ilist * sizeof(int)) + " bytes. " +
+            "Hint: Increase alloc_fac_ilist");
     }
     cub::DeviceScan::InclusiveSum(
         node_ilist, tmp_bytes, interaction_count, node_ilist_spl + 1, size_node, stream

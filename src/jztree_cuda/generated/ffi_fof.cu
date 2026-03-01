@@ -202,9 +202,7 @@ ffi::Error FofNode2NodeFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &FofNode2NodeDispatchWrapper<2, float> },
-        { {2, DT::F64}, &FofNode2NodeDispatchWrapper<2, double> },
-        { {3, DT::F32}, &FofNode2NodeDispatchWrapper<3, float> },
-        { {3, DT::F64}, &FofNode2NodeDispatchWrapper<3, double> }
+        { {3, DT::F32}, &FofNode2NodeDispatchWrapper<3, float> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -214,7 +212,7 @@ ffi::Error FofNode2NodeFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FofNode2NodeFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (3, float)"
         );
     }
     FofNode2NodeDispatchFn instance = it->second;
@@ -236,6 +234,10 @@ ffi::Error FofNode2NodeFFIHost(
         size_node_ilist,
         block_size
     );
+    // Check if the function returned an error
+    if (!result.success()) {
+        return result;
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -336,9 +338,7 @@ ffi::Error FofLeaf2LeafFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &FofLeaf2LeafDispatchWrapper<2, float> },
-        { {2, DT::F64}, &FofLeaf2LeafDispatchWrapper<2, double> },
-        { {3, DT::F32}, &FofLeaf2LeafDispatchWrapper<3, float> },
-        { {3, DT::F64}, &FofLeaf2LeafDispatchWrapper<3, double> }
+        { {3, DT::F32}, &FofLeaf2LeafDispatchWrapper<3, float> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -348,7 +348,7 @@ ffi::Error FofLeaf2LeafFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FofLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (3, float)"
         );
     }
     FofLeaf2LeafDispatchFn instance = it->second;
@@ -367,6 +367,10 @@ ffi::Error FofLeaf2LeafFFIHost(
         size_part,
         block_size
     );
+    // Check if the function returned an error
+    if (!result.success()) {
+        return result;
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
@@ -419,6 +423,10 @@ ffi::Error InsertLinksFFIHost(
         size_groups,
         block_size
     );
+    // Check if the function returned an error
+    if (!result.success()) {
+        return result;
+    }
 
     cudaError_t last_error = cudaGetLastError();
     if (last_error != cudaSuccess) {
