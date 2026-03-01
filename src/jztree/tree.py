@@ -208,7 +208,8 @@ def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: j
 determine_znode_boundaries.jit = jax.jit(determine_znode_boundaries)
 
 def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array, 
-                      num: jnp.array = None, block_size: int = 64, result: str = "lvl_cent_ext"
+                      num: jnp.array = None, block_size: int = 64, result: str = "lvl_cent_ext",
+                      upper_extent: bool = False
                       ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     assert lbound.shape == rbound.shape
     assert lbound.dtype == rbound.dtype == jnp.int32
@@ -238,7 +239,7 @@ def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array,
     
     rdict["lvl"], rdict["cent"], rdict["ext"] = jax.ffi.ffi_call("GetNodeGeometry", out_types)(
         posz, lbound, rbound, num, block_size=np.uint64(block_size),
-        lvl_invalid=np.int32(-2000), mode_flags=np.uint32(mode_flags)
+        lvl_invalid=np.int32(-2000), mode_flags=np.uint32(mode_flags), upper_extent=upper_extent
     )
 
     res = []

@@ -304,10 +304,13 @@ __global__ void GetNodeGeometry(
     const int size_nodes,
     const int size_part,
     const int lvl_invalid,
-    uint32_t mode_flags
+    const uint32_t mode_flags,
+    const bool upper_extent
 ) {
     // Gets the properties of the smallest node that contains pos[lbound[idx]] and pos[rbound[idx]-1]
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    int lb=lbound[idx], rb=rbound[idx];
 
     if(idx >= size_nodes)
         return;
@@ -317,16 +320,38 @@ __global__ void GetNodeGeometry(
         if(mode_flags & 4u) extent[idx] = Vec<dim,tvec>::constant(0);
         return;
     }
+
+    Vec<dim,tvec> x0b = pos[clip(lb, 0, size_part-1)];
+    Vec<dim,tvec> x1a = pos[clip(rb-1, 0, size_part-1)];
+
+    int lvl;
+    if(!upper_extent) {
+        // in lower extent mode we use the minimal level that guarantees to include
+        // all particles that we know about
+        lvl = msb_diff_level<dim,tvec>(x0b, x1a);
+    }
+    else {
+        // in upper extent mode we use our (lowest) parent's level - 1
+        // this guarantees that our node includes all the space that exists in our parents
+        // basically also including hypothetical particles
+        Vec<dim,tvec> x0a = pos[clip(lb-1, 0, size_part-1)];
+        if(lb-1 < 0) x0a = Vec<dim,tvec>::constant(-INFINITY);
+
+        Vec<dim,tvec> x1b = pos[clip(rb, 0, size_part-1)];
+        if(rb >= size_part) x1b = Vec<dim,tvec>::constant(INFINITY);
+
+        int lvl_left = msb_diff_level<dim,tvec>(x0a, x0b);
+        int lvl_right = msb_diff_level<dim,tvec>(x1a, x1b);
+
+        lvl = min(lvl_left, lvl_right) - 1;
+    }
     
-    Vec<dim,tvec> x0 = pos[clip(lbound[idx], 0, size_part-1)];
-    Vec<dim,tvec> x1 = pos[clip(rbound[idx]-1, 0, size_part-1)];
-
-    int lvl = msb_diff_level<dim,tvec>(x0, x1);
-    NodeWithExt<dim,tvec> node_ext = get_common_node<dim,tvec>(x0, x1);
-
-    if(mode_flags & 1u) level[idx] = lvl;
-    if(mode_flags & 2u) center[idx] = node_ext.center;
-    if(mode_flags & 4u) extent[idx] = node_ext.extent;
+    if(mode_flags & 1u) 
+        level[idx] = lvl;
+    if(mode_flags & 2u)
+        center[idx] = LvlToCenter<dim,tvec>(x0b, lvl);
+    if(mode_flags & 4u)
+        extent[idx] = LvlToExt<dim,tvec>(lvl);
 }
 
 /* ---------------------------------------------------------------------------------------------- */
