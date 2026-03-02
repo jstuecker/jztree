@@ -35,6 +35,7 @@ def _fof_node2node(
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
     assert len(node_data.lvl) == len(node_igroup), "Should both correspond to no. of childrne"
     assert ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
+    assert ilist.iother.dtype == ilist.ispl.dtype == spl_parent.dtype == node_igroup.dtype == jnp.int32
     
     size = len(node_data.pos)
 
@@ -85,7 +86,7 @@ def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
                          rlink: float, dim: int, num: int | None = None,
                          size_child: int | None = None,
                          flag_local: jax.Array | None = None,
-                         block_size: int = 64) -> jax.Array:
+                         block_size: int = 64, dtype=jnp.float32) -> jax.Array:
     assert len(spl) == len(igroup) + 1 == len(lvl) + 1
 
     if size_child is None:
@@ -97,7 +98,8 @@ def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
     outputs = (jax.ShapeDtypeStruct((size_child,), jnp.int32),)
     igroup_child = jax.ffi.ffi_call("NodeToChildLabel",  outputs)(
         igroup, flag_local, lvl, spl, block_size=np.uint64(block_size),
-        r2link=np.float32(rlink*rlink), dim=np.int32(dim)
+        r2link=np.float32(rlink*rlink), dim=np.int32(dim),
+        double_precision = (dtype == jnp.float64)
     )[0]
 
     if num is not None:
@@ -139,7 +141,8 @@ def _fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac
         parent_spl = spl_n2n.get(level+1, size+1)
 
         igroup = _node_to_child_label(igroup, nlvl.get(level+1, size), parent_spl,
-                                      num=th.num(level), rlink=rlink, dim=th.geom_cent.data.shape[-1])
+                                      num=th.num(level), rlink=rlink, dim=th.geom_cent.data.shape[-1],
+                                      dtype=th.geom_cent.data.dtype)
         node_data = PosLvl(pos=th.geom_cent.get(level, size), lvl=nlvl.get(level, size))
 
         igroup, ilist = _fof_node2node(
@@ -158,10 +161,11 @@ _fof_hierarchy.jit = jax.jit(_fof_hierarchy, static_argnames=["rlink", "boxsize"
 def _fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                    rlink: float, boxsize: float = 0., block_size=32):
     assert len(leaf_data.spl) == len(ilist.ispl) == len(leaf_data.igroup)+1 == len(leaf_data.lvl)+1
+    assert ilist.iother.dtype == ilist.ispl.dtype == leaf_data.spl.dtype == leaf_data.igroup.dtype == jnp.int32
 
     part_igroup = _node_to_child_label(
         leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz),
-        num=leaf_data.spl[-1], dim=posz.shape[-1]
+        num=leaf_data.spl[-1], dim=posz.shape[-1], dtype=posz.dtype
     )
 
     igroup = jax.ffi.ffi_call("FofLeaf2Leaf", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
@@ -407,7 +411,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
 
         igroup = _node_to_child_label(
             parent_igroup, parent_lvl, parent_spl, rlink=rlink, num=th.num(level),
-            dim=th.geom_cent.data.shape[-1]
+            dim=th.geom_cent.data.shape[-1], dtype=th.geom_cent.data.dtype
         )
 
         poslvl = PosLvl(pos=th.geom_cent.get(level, size), lvl=th.lvl.get(level, size))
@@ -459,7 +463,7 @@ def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
 
     iseg = _node_to_child_label(
         node_data.igroup, node_data.lvl, node_data.spl, rlink=rlink, size_child=size,
-        num=node_data.spl[-1], dim=posz.shape[-1]
+        num=node_data.spl[-1], dim=posz.shape[-1], dtype=posz.dtype
     )
 
     numpart = node_data.spl[-1]

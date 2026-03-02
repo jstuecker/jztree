@@ -39,7 +39,7 @@ __device__ __forceinline__ void link_roots(int* __restrict__ igroup, int a, int 
 /*                                  Kernels for node-node linking                                 */
 /* ---------------------------------------------------------------------------------------------- */
 
-template<int dim>
+template<int dim, typename tvec>
 __global__ void NodeToChildLabel(
     const int* __restrict__ parent_igroup,
     const bool* __restrict__ parent_is_local,
@@ -47,7 +47,8 @@ __global__ void NodeToChildLabel(
     const int* __restrict__ parent_spl,
     int* __restrict__ node_igroup,
     const int size_parent,
-    const float r2link
+    const float r2link,
+    const bool double_precision
 ) {
     int node = blockIdx.x;
     if(node >= size_parent || !parent_is_local[node])
@@ -55,7 +56,7 @@ __global__ void NodeToChildLabel(
     int node_root = parent_igroup[node];
     if(node_root >= size_parent || !parent_is_local[node_root])
         return;
-    float L2 = LvlToExt<dim,float>(parent_lvl[node]).norm2();
+    tvec L2 = LvlToExt<dim,tvec>(parent_lvl[node]).norm2();
 
     int inode_start = parent_spl[node], inode_end = parent_spl[node + 1];
     for(int inode = inode_start + threadIdx.x; inode < inode_end; inode += blockDim.x) {
@@ -102,7 +103,7 @@ __global__ void NodeFof_Link_Count_Insert(
         // we set overhead threads to the last node to avoid adding many conditionals
         int inodeQ = min(iqoff + threadIdx.x, inodeQ_end - 1); 
         bool valid = iqoff + threadIdx.x < inodeQ_end;
-        NodeWithExt nodeQ = NodeLvlToHalfExt<dim,tvec>(nodes[inodeQ]);
+        NodeWithExt<dim,tvec> nodeQ = NodeLvlToHalfExt<dim,tvec>(nodes[inodeQ]);
         
         PrefetchList<int> pf_ilist(parent_ilist, parent_ilist_splits[parentQ], parent_ilist_splits[parentQ + 1]);
 
@@ -154,10 +155,10 @@ __global__ void NodeFof_Link_Count_Insert(
 
                     // Upper and lower bound to the distance between any two particles in A and B:
                     NodeWithExt<dim,tvec> lT = nodeT[j];
-                    float r2max = maxdist2<dim,tvec>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
-                    float r2min = mindist2<dim,tvec>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
+                    tvec r2max = maxdist2<dim,tvec>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
+                    tvec r2min = mindist2<dim,tvec>(lT.center, nodeQ.center, nodeQ.extent+lT.extent, boxsize);
 
-                    float L2 =  lT.extent.norm2() * 4.f;
+                    tvec L2 =  lT.extent.norm2() * static_cast<tvec>(4);
                     
                     // Check whether we are guaranteed to be linked
                     if(max(r2max, L2) <= r2link) {
@@ -334,7 +335,7 @@ __global__ void FofLeaf2LeafLink(
                     if(!valid)
                         break;
 
-                    float r2 = distance_squared<dim,tvec>(xQ, tileT[j].pos, boxsize);
+                    tvec r2 = distance_squared<dim,tvec>(xQ, tileT[j].pos, boxsize);
 
                     if((igroupQ != tileT[j].id) && (r2 <= r2link))
                         link_roots(part_igroup, ipartQ, itoff+j);

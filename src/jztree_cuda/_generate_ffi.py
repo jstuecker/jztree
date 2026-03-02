@@ -17,6 +17,9 @@ dimensions = (2,3)
 kmax_instance_values = (4, 8, 16, 32)
 knn_dim = (2,3)
 
+fof_types = ("float", "double")
+fof_dim = (2,3)
+
 default_includes = ["../common/math.cuh"]
 
 def add_dim_dtype_templates(func, buf_from, dimensions=dimensions, pos_types=float_types):
@@ -64,9 +67,6 @@ functions = parse.get_functions_from_file(
     only_kernels=False
 )
 
-fof_types = ("float",)
-fof_dim = (2,3)
-
 add_dim_dtype_templates(functions["FofNode2Node"], "nodes", fof_dim, fof_types)
 functions["FofNode2Node"].template_par["dim"].expression = None # need explicit input
 functions["FofNode2Node"].par["size_parent"].expression = "parent_spl.element_count() - 1"
@@ -80,6 +80,8 @@ functions["FofLeaf2Leaf"].par["size_part"].expression = "part_igroup->element_co
 functions["InsertLinks"].par["size_links"].expression = "igroupLinkA.element_count()"
 functions["InsertLinks"].par["size_groups"].expression = "igroup_in.element_count()"
 
+functions["NodeToChildLabel"].template_par["tvec"].instances = fof_types
+functions["NodeToChildLabel"].template_par["tvec"].expression = "double_precision ? DT::F64 : DT::F32"
 functions["NodeToChildLabel"].template_par["dim"].instances = fof_dim
 functions["NodeToChildLabel"].init_outputs_zero = True
 functions["NodeToChildLabel"].grid_size_expression = "parent_igroup.element_count()"

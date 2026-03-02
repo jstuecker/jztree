@@ -211,7 +211,14 @@ class PosLvl():
     lvl: jax.Array
 
     def pos_lvl(self):
-        return jnp.concatenate((self.pos, self.lvl.view(jnp.float32)[...,None]), axis=-1)
+        if self.pos.dtype.itemsize == 4:
+            lvl_t = jnp.astype(self.lvl, jnp.int32).view(self.pos.dtype)
+        elif self.pos.dtype.itemsize == 8:
+            lvl_t = jnp.astype(self.lvl, jnp.int64).view(self.pos.dtype)
+        else:
+            raise ValueError("only 32 and 64 bit types handled here")
+        
+        return jnp.concatenate((self.pos, lvl_t[...,None]), axis=-1)
 
 @jax.tree_util.register_dataclass
 @dataclass(slots=True, kw_only=True)

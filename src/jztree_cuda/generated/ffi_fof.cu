@@ -36,10 +36,12 @@ ffi::Error NodeToChildLabelFFIHost(
     ffi::AnyBuffer parent_spl,
     ffi::Result<ffi::AnyBuffer> node_igroup,
     float r2link,
+    bool double_precision,
     int dim,
     size_t block_size
 ) {
     int size_parent = parent_igroup.element_count();
+    DT tvec = double_precision ? DT::F64 : DT::F32;
     dim3 blockDim(block_size);
     dim3 gridDim(parent_igroup.element_count());
     size_t smem = 0;
@@ -60,28 +62,31 @@ ffi::Error NodeToChildLabelFFIHost(
         &parent_spl_arg,
         &node_igroup_arg,
         &size_parent,
-        &r2link
+        &r2link,
+        &double_precision
     };
     
 
     // We have template parameters, so we need to instantiate all valid templates.
     // We select a function pointer through a map with a stable, type-erased signature.
-    using TTuple = std::tuple<int>;
+    using TTuple = std::tuple<int, DT>;
     using TFunc = const void*;
 
     static const std::map<TTuple, TFunc> instance_map = {
-        { {2}, reinterpret_cast<TFunc>(&NodeToChildLabel<2>) },
-        { {3}, reinterpret_cast<TFunc>(&NodeToChildLabel<3>) }
+        { {2, DT::F32}, reinterpret_cast<TFunc>(&NodeToChildLabel<2, float>) },
+        { {2, DT::F64}, reinterpret_cast<TFunc>(&NodeToChildLabel<2, double>) },
+        { {3, DT::F32}, reinterpret_cast<TFunc>(&NodeToChildLabel<3, float>) },
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&NodeToChildLabel<3, double>) }
     };
 
-    const TTuple key = TTuple(dim);
+    const TTuple key = TTuple(dim, tvec);
 
     const auto it = instance_map.find(key);
     if (it == instance_map.end()) {
         return ffi::Error::Internal(
-            "\nUnsupported template parameter combination for (dim)"\
+            "\nUnsupported template parameter combination for (dim, tvec)"\
             " in NodeToChildLabelFFIHost -- Only supporting:\n"\
-            "(2), (3)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     const void* instance = it->second;
@@ -112,6 +117,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // parent_spl
         .Ret<ffi::AnyBuffer>() // node_igroup
         .Attr<float>("r2link")
+        .Attr<bool>("double_precision")
         .Attr<int>("dim")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
@@ -202,7 +208,9 @@ ffi::Error FofNode2NodeFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &FofNode2NodeDispatchWrapper<2, float> },
-        { {3, DT::F32}, &FofNode2NodeDispatchWrapper<3, float> }
+        { {2, DT::F64}, &FofNode2NodeDispatchWrapper<2, double> },
+        { {3, DT::F32}, &FofNode2NodeDispatchWrapper<3, float> },
+        { {3, DT::F64}, &FofNode2NodeDispatchWrapper<3, double> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -212,7 +220,7 @@ ffi::Error FofNode2NodeFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FofNode2NodeFFIHost -- Only supporting:\n"\
-            "(2, float), (3, float)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     FofNode2NodeDispatchFn instance = it->second;
@@ -338,7 +346,9 @@ ffi::Error FofLeaf2LeafFFIHost(
 
     static const std::map<TTuple, TFunc> instance_map = {
         { {2, DT::F32}, &FofLeaf2LeafDispatchWrapper<2, float> },
-        { {3, DT::F32}, &FofLeaf2LeafDispatchWrapper<3, float> }
+        { {2, DT::F64}, &FofLeaf2LeafDispatchWrapper<2, double> },
+        { {3, DT::F32}, &FofLeaf2LeafDispatchWrapper<3, float> },
+        { {3, DT::F64}, &FofLeaf2LeafDispatchWrapper<3, double> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -348,7 +358,7 @@ ffi::Error FofLeaf2LeafFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FofLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(2, float), (3, float)"
+            "(2, float), (2, double), (3, float), (3, double)"
         );
     }
     FofLeaf2LeafDispatchFn instance = it->second;
