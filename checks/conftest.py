@@ -35,7 +35,26 @@ def pytest_configure(config):
         print("Using single-host mode")
 
     if jax.process_index() != 0:
-        _silence_process_output()
+        # 1. Standard "Quiet" flags
+        config.option.quiet = 3
+        config.option.no_header = True
+        config.option.no_summary = True
+        config.option.verbose = -1
+        config.option.show_capture = "no"
+
+def pytest_report_teststatus(report, config):
+    """Eliminates the 's.sss' dots for non-zero ranks."""
+    if jax.process_index() != 0:
+        # Returning an empty string for the 'short' status 
+        # stops the 's' or '.' from being printed.
+        return report.outcome, "", ""
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    if jax.process_index() != 0:
+        # Removes the 'N passed, M skipped in X.XXs' footer
+        terminalreporter.stats = {}
+        terminalreporter.summary_stats = lambda: None
 
 def _keep_index_from_marker(item) -> int | None:
     """
@@ -94,6 +113,12 @@ def _silence_process_output() -> None:
     # Rebind Python-level streams (some libs write to these objects directly)
     sys.stdout = open(os.devnull, "w")
     sys.stderr = open(os.devnull, "w")
+
+def pytest_unconfigure(config):
+    if jax.process_count() > 1: 
+        # jax's distributed mode always ends in many warning messages at the end
+        # We'll simply silence all output at the end of the session to get rid of them
+        _silence_process_output()
 
 # ------------------------------------------------------------------------------------------------ #
 #                                             Fixtures                                             #
