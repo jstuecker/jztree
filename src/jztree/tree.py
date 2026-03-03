@@ -203,13 +203,14 @@ def detect_leaf_boundaries(
     if cfg_reg is not None: # Ensure leaves to not exceed a dynamically determined maximum level
         num_pre = jnp.sum(flag_split)
         splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
+        leaf_npart = splits[1:] - splits[:-1]
 
         # Use upper extent level for this calculation
         leaf_lvl = jnp.minimum(lvl[splits[1:]], lvl[splits[:-1]]) - 1
 
         linfo = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
         lvl_max = find_regularization_level(
-            leaf_lvl, linfo, weights=(jnp.arange(len(splits)-1) < num_pre).astype(jnp.int32),
+            leaf_lvl, linfo, weights=leaf_npart,
             max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
         )
 
@@ -535,12 +536,14 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
         # leaves were already regularized, so let's keep them all:
         new_is_spl = [(npart_if_not_split > 0) | is_spl_on_level[0]] 
 
+        lvl_up = jnp.minimum(lvl[lbound], lvl[rbound-1]) - 1 # use upper level in this calculation
+
         for i in range(1, nlevels):
             is_node = (~is_spl_on_level[i]) & is_spl_on_level[i,lbound] & is_spl_on_level[i,rbound]
 
             linfo = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
             lvl_max = find_regularization_level(
-                lvl, linfo, weights=jnp.astype(is_node, jnp.int32),
+                lvl_up, linfo, weights=jnp.where(is_node, npart_if_not_split, 0),
                 max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
             )
 
