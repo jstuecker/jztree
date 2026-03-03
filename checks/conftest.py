@@ -30,7 +30,10 @@ def pytest_configure(config):
     )
     # Your existing setup:
     if should_init_jax_distributed():
-        jax.distributed.initialize()
+        jax.distributed.initialize(
+            heartbeat_timeout_seconds=10,
+            shutdown_timeout_seconds=10
+        )
     else:
         print("Using single-host mode")
 
