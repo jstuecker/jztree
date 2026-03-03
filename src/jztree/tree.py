@@ -27,15 +27,42 @@ jax.ffi.register_ffi_target("CenterOfMass", ffi_tree.CenterOfMass(), platform="C
 #                                         Helper Functions                                         #
 # ------------------------------------------------------------------------------------------------ #
 
-def lvl_to_ext(level_binary):
-    olvl, omod = level_binary//3, level_binary % 3
-    levels_3d = jnp.stack((olvl, olvl + (omod >= 2).astype(jnp.int32), olvl + (omod >= 1).astype(jnp.int32)),axis=-1)
-    return 2.**levels_3d
+def lvl_to_lvlvec(level: jax.Array, dim: int, stacked: bool = True):
+    olvl = level // dim
+    omod = level - olvl*dim
+
+    lvec = []
+    for i in range(0, dim):
+        lvec.append(olvl + (omod >= dim-i).astype(jnp.int32))
+    if stacked:
+        return jnp.stack(lvec, axis=-1)
+    else:
+        return lvec
+
+def lvl_to_ext(level: jax.Array, linfo: LevelInfo):
+    lvec = lvl_to_lvlvec(level, linfo.dim)
+    return jnp.astype(2., linfo.dtype) ** lvec
 
 def get_node_box(x, level_binary):
+    raise NotImplemented("implementation broken")
     node_size = lvl_to_ext(level_binary)
     node_cent = x + jnp.sign(x)*(0.5 * node_size - jnp.mod(jnp.abs(x), node_size))
     return node_cent, node_size
+
+def level_histogram(lvl: jax.Array, linfo: LevelInfo, weights: jax.Array | None = None,
+                    dtype: jnp.dtype = jnp.float32):
+    rank, ndev, axis_name = get_rank_info()
+
+    nlvl = linfo.max_lvl() - linfo.min_lvl() + 1
+    counts = jnp.bincount(lvl - linfo.min_lvl(), length=nlvl, weights=weights)
+    counts = jnp.astype(counts, dtype) # After summing floating point is a reliable representation
+
+    if ndev > 1:
+        counts = jax.lax.psum(counts, axis_name=axis_name)
+    
+    levels = jnp.arange(nlvl, dtype=jnp.int32) + linfo.min_lvl()
+    
+    return levels, counts
 
 # ------------------------------------------------------------------------------------------------ #
 #                                             FFI Calls                                            #
@@ -124,6 +151,32 @@ def weighted_percentile(x, weights, percentile):
     iperc = jnp.searchsorted(ncum, ncum[-1]*0.01*percentile, side="left")
     return x[isort[iperc]]
 
+def find_regularization_level(lvl: jax.Array, linfo: LevelInfo, weights: jax.Array | None = None,
+                              max_vol_fac: float = 50., min_percentile: float = 90.):
+    """Determines the first level where the node volume is > max_vol_frac times the average vol."""
+    levels, counts = level_histogram(lvl, linfo, weights=weights)
+
+    # Find a reference level (to avoid volume undeflows/overlows in the relevant domain)
+    # We determine the min_percentile for this and we only consider to regularize
+    # above this level
+    cts_csum = jnp.cumsum(counts)
+    consider = cts_csum >= (0.01*min_percentile)*cts_csum[-1]
+    ref_level = jnp.min(jnp.where(consider, levels, linfo.max_lvl()))
+
+    vol_rel = jnp.astype(2., linfo.dtype)**(levels - ref_level)
+
+    # find the level where the node volume exceeds the average volume of smaller nodes
+    # by a given factor
+
+    vol_csum = jnp.cumsum(vol_rel*counts)
+    avg_vol = vol_csum / cts_csum
+
+    too_large = consider & (vol_rel >= max_vol_fac * avg_vol)
+    
+    first_too_large = jnp.argmax(too_large) # find first too large level
+
+    return levels[first_too_large] #, cts_csum/cts_csum[-1]
+
 def detect_leaf_boundaries(
         posz: jax.Array, leaf_size: int = 32, npart: int | None = None, lvl_bound = None,
         block_size: int = 64, alloc_size: int | None = None,
@@ -147,28 +200,24 @@ def detect_leaf_boundaries(
         block_size=np.uint64(block_size), scan_size=np.int32(leaf_size+1)
     )
 
-    if cfg_reg is not None:
+    if cfg_reg is not None: # Ensure leaves to not exceed a dynamically determined maximum level
+        num_pre = jnp.sum(flag_split)
         splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0]
 
-        # Determine percentile of the particle-weighted leaf-size distribution:
-        leaf_npart = splits[1:] - splits[:-1]
+        # Use upper extent level for this calculation
         leaf_lvl = jnp.minimum(lvl[splits[1:]], lvl[splits[:-1]]) - 1
 
-        # Note !!! Currently the regularization will not guarantee results that are independent
-        # of the number of tasks for the tree structure. Later, I should think of a way to get
-        # the percentile in a distribute way or so...
-        lvl_percentile = weighted_percentile(leaf_lvl, leaf_npart, cfg_reg.percentile)
+        linfo = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
+        lvl_max = find_regularization_level(
+            leaf_lvl, linfo, weights=(jnp.arange(len(splits)-1) < num_pre).astype(jnp.int32),
+            max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
+        )
 
-        # adjust flags to not exceed target level
-        num_pre = jnp.sum(flag_split)
-        max_lvl = lvl_percentile + int(np.ceil(3 * np.log2(cfg_reg.max_extent_fac)))
-        flag_split = flag_split | ((lvl > max_lvl) & (jnp.arange(len(posz)+1) < npart+1))
+        flag_split = flag_split | ((lvl >= lvl_max) & (jnp.arange(len(posz)+1) < npart+1))
 
         stats_callback(
-            "allocation", AllocStats.record_regularization, max_lvl, num_pre, jnp.sum(flag_split)
+            "allocation", AllocStats.record_regularization, lvl_max, num_pre, jnp.sum(flag_split)
         )
-    else:
-        lvl_percentile = None
 
     nfilled = jnp.sum(flag_split)
 
@@ -180,7 +229,7 @@ def detect_leaf_boundaries(
 
     splits = jnp.where(flag_split, size=alloc_size, fill_value=npart)[0].astype(jnp.int32)
 
-    return splits, lvl_percentile
+    return splits
 detect_leaf_boundaries.jit = jax.jit(detect_leaf_boundaries,
     static_argnames=("leaf_size", "block_size", "cfg_reg")
 )
@@ -466,7 +515,7 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
         lvl_max = LevelInfo(posz.shape[-1], posz.dtype).max_lvl()
         lvl_bound = (lvl_max, lvl_max)
     
-    ispl, lvl_percentile =  detect_leaf_boundaries(
+    ispl =  detect_leaf_boundaries(
         posz, leaf_size=node_sizes[0], npart=npart, alloc_size=alloc_size, lvl_bound=lvl_bound,
         cfg_reg=cfg_reg
     )
@@ -488,15 +537,15 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
 
         for i in range(1, nlevels):
             is_node = (~is_spl_on_level[i]) & is_spl_on_level[i,lbound] & is_spl_on_level[i,rbound]
-            np_node = npart_if_not_split*is_node
 
-            lvl_percentile = weighted_percentile(lvl, np_node, cfg_reg.percentile)
-            lvl_max = lvl_percentile + int(np.ceil(3 * np.log2(cfg_reg.max_extent_fac)))
-            
+            linfo = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
+            lvl_max = find_regularization_level(
+                lvl, linfo, weights=jnp.astype(is_node, jnp.int32),
+                max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
+            )
+
             new_is_spl.append(is_spl_on_level[i] | (lvl > lvl_max))
-
-            # jax.debug.log("perc, {} {} {} {} {}", i, jnp.sum(np_node), npart, 
-            #               jnp.sum(is_spl_on_level[i]), jnp.sum(new_is_spl[i]))
+        
         is_spl_on_level = jnp.array(new_is_spl)
 
     # Calculate a prefix accross hierarchy levels to densly stack the nodes later

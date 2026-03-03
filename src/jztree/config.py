@@ -7,8 +7,8 @@ class LoggingConfig():
 
 @dataclass(unsafe_hash=True)
 class RegularizationConfig():
-    percentile: float = 90.
-    max_extent_fac: float = 2.
+    regularize_percentile: float = 90.
+    max_volume_fac: float = 20.
 
 @dataclass(unsafe_hash=True)
 class TreeConfig():

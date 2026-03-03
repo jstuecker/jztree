@@ -38,7 +38,7 @@ def test_mutli_zsort():
 
 def _distr_coarsen(partz: Pos):
     partz, dataz, lvl_bound = adjust_domain_for_nodesize(partz, 256)
-    ispl = detect_leaf_boundaries(partz.pos, leaf_size=256, lvl_bound=lvl_bound, npart=partz.num)[0]
+    ispl = detect_leaf_boundaries(partz.pos, leaf_size=256, lvl_bound=lvl_bound, npart=partz.num)
 
     # Convert splits to global splits
     rank, ndev, axis_name = get_rank_info()
@@ -56,7 +56,7 @@ def test_multi_leaves():
     
     assert jnp.all(squeeze_particles(partz).pos == squeeze_particles(partz_new).pos)
 
-    ispl0 = detect_leaf_boundaries(squeeze_particles(partz).pos, leaf_size=256)[0]
+    ispl0 = detect_leaf_boundaries(squeeze_particles(partz).pos, leaf_size=256)
 
     # Have to remove duplicates, since splits at device boundaries appear twice
     def remove_duplicates(i):
