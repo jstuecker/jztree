@@ -23,8 +23,10 @@ class AllocStats:
     max_part_frac_domain: float | None = None
     max_part_frac_interaction: float | None = None
     max_node_frac: float | None = None
-    max_reg_frac: float | None = None
+    max_reg_frac_leaf: float | None = None
     max_reg_leaf_lvl: int | None = None
+    max_reg_frac_node: float | None = None    
+
     max_ilist_frac_fof: float | None = None
     max_links_frac: float | None = None
 
@@ -40,10 +42,13 @@ class AllocStats:
     def record_filled_nodes(self, num, size):
         self.max_node_frac = max_allow_None(self.max_node_frac, float(num/size))
 
-    def record_regularization(self, lvl, nleaves_pre, nleaves_post):
+    def record_leaf_regularization(self, lvl, nleaves_pre, nleaves_post):
         # print(f"reg: {lvl} {nleaves_pre}, {nleaves_post}")
-        self.max_reg_frac = max_allow_None(self.max_reg_frac, float(nleaves_post/nleaves_pre))
+        self.max_reg_frac_leaf = max_allow_None(self.max_reg_frac_leaf, float(nleaves_post/nleaves_pre))
         self.max_reg_leaf_lvl = max_allow_None(self.max_reg_leaf_lvl, lvl)
+
+    def record_node_regularization(self, nnodes_pre, nnodes_post):
+        self.max_reg_frac_node = max_allow_None(self.max_reg_frac_node, float(nnodes_post/nnodes_pre))
 
     def record_filled_interactions(self, nfilled, size):
         self.max_ilist_frac_fof = max_allow_None(self.max_ilist_frac_fof, float(nfilled/size))
@@ -69,8 +74,9 @@ class AllocStats:
             print(f"Filled at most {self.max_links_frac*100.:.2g}% of cross-task link data. Could "
                   f"decrease alloc_fac_distr_links at most from {cfg.alloc_fac_distr_links} to"
                   f"{cfg.alloc_fac_distr_links*self.max_links_frac:.2g}")
-        if self.max_reg_frac is not None:
-            print(f"Regularization increased number of leaves by {self.max_reg_frac- 1.:.2%}")
+        if self.max_reg_frac_leaf is not None:
+            print(f"Regularization increased number of leaves at most by {self.max_reg_frac_leaf - 1.:.2%}")
+            print(f"Regularization increased number of nodes on a level at most by {self.max_reg_frac_node - 1.:.2%}")
         print("-------")
 
 @jax.tree_util.register_dataclass

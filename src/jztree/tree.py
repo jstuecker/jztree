@@ -217,7 +217,7 @@ def detect_leaf_boundaries(
         flag_split = flag_split | ((lvl >= lvl_max) & (jnp.arange(len(posz)+1) < npart+1))
 
         stats_callback(
-            "allocation", AllocStats.record_regularization, lvl_max, num_pre, jnp.sum(flag_split)
+            "allocation", AllocStats.record_leaf_regularization, lvl_max, num_pre, jnp.sum(flag_split)
         )
 
     nfilled = jnp.sum(flag_split)
@@ -545,6 +545,11 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
             lvl_max = find_regularization_level(
                 lvl_up, linfo, weights=jnp.where(is_node, npart_if_not_split, 0),
                 max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
+            )
+
+            stats_callback(
+                "allocation", AllocStats.record_node_regularization, 
+                jnp.sum(is_spl_on_level[i]), jnp.sum(is_spl_on_level[i] | (lvl > lvl_max))
             )
 
             new_is_spl.append(is_spl_on_level[i] | (lvl > lvl_max))
