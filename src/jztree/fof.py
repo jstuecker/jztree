@@ -11,7 +11,7 @@ from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num, ver
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from .tools import bucket_prefix_sum, masked_to_dense
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
-from .tree import simplify_interaction_list, distr_zsort_and_tree, distr_grouped_dense_interaction_list
+from .tree import simplify_interaction_list, zsort_and_tree, distr_grouped_dense_interaction_list
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
 from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constructor, tree_map_by_len
@@ -818,7 +818,7 @@ distr_fof_labels_z_with_tree.jit = jax.jit(
 
 def distr_fof_labels(part: Pos, rlink: float, boxsize: float = 0., 
               cfg: FofConfig = FofConfig):
-    partz, th = distr_zsort_and_tree(part, cfg.tree)
+    partz, th = zsort_and_tree(part, cfg.tree)
 
     labels = distr_fof_labels_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
 
@@ -870,7 +870,7 @@ def distr_fof_and_catalogue(
         partz = part
         assert th is not None, "To skip sort, provide tree (jztree.tree.distr_zsort_and_tree)"
     else:
-        partz, th = distr_zsort_and_tree(part, cfg.tree)
+        partz, th = zsort_and_tree(part, cfg.tree)
     labels = distr_fof_labels_z_with_tree(partz.pos, th, rlink=rlink, boxsize=boxsize, cfg=cfg)
     partf, counts = distr_fof_order(labels, partz)
     catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)

@@ -5,7 +5,7 @@ from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 import numpy as np
 
 from jztree.config import FofConfig
-from jztree.tree import distr_zsort_and_tree
+from jztree.tree import zsort_and_tree
 from jztree.fof import distr_fof_labels_z_with_tree, _distr_fof_hierarchy, distr_fof_leaf2leaf
 from jztree.fof import fof_catalogue_from_groups, distr_fof_order, distr_fof_and_catalogue
 from jztree.jax_ext import get_rank_info, shard_map_constructor
@@ -15,7 +15,7 @@ mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
 
 def particles_and_tree(N=int(1e6), seed=0):
     part = ics.gaussian_particles(N, npad=int(N*0.5), seed=seed)
-    partz, th = distr_zsort_and_tree(part, FofConfig().tree)
+    partz, th = zsort_and_tree(part, FofConfig().tree)
     return part, partz, th
 particles_and_tree.smap = shard_map_constructor(particles_and_tree,
     out_specs=P(-1), in_specs=(None, None), static_argnums=(0,)

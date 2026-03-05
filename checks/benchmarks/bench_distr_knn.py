@@ -83,7 +83,7 @@ def bench_distr_knn_steps(jax_bench):
     with stats.statistics() as st:
         part = ics.uniform_particles.smap(mesh, jit=True)(N, npad=int(N * 1.0))
 
-        partz, th = jb.measure(fn_jit=knn.distr_zsort_and_tree.smap(mesh, jit=True),
+        partz, th = jb.measure(fn_jit=knn.zsort_and_tree.smap(mesh, jit=True),
             part=part, cfg_tree=cfg.tree, tag=f"tree_ndev{ndev}"
         )[1]
 

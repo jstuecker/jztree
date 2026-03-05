@@ -6,6 +6,7 @@ from scipy.spatial import cKDTree
 from jztree.config import KNNConfig
 from jztree.knn import knn_z, _segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z, evaluate_knn, knn
 from jztree.tree import pos_zorder_sort
+import jztree as jz
 
 def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1, dim=3, dtype=jnp.float32):
     pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,dim), dtype=dtype, minval=xmin, maxval=xmax)
@@ -34,7 +35,9 @@ def test_segment_sort():
 
 def check_against_ckdtree(posz, k=16, boxsize=0.):
     cfg = KNNConfig()
-    rnn, inn = knn_z(posz, k=k, boxsize=boxsize, cfg=cfg)
+    # rnn, inn = knn_z(posz, k=k, boxsize=boxsize, cfg=cfg)
+
+    rnn, inn = jz.knn.distr_knn(posz, k=k, boxsize=boxsize, result="rad_globalidx")
 
     tree = cKDTree(np.array(posz), boxsize=boxsize)
     rnn2, inn2 = tree.query(np.array(posz), k=k)

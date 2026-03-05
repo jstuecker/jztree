@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.data import Pos, PosMass
-from jztree.tree import distr_zsort, distr_zsort_and_tree
+from jztree.tree import distr_zsort, zsort_and_tree
 from jztree.config import TreeConfig
 from jztree.jax_ext import shard_map_constructor
 from jztree_utils import ics
@@ -61,5 +61,5 @@ def bench_multi_tree(jax_bench, ndev):
 
     jb = jax_bench(jit_rounds=5, jit_warmup=1)
 
-    get_tree = distr_zsort_and_tree.smap(get_mesh(ndev), jit=True)
+    get_tree = zsort_and_tree.smap(get_mesh(ndev), jit=True)
     jb.measure(None, get_tree, part, cfg_tree=TreeConfig(), tag="sort_and_tree")

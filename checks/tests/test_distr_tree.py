@@ -7,7 +7,7 @@ from jztree.jax_ext import get_rank_info, expanding_shard_map, shard_map_constru
 from jztree.config import TreeConfig
 from jztree.data import Pos, PosMass, TreeHierarchy, squeeze_particles
 from jztree.tree import pos_zorder_sort, distr_zsort, adjust_domain_for_nodesize
-from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, distr_zsort_and_tree
+from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, zsort_and_tree
 from jztree_utils import ics
 
 mesh = jax.sharding.Mesh(jax.devices(), ('gpus',), axis_types=(AxisType.Auto))
@@ -101,7 +101,7 @@ def test_tree_properties():
 
     def distr_reductions(part):
         rank, ndev, axis_name = get_rank_info()
-        partz, th = distr_zsort_and_tree(part, cfg_tree)
+        partz, th = zsort_and_tree(part, cfg_tree)
 
         return reductions(th, axis_name)
     distr_reductions.smap = shard_map_constructor(distr_reductions, out_specs=P())

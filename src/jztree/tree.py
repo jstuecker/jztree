@@ -337,13 +337,23 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
 
     return ext_ll, ext_lr, ext_rl, ext_rr
 
-def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: Any | None = None
-                         ) -> Tuple[Pos, TreeHierarchy]:
-    npart_tot = get_num_total(part)
-    partz, dataz = distr_zsort(part, data=data, nsamp=cfg_tree.nsamp)
+def zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: Any | None = None
+                   ) -> Tuple[Pos, TreeHierarchy]:
+    rank, ndev, axis_name = get_rank_info()
 
-    top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
-    partz, dataz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, dataz=dataz)
+    npart_tot = get_num_total(part, default_to_length=(ndev==1))
+    if ndev > 1:
+        partz, dataz = distr_zsort(part, data=data, nsamp=cfg_tree.nsamp)
+    else:
+        partz, isort = pos_zorder_sort(part)
+        if data is not None:
+            dataz = tree_map_by_len(lambda x: x[isort], data, len(get_pos(partz)))
+
+    if ndev > 1:
+        top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
+        partz, dataz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, dataz=dataz)
+    else:
+        lvl_bound = None
 
     th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
@@ -351,8 +361,8 @@ def distr_zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: A
         return partz, th
     else:
         return partz, dataz, th
-distr_zsort_and_tree.smap = shard_map_constructor(
-    distr_zsort_and_tree, in_specs=(P(-1), None, P(-1)), static_argnames="cfg_tree"
+zsort_and_tree.smap = shard_map_constructor(
+    zsort_and_tree, in_specs=(P(-1), None, P(-1)), static_argnames="cfg_tree"
 )
 
 def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True, block_size=32

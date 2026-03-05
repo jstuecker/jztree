@@ -8,7 +8,7 @@ from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
 from jztree.data import ParticleData, Link, Label, flatten_particles, pad_particles
 from jztree.data import squeeze_particles, expand_particles, squeeze_catalogue, sort_catalogue
-from jztree.tree import distr_zsort_and_tree, pos_zorder_sort
+from jztree.tree import zsort_and_tree, pos_zorder_sort
 from jztree.fof import _distr_link, _insert_links, distr_fof_labels_z_with_tree, fof_labels_z
 from jztree.fof import fof_and_catalogue, distr_fof_and_catalogue
 from jztree_utils import ics
@@ -61,7 +61,7 @@ def distr_fof_labels(seed):
     # almost everything gets linked so we need a bit larger allocation than usual:
     cfg = FofConfig(alloc_fac_distr_links=0.1)
     part = ics.gaussian_particles(1024*1024, npad=1024*256, seed=seed)
-    partz, th = distr_zsort_and_tree(part, cfg.tree)
+    partz, th = zsort_and_tree(part, cfg.tree)
     igroup = distr_fof_labels_z_with_tree(partz.pos, th, rlink=0.03, linearize_labels=True, cfg=cfg)
 
     return partz, igroup
