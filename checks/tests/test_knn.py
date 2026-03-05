@@ -7,6 +7,7 @@ from jztree.config import KNNConfig
 from jztree.knn import knn_z, _segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z, evaluate_knn, knn
 from jztree.tree import pos_zorder_sort
 import jztree as jz
+from jztree_utils import ics
 
 def get_pos(N=5555, duplicate=False, xmin=0., xmax=1., seed=1, dim=3, dtype=jnp.float32):
     pos0 = jax.random.uniform(jax.random.PRNGKey(seed), (N,dim), dtype=dtype, minval=xmin, maxval=xmax)
@@ -107,23 +108,20 @@ def test_query_skip():
 
 def test_io_order():
     # tests (and demonstrates) the different output/input ordering options
-    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
-    posz, idz = pos_zorder_sort.jit(pos0)
+    part = ics.uniform_particles(int(1024*128))
+    partz, idz, th = jz.tree.zsort_and_tree(part, jz.config.KNNConfig().tree, data=jnp.arange(len(part.pos)))
 
-    data = prepare_knn.jit(pos0, k=16)
-    dataz = prepare_knn_z.jit(posz, k=16)
-
-    rnn00, inn00 = evaluate_knn.jit(data)    # ids and outputs in original order
-    rnn0z, inn0z = evaluate_knn_z.jit(data)   # ids original order, outputs in z-order
-    rnnzz, innzz = evaluate_knn_z.jit(dataz)  # ids and outputs in z-order
+    rnn00, inn00 = jz.knn.distr_knn.jit(part, k=16)
+    rnn0z, inn0z = jz.knn.distr_knn.jit(part, k=16, output_order="z")
+    rnnzz, innzz = jz.knn.distr_knn.jit(partz, k=16, th=th)
 
     print("radii only depent on output order:")
-    assert jnp.all(rnn00[data.partz.id] == rnn0z)
+    assert jnp.all(rnn00[idz] == rnn0z)
     assert jnp.all(rnn0z == rnnzz)
 
     print("ids also depent on input order used to define the data")
-    assert jnp.all(inn00[data.partz.id] == inn0z)
-    assert jnp.all(inn0z == data.partz.id[innzz])
+    assert jnp.all(inn00[idz] == idz[innzz])
+    assert jnp.all(inn0z == innzz)
 
 @pytest.mark.skip_in_quick
 def test_twice_knn():

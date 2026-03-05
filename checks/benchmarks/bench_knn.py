@@ -12,28 +12,43 @@ import importlib
 has_jaxkd = (importlib.util.find_spec("jaxkd") is not None) and (importlib.util.find_spec("jaxkd_cuda") is not None)
 
 @pytest.mark.shrink_in_quick(keep_index=1)
-@pytest.mark.parametrize("npart", [int(1e5), int(1e6), int(3e6)])
+@pytest.mark.parametrize("npart", [int(1e5), int(1e6), int(3e6), int(3e7)])
 def bench_knn_steps(jax_bench, pos):
     k = 16
+    cfg = jz.config.KNNConfig()
 
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
 
     posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
+    th = jb.measure(fn_jit=jz.knn.build_tree_hierarchy.jit, tag="tree",
+                    part=posz, cfg_tree=cfg.tree)[1]
+    
+    ilist = jb.measure(fn_jit=jz.knn._knn_dual_walk.jit, tag="treewalk",
+                       th=th, k=k, alloc_fac_ilist=cfg.alloc_fac_ilist)[1]
+    rnn, inn = jb.measure(fn_jit=jz.knn._knn_leaf2leaf.jit, tag="leaf2leaf",
+                          ilist=ilist, splT=th.ispl_n2n.get(0), xT=posz, k=k)[1]
+    inverse = jnp.zeros_like(idz).at[idz].set(jnp.arange(len(idz)))
+    def reorder(rnn, inn):
+        return jax.tree.map(lambda x: x[inverse], (rnn, inn))
+    jb.measure(fn_jit=jax.jit(reorder), tag="reorder", rnn=rnn, inn=inn)
+    
+    jb.measure(fn_jit=jz.knn.distr_knn.jit, tag="total_z", part=posz, k=k, th=th)
+    jb.measure(fn_jit=jz.knn.distr_knn.jit, tag="total", part=pos, k=k)
+    
+    # data = jb.measure(fn_jit=prepare_knn.jit, pos0=pos, k=k, tag="prepare")[1]
+    # data2 = jb.measure(fn_jit=prepare_knn_z.jit, posz=posz, k=k, tag="prepare_z_new")[1]
 
-    data = jb.measure(fn_jit=prepare_knn.jit, pos0=pos, k=k, tag="prepare")[1]
-    data2 = jb.measure(fn_jit=prepare_knn_z.jit, posz=posz, k=k, tag="prepare_z_new")[1]
-
-    jb.measure(fn_jit=evaluate_knn.jit, d=data, tag="eval")
+    # jb.measure(fn_jit=evaluate_knn.jit, d=data, tag="eval")
         
-    jb.measure(fn_jit=knn.jit, pos0=pos, k=k, tag="total")
-    jb.measure(fn_jit=knn_z.jit, posz=posz, k=k, tag="total_z")
+    # jb.measure(fn_jit=knn.jit, pos0=pos, k=k, tag="total")
+    # jb.measure(fn_jit=knn_z.jit, posz=posz, k=k, tag="total_z")
 
     # query particles with a different seed
-    pos_q = jax.random.uniform(jax.random.PRNGKey(1), (len(pos),3), dtype=jnp.float32)
-    pos_qz = pos_zorder_sort.jit(pos_q)[0]
+    # pos_q = jax.random.uniform(jax.random.PRNGKey(1), (len(pos),3), dtype=jnp.float32)
+    # pos_qz = pos_zorder_sort.jit(pos_q)[0]
 
-    jb.measure(fn_jit=evaluate_knn_z.jit, d=data2, posz_query=pos_qz, tag="eval_q_z")
-    jb.measure(fn_jit=knn.jit, pos0=pos_q, k=k, pos_query=pos_q, tag="total_q_z")
+    # jb.measure(fn_jit=evaluate_knn_z.jit, d=data2, posz_query=pos_qz, tag="eval_q_z")
+    # jb.measure(fn_jit=knn.jit, pos0=pos_q, k=k, pos_query=pos_q, tag="total_q_z")
 
 @pytest.mark.shrink_in_quick(keep_index=5)
 @pytest.mark.parametrize("k", [2,8,12,23,32,64,128,220])

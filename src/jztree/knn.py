@@ -358,7 +358,7 @@ def distr_knn(
         k: int,
         boxsize: float | None = None,
         th: TreeHierarchy | None = None,
-        result: str | jax.Array | Any = "rad_rankidx",
+        result: str | jax.Array | Any = "rad_globalidx",
         reduce_func: Callable | None = None,
         output_order: str = "input",
         cfg: KNNConfig = KNNConfig()
@@ -467,9 +467,10 @@ def distr_knn(
                 origin.rank, (res, origin.idx), num=num, axis_name=axis_name,
                 err_hint="\nThis should never fail..."
             )
-            inverse = masked_inverse(idx, mask=jnp.arange(len(idx)) < dev_spl[-1])
+            num = dev_spl[-1]
         else:
-            inverse = origin.idx
+            num, idx = num_origin, origin.idx
+        inverse = masked_inverse(idx, mask=jnp.arange(len(idx)) < num)
 
         return tree_map_by_len(lambda x: x[inverse], res, size)
     else:

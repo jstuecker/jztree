@@ -346,8 +346,7 @@ def zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: Any | N
         partz, dataz = distr_zsort(part, data=data, nsamp=cfg_tree.nsamp)
     else:
         partz, isort = pos_zorder_sort(part)
-        if data is not None:
-            dataz = tree_map_by_len(lambda x: x[isort], data, len(get_pos(partz)))
+        dataz = tree_map_by_len(lambda x: x[isort], data, len(get_pos(partz)))
 
     if ndev > 1:
         top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
@@ -357,7 +356,7 @@ def zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: Any | N
 
     th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
 
-    if dataz is None:
+    if data is None:
         return partz, th
     else:
         return partz, dataz, th
