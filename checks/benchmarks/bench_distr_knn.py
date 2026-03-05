@@ -19,7 +19,10 @@ def get_mesh(ndev=-1):
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_distr_knn(jax_bench, N):
     cfg = KNNConfig()
-    cfg.tree.alloc_fac_nodes = 2.5
+
+    pad, nfac = (1.0, 4.0) if N <= 1e7 else (0.6, 2.5)
+
+    cfg.tree.alloc_fac_nodes = nfac
     cfg.tree.regularization = RegularizationConfig()
 
     ndev = jax.device_count()
@@ -28,7 +31,7 @@ def bench_distr_knn(jax_bench, N):
 
     mesh = get_mesh(ndev)
 
-    part = ics.uniform_particles.smap(mesh, jit=True)(N, npad=int(N * 0.8))
+    part = ics.uniform_particles.smap(mesh, jit=True)(N, npad=int(N * pad))
 
     with stats.statistics() as st:
         rnn = jb.measure(fn_jit=knn.distr_knn.smap(mesh, jit=True),
@@ -42,8 +45,10 @@ def bench_distr_knn(jax_bench, N):
 @pytest.mark.parametrize("N", (int(1e6), int(3e6), int(1e7), int(3e7), int(1e8)))
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
 def bench_gaus(jax_bench, N):
+    pad, nfac = (1.0, 4.0) if N <= 1e7 else (0.6, 2.5)
+
     cfg = KNNConfig()
-    cfg.tree.alloc_fac_nodes = 2.5
+    cfg.tree.alloc_fac_nodes = nfac
 
     ndev = jax.device_count()
 
@@ -51,7 +56,7 @@ def bench_gaus(jax_bench, N):
 
     mesh = get_mesh(ndev)
 
-    part = ics.gaussian_particles.smap(mesh, jit=True)(N, npad=int(N * 0.8))
+    part = ics.gaussian_particles.smap(mesh, jit=True)(N, npad=int(N * pad))
 
     with stats.statistics() as st:
         rnn = jb.measure(fn_jit=knn.distr_knn.smap(mesh, jit=True),
@@ -67,7 +72,7 @@ def bench_distr_knn_steps(jax_bench):
     N = int(1e7)
 
     cfg = KNNConfig()
-    cfg.tree.alloc_fac_nodes = 2.5
+    cfg.tree.alloc_fac_nodes = 4.0
 
     ndev = jax.device_count()
 
@@ -76,7 +81,7 @@ def bench_distr_knn_steps(jax_bench):
     mesh = get_mesh(ndev)
 
     with stats.statistics() as st:
-        part = ics.uniform_particles.smap(mesh, jit=True)(N, npad=int(N * 0.8))
+        part = ics.uniform_particles.smap(mesh, jit=True)(N, npad=int(N * 1.0))
 
         partz, th = jb.measure(fn_jit=knn.distr_zsort_and_tree.smap(mesh, jit=True),
             part=part, cfg_tree=cfg.tree, tag=f"tree_ndev{ndev}"
