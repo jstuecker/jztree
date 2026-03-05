@@ -192,7 +192,7 @@ _knn_dual_walk.smap = shard_map_constructor(_knn_dual_walk,
 #                                       User Exposed Function                                      #
 # ------------------------------------------------------------------------------------------------ #
 
-def distr_knn(
+def knn(
         part: jax.Array | Pos,
         k: int,
         boxsize: float | None = None,
@@ -314,10 +314,10 @@ def distr_knn(
         return tree_map_by_len(lambda x: x[inverse], res, size)
     else:
         raise ValueError(f"Unknown output order {output_order}")
-distr_knn.jit = jax.jit(distr_knn,
+knn.jit = jax.jit(knn,
     static_argnames=("k", "boxsize", "result", "reduce_func", "output_order", "cfg")
 )
-distr_knn.smap = shard_map_constructor(distr_knn,
+knn.smap = shard_map_constructor(knn,
     in_specs=(P(-1), None, None, P(-1), None, None, None, None),
     static_argnames=("k", "boxsize", "result", "reduce_func", "output_order", "cfg")
 )

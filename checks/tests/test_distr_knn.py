@@ -19,13 +19,13 @@ def test_distr_knn():
 
     part = ics.uniform_particles.smap(mesh, jit=True)(1000000, npad=400000)
 
-    rnn, inn = knn.distr_knn.smap(mesh, jit=True)(
+    rnn, inn = knn.knn.smap(mesh, jit=True)(
         part, k=4, output_order="input", result="rad_globalidx"
     )
     rnn, inn = squeeze_any((rnn, inn), rnn.shape[1], part.num, part.num_total)
 
     part_fl = squeeze_particles(part)
-    rnn_ref, inn_ref = knn.distr_knn.jit(part_fl.pos, k=4)
+    rnn_ref, inn_ref = knn.knn.jit(part_fl.pos, k=4)
 
     assert jnp.all(inn == inn_ref)
     assert jnp.allclose(rnn, rnn_ref, rtol=1e-6, atol=1e-6)

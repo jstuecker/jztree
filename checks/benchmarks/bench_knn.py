@@ -27,15 +27,15 @@ def bench_knn_steps(jax_bench, pos):
         return jax.tree.map(lambda x: x[inverse], (rnn, inn))
     jb.measure(fn_jit=jax.jit(reorder), tag="reorder", rnn=rnn, inn=inn)
     
-    jb.measure(fn_jit=jz.knn.distr_knn.jit, tag="total_z", part=posz, k=k, th=th)
-    jb.measure(fn_jit=jz.knn.distr_knn.jit, tag="total", part=pos, k=k)
+    jb.measure(fn_jit=jz.knn.knn.jit, tag="total_z", part=posz, k=k, th=th)
+    jb.measure(fn_jit=jz.knn.knn.jit, tag="total", part=pos, k=k)
 
 @pytest.mark.shrink_in_quick(keep_index=5)
 @pytest.mark.parametrize("k", [2,8,12,23,32,64,128,220])
 def bench_knn_k(jax_bench, pos, k):
     jb = jax_bench(jit_rounds=10, jit_warmup=5)
 
-    jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=k)
+    jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=k)
 
 @pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("N", [1e5,3e5,1e6,3e6,1e7])
@@ -44,8 +44,8 @@ def bench_knn_N(jax_bench, N):
 
     pos = jax.random.uniform(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
 
-    jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=4, tag="jztree_k4")
-    jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="jztree_k16")
+    jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=4, tag="jztree_k4")
+    jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=16, tag="jztree_k16")
 
     if has_jaxkd:
         import jaxkd
@@ -67,20 +67,20 @@ def bench_knn_setup(jax_bench):
     print("\nUniform:")
     with jz.stats.statistics() as st:
         pos = jax.random.uniform(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
-        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="uniform")
+        jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=16, tag="uniform")
         st.print_suggestions(cfg)
 
     print("\nGaus:")
     with jz.stats.statistics() as st:
         pos = jax.random.normal(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
-        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="gaus")
+        jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=16, tag="gaus")
         st.print_suggestions(cfg)
 
     print("\nGaus (regularized):")
     cfg.tree.regularization = jz.config.RegularizationConfig()
     with jz.stats.statistics() as st:
         pos = jax.random.normal(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
-        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16,  tag="gaus(reg)")
+        jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=16,  tag="gaus(reg)")
         st.print_suggestions(cfg)
 
 @pytest.mark.parametrize("dim", [2,3])
@@ -91,8 +91,8 @@ def bench_knn_dtype_dim(jax_bench, dim):
     k = 16
 
     pos = jax.random.uniform(jax.random.key(0), (N,dim))
-    jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="float")
+    jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=16, tag="float")
 
     with jax.enable_x64():
         pos = jax.random.uniform(jax.random.key(0), (N,dim), dtype=jnp.float64)
-        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="double")
+        jb.measure(fn_jit=jz.knn.knn.jit, part=pos, k=16, tag="double")

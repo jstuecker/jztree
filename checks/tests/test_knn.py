@@ -36,7 +36,7 @@ def check_against_ckdtree(posz, k=16, boxsize=0.):
     cfg = KNNConfig()
     # rnn, inn = knn_z(posz, k=k, boxsize=boxsize, cfg=cfg)
 
-    rnn, inn = jz.knn.distr_knn(posz, k=k, boxsize=boxsize, result="rad_globalidx")
+    rnn, inn = jz.knn.knn(posz, k=k, boxsize=boxsize, result="rad_globalidx")
 
     tree = cKDTree(np.array(posz), boxsize=boxsize)
     rnn2, inn2 = tree.query(np.array(posz), k=k)
@@ -97,9 +97,9 @@ def test_io_order():
     part = ics.uniform_particles(int(1024*128))
     partz, idz, th = jz.tree.zsort_and_tree(part, jz.config.KNNConfig().tree, data=jnp.arange(len(part.pos)))
 
-    rnn00, inn00 = jz.knn.distr_knn.jit(part, k=16)
-    rnn0z, inn0z = jz.knn.distr_knn.jit(part, k=16, output_order="z")
-    rnnzz, innzz = jz.knn.distr_knn.jit(partz, k=16, th=th)
+    rnn00, inn00 = jz.knn.knn.jit(part, k=16)
+    rnn0z, inn0z = jz.knn.knn.jit(part, k=16, output_order="z")
+    rnnzz, innzz = jz.knn.knn.jit(partz, k=16, th=th)
 
     print("radii only depent on output order:")
     assert jnp.all(rnn00[idz] == rnn0z)

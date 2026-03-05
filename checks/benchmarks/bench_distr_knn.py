@@ -34,7 +34,7 @@ def bench_distr_knn(jax_bench, N):
     part = ics.uniform_particles.smap(mesh, jit=True)(N, npad=int(N * pad))
 
     with stats.statistics() as st:
-        rnn = jb.measure(fn_jit=knn.distr_knn.smap(mesh, jit=True),
+        rnn = jb.measure(fn_jit=knn.knn.smap(mesh, jit=True),
             part=part, k=16, output_order="z", result="rad", tag=f"ndev{ndev}", cfg=cfg
         )
         st = st.reduce_multi_host()
@@ -59,7 +59,7 @@ def bench_gaus(jax_bench, N):
     part = ics.gaussian_particles.smap(mesh, jit=True)(N, npad=int(N * pad))
 
     with stats.statistics() as st:
-        rnn = jb.measure(fn_jit=knn.distr_knn.smap(mesh, jit=True),
+        rnn = jb.measure(fn_jit=knn.knn.smap(mesh, jit=True),
             part=part, k=16, output_order="z", result="rad", cfg=cfg, tag=f"ndev{ndev}"
         )
         st = st.reduce_multi_host()
@@ -91,11 +91,11 @@ def bench_distr_knn_steps(jax_bench):
             th=th, k=16, alloc_fac_ilist=cfg.alloc_fac_ilist, tag=f"treewalk_ndev{ndev}"
         )
 
-        rnn = jb.measure(fn_jit=knn.distr_knn.smap(mesh, jit=True),
+        rnn = jb.measure(fn_jit=knn.knn.smap(mesh, jit=True),
             part=partz, th=th, k=16, output_order="z", result="rad", tag=f"totalzz_ndev{ndev}"
         )
 
-        rnn = jb.measure(fn_jit=knn.distr_knn.smap(mesh, jit=True),
+        rnn = jb.measure(fn_jit=knn.knn.smap(mesh, jit=True),
             part=part, th=th, k=16, result="rad", tag=f"total_ndev{ndev}"
         )
 
