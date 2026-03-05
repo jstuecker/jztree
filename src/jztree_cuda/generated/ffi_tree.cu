@@ -31,12 +31,14 @@ using DT = ffi::DataType;
 ffi::Error FlagLeafBoundariesFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer posz,
+    ffi::AnyBuffer ptype,
     ffi::AnyBuffer lvl_bound,
     ffi::AnyBuffer npart,
     ffi::Result<ffi::AnyBuffer> split_flags,
     ffi::Result<ffi::AnyBuffer> lvl,
     int max_size,
     int scan_size,
+    int num_types,
     size_t block_size
 ) {
     int size_part = posz.dimensions()[0];
@@ -44,23 +46,26 @@ ffi::Error FlagLeafBoundariesFFIHost(
     DT tvec = posz.element_type();
     dim3 blockDim(block_size);
     dim3 gridDim(div_ceil(size_part+1, block_size));
-    size_t smem = (block_size + 2*scan_size + 1) * sizeof(int32_t);
+    size_t smem = (block_size + 2*scan_size + 1) * (sizeof(int32_t) + sizeof(uint8_t));
     
     // Build a bundled argument list for cudaLaunchKernel
     void* posz_arg = posz.untyped_data();
+    void* ptype_arg = ptype.untyped_data();
     void* lvl_bound_arg = lvl_bound.untyped_data();
     void* npart_arg = npart.untyped_data();
     void* split_flags_arg = split_flags->untyped_data();
     void* lvl_arg = lvl->untyped_data();
     void* args[] = {
         &posz_arg,
+        &ptype_arg,
         &lvl_bound_arg,
         &npart_arg,
         &split_flags_arg,
         &lvl_arg,
         &max_size,
         &size_part,
-        &scan_size
+        &scan_size,
+        &num_types
     };
     
 
@@ -109,12 +114,14 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // posz
+        .Arg<ffi::AnyBuffer>() // ptype
         .Arg<ffi::AnyBuffer>() // lvl_bound
         .Arg<ffi::AnyBuffer>() // npart
         .Ret<ffi::AnyBuffer>() // split_flags
         .Ret<ffi::AnyBuffer>() // lvl
         .Attr<int>("max_size")
         .Attr<int>("scan_size")
+        .Attr<int>("num_types")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

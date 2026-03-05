@@ -181,8 +181,14 @@ def find_regularization_level(lvl: jax.Array, linfo: LevelInfo, weights: jax.Arr
     return levels[first_too_large]
 
 def detect_leaf_boundaries(
-        posz: jax.Array, leaf_size: int = 32, npart: int | None = None, lvl_bound = None,
-        block_size: int = 64, alloc_size: int | None = None,
+        posz: jax.Array,
+        ptype: jax.Array | None = None,
+        num_types: int | None = None,
+        leaf_size: int = 32,
+        npart: int | None = None,
+        lvl_bound = None,
+        block_size: int = 64,
+        alloc_size: int | None = None,
         cfg_reg: RegularizationConfig | None = None
     ) -> jax.Array:
     if alloc_size is None:
@@ -198,9 +204,18 @@ def detect_leaf_boundaries(
         jax.ShapeDtypeStruct((posz.shape[0]+1,), jnp.int32)
     )
 
+    if ptype is None:
+        ptype = jnp.zeros(0, dtype=jnp.uint8)
+        num_types = 1
+    else:
+        assert num_types is not None, "Please provide num_types if providing ptype"
+        assert len(ptype) == len(posz)
+        ptype = jnp.astype(ptype, jnp.uint8)
+
     flag_split, lvl = jax.ffi.ffi_call("FlagLeafBoundaries", outputs, vmap_method="sequential")(
-        posz, jnp.asarray(lvl_bound), npart, max_size=np.int32(leaf_size),
-        block_size=np.uint64(block_size), scan_size=np.int32(leaf_size+1)
+        posz, ptype, jnp.asarray(lvl_bound), npart, max_size=np.int32(leaf_size),
+        block_size=np.uint64(block_size), scan_size=np.int32((leaf_size+1)*num_types),
+        num_types=np.int32(num_types)
     )
 
     if cfg_reg is not None: # Ensure leaves to not exceed a dynamically determined maximum level

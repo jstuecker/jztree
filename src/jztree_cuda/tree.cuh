@@ -13,13 +13,15 @@
 template<int dim, typename tvec>
 __global__ void FlagLeafBoundaries(
     const Vec<dim,tvec>* posz,
+    const uint8_t* ptype,
     const int* lvl_bound,
     const int* npart,
     int8_t* split_flags,
     int* lvl,
     int max_size,
     int size_part,
-    int scan_size
+    int scan_size,
+    int num_types
 ) {
     // Finds splitting points where the group of particles between each splitting point
     // can be summarized into a single leaf node that represents <= max_size particles
@@ -33,41 +35,56 @@ __global__ void FlagLeafBoundaries(
     // Load data preceding and following our block into shared memory
     int nload = blockDim.x + 2*scan_size + 1;
     extern __shared__ int32_t level[];
+    uint8_t* types = reinterpret_cast<uint8_t*>(level + nload);
 
     int ioff = blockIdx.x * blockDim.x - scan_size - 1;
     
     __syncthreads();
     for(int i = threadIdx.x; i < nload-1; i += blockDim.x) {
         int ipart = ioff + i;
-        if(ipart < 0)
+        if(ipart < 0) {
             level[i] = lbound_l;
-        else if(ipart + 1 >= nump)
+            types[i] = 0;
+        }
+        else if(ipart + 1 >= nump) {
             level[i] = lbound_r;
-        else
+            types[i] = 0;
+        }
+        else {
             level[i] = msb_diff_level<dim,tvec>(posz[ipart], posz[ipart + 1]);
+            if(num_types > 1)
+                types[i] = ptype[ipart];
+            else
+                types[i] = 0;
+        }
     }
     __syncthreads();
 
-    // Find the boundaries of each node
     int idx = threadIdx.x + scan_size;
     int mylevel = level[idx];
-    int lsize = 0;
-    for(int i = idx - scan_size; i < idx; i++) {
-        lsize = (level[i] >= mylevel ? 0 : lsize) + 1;
-    }
-    int rsize = 0;
-    for(int i = idx + scan_size; i > idx; i--) {
-        rsize = (level[i] >= mylevel ? 0 : rsize) + 1;
+    bool is_split = false;
+
+    for(int type=0; type<num_types; type++) {
+        // Find the boundaries of each node
+        int lsize = 0;
+        for(int i = idx - scan_size; i < idx; i++) {
+            lsize = (level[i] < mylevel ? lsize : 0) + 1*(types[i] == type);
+        }
+        int rsize = 0;
+        for(int i = idx + scan_size; i > idx; i--) {
+            rsize = (level[i] < mylevel ? rsize : 0) + 1*(types[i] == type);
+        }
+
+        // Each maximum size node that is <= max_size is bounded by nodes that are > max_size
+        // Therefore, we can find their splitting points by simply flagging all nodes that are > max_size
+        is_split = is_split | (lsize + rsize > max_size);
+        
+        // If nodes hit a domain boundary and are larger than the boundary level, we always flag them
+        // int max_lvl_left = lvl_bound[0], max_lvl_right = lvl_bound[1];
+        is_split = is_split | ((mylevel > lvl_bound[0]) && (node_idx - lsize <= 0));
+        is_split = is_split | ((mylevel > lvl_bound[1]) && (node_idx + rsize >= nump));
     }
 
-    // Each maximum size node that is <= max_size is bounded by nodes that are > max_size
-    // Therefore, we can find their splitting points by simply flagging all nodes that are > max_size
-    bool is_split = lsize + rsize > max_size;
-
-    // If nodes hit a domain boundary and are larger than the boundary level, we always flag them
-    // int max_lvl_left = lvl_bound[0], max_lvl_right = lvl_bound[1];
-    is_split = is_split | ((mylevel > lvl_bound[0]) && (node_idx - lsize <= 0));
-    is_split = is_split | ((mylevel > lvl_bound[1]) && (node_idx + rsize >= nump));
 
     // Additionally we set the beginning and end points to be splits
     is_split &= node_idx <= nump;
