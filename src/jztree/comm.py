@@ -506,7 +506,8 @@ def all_to_all_request_children(
     output: jax.Array | Pytree | None = None,
     axis_name: str = None,
     verify: bool = True,
-    err_hint: str = "",
+    err_hint_parent: str = "",
+    err_hint_child: str = "",
     copy_self: bool = True,
     pack_pytree: bool = False
 ):
@@ -519,7 +520,7 @@ def all_to_all_request_children(
 
     # First inform the task with the data which indices we need
     indices, dev_spl = all_to_all_with_splits(
-        indices, dev_spl, output=None, axis_name=axis_name, verify=verify, err_hint=err_hint,
+        indices, dev_spl, output=None, axis_name=axis_name, verify=verify, err_hint=err_hint_parent,
         copy_self=copy_self, pack_pytree=pack_pytree
     )
         
@@ -534,14 +535,15 @@ def all_to_all_request_children(
 
     # send back the node_sizes so the receiver knows where each node starts
     node_sizes, node_dev_spl = all_to_all_with_splits(
-        node_sizes, dev_spl, axis_name=axis_name, verify=verify, err_hint=err_hint, 
+        node_sizes, dev_spl, axis_name=axis_name, verify=verify,
+        err_hint="\nThis should not fail...",  # (since it must be identical to input size)
         pack_pytree=pack_pytree,
     )
     node_spl = cumsum_starting_with_zero(node_sizes)
     
     # Now send the child data
     xchild, child_dev_spl = all_to_all_with_splits(
-        child_data, child_dev_spl, output, axis_name=axis_name, verify=verify, err_hint=err_hint,
+        child_data, child_dev_spl, output, axis_name=axis_name, verify=verify, err_hint=err_hint_child,
         copy_self=copy_self, pack_pytree=pack_pytree
     )
     

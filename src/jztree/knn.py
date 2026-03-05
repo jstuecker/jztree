@@ -205,9 +205,10 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
             # Request the remote node data that we need to interact with
             (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
                 ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
-                axis_name=axis_name, err_hint="\nHint: increase alloc_fac_nodes"
+                axis_name=axis_name, err_hint_child="\nHint: increase alloc_fac_nodes",
+                err_hint_parent="\nHint: increase alloc_fac_nodes"
             )
-            stats_callback("allocation", AllocStats.record_filled_nodes, dev_spl[-1], size)
+            stats_callback("allocation", AllocStats.record_filled_nodes_interaction, dev_spl[-1], size)
 
         ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
 
@@ -292,31 +293,32 @@ def prepare_knn_z(posz, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None
     )
 prepare_knn_z.jit = jax.jit(prepare_knn_z, static_argnames=["k", "boxsize", "cfg"])
 
-def distr_prepare_knn_z(posz, th: TreeHierarchy, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
-    rank, ndev, axis_name = get_rank_info()
+# def distr_prepare_knn_z(posz, th: TreeHierarchy, k, boxsize=None, cfg : KNNConfig = KNNConfig(), idz=None) -> KNNData:
+#     rank, ndev, axis_name = get_rank_info()
 
-    ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
+#     ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
 
-    pdata = PosId(pos=posz, id=idz)
+#     pdata = PosId(pos=posz, id=idz)
 
-    spl = th.ispl_n2n.get(0, th.size()+1)
-    (pdata, ids), spl, dev_spl = all_to_all_request_children(
-        ilist.dev_spl, ilist.ids, spl, (pdata, jnp.arange(len(posz))),
-        axis_name=axis_name, err_hint="\nHint: increase padding."
-    )
+#     spl = th.ispl_n2n.get(0, th.size()+1)
+#     (pdata, ids), spl, dev_spl = all_to_all_request_children(
+#         ilist.dev_spl, ilist.ids, spl, (pdata, jnp.arange(len(posz))),
+#         axis_name=axis_name, err_hint_child="\nHint: increase padding."
+#         err_hint_parent="\nHint: increase padding."
+#     )
 
-    return DistrKNNData(
-        k=k,
-        boxsize=boxsize,
-        partz=pdata,
-        spl=spl,
-        ilist=ilist,
-        origin = RankIdx(rank=inverse_of_splits(dev_spl, len(posz)), idx=ids)
-    )
-distr_prepare_knn_z.smap = shard_map_constructor(distr_prepare_knn_z,
-    in_specs=(P(-1), P(-1), None, None, None, P(-1)),
-    static_argnames=("k", "boxsize", "cfg")
-)
+#     return DistrKNNData(
+#         k=k,
+#         boxsize=boxsize,
+#         partz=pdata,
+#         spl=spl,
+#         ilist=ilist,
+#         origin = RankIdx(rank=inverse_of_splits(dev_spl, len(posz)), idx=ids)
+#     )
+# distr_prepare_knn_z.smap = shard_map_constructor(distr_prepare_knn_z,
+#     in_specs=(P(-1), P(-1), None, None, None, P(-1)),
+#     static_argnames=("k", "boxsize", "cfg")
+# )
 
 def prepare_knn(pos0, k, boxsize=None, cfg : KNNConfig = KNNConfig()) -> KNNData:
     """Prepares an instance of KNNData for a given set of positions pos0
@@ -388,8 +390,9 @@ def distr_knn(
     # Localize particle data
     spl = th.ispl_n2n.get(0, th.size()+1)
     (premote, origin_rem), spl, dev_spl = all_to_all_request_children(
-        ilist.dev_spl, ilist.ids, spl, (partz, origin),
-        axis_name=axis_name, err_hint="\nHint: increase padding."
+        ilist.dev_spl, ilist.ids, spl, (partz, origin), axis_name=axis_name,
+        err_hint_parent="\nHint: increase alloc_fac_nodes.",
+        err_hint_child="\nHint: increase padding."
     )
 
     stats_callback("allocation", AllocStats.record_filled_part_interactions, dev_spl[-1], size)

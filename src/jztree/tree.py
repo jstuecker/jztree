@@ -166,16 +166,19 @@ def find_regularization_level(lvl: jax.Array, linfo: LevelInfo, weights: jax.Arr
     vol_rel = jnp.astype(2., linfo.dtype)**(levels - ref_level)
 
     # find the level where the node volume exceeds the average volume of smaller nodes
-    # by a given factor
 
-    vol_csum = jnp.cumsum(vol_rel*counts)
-    avg_vol = vol_csum / cts_csum
+    vol_sum = jnp.sum(jnp.where(levels <= ref_level, vol_rel*counts, 0))
+    cts_sum = jnp.sum(jnp.where(levels <= ref_level, counts, 0))
+    avg_vol = vol_sum / cts_sum
 
     too_large = consider & (vol_rel >= max_vol_fac * avg_vol)
     
-    first_too_large = jnp.argmax(too_large) # find first too large level
+    # find the first too large level
+    first_too_large = jnp.where(jnp.any(too_large), jnp.argmax(too_large), len(levels-1))
 
-    return levels[first_too_large] #, cts_csum/cts_csum[-1]
+    # jax.debug.log("avol: {} csum: {}", avg_vol[-10 - linfo.min_lvl()] * 2.**ref_level, cts_csum[-1])
+
+    return levels[first_too_large]
 
 def detect_leaf_boundaries(
         posz: jax.Array, leaf_size: int = 32, npart: int | None = None, lvl_bound = None,
@@ -407,7 +410,9 @@ def distr_zsort(part: Pos, data: Any | None = None, nsamp: int = 1024, equalize:
 
     # Now organize and determine which chunks need to be send to each rank
     irank = search_sorted_z(xpivot, part.pos)-1
-    (part, data), dev_spl = all_to_all_with_irank(irank, (part, data), num=part.num)
+    (part, data), dev_spl = all_to_all_with_irank(
+        irank, (part, data), num=part.num, err_hint="\nHint: Increase padding."
+    )
     
     part.num = dev_spl[-1]
 
@@ -536,10 +541,11 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
         # leaves were already regularized, so let's keep them all:
         new_is_spl = [(npart_if_not_split > 0) | is_spl_on_level[0]] 
 
-        lvl_up = jnp.minimum(lvl[lbound], lvl[rbound-1]) - 1 # use upper level in this calculation
+        lvl_up = jnp.minimum(lvl[lbound], lvl[rbound]) - 1 # use upper level in this calculation
 
         for i in range(1, nlevels):
             is_node = (~is_spl_on_level[i]) & is_spl_on_level[i,lbound] & is_spl_on_level[i,rbound]
+            is_node = is_node & (jnp.arange(len(lvl)) < nleaves)
 
             linfo = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
             lvl_max = find_regularization_level(
@@ -547,12 +553,17 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
                 max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
             )
 
+            new = is_spl_on_level[i] | ((lvl > lvl_max) &  (jnp.arange(len(lvl)) <= nleaves))
+
+            # rank = jax.lax.axis_index("gpus")
+            # jax.debug.log("r {} lv {}, lvmax {} isnode {}", rank, i, lvl_max, jnp.mean(is_node))
+
             stats_callback(
                 "allocation", AllocStats.record_node_regularization, 
-                jnp.sum(is_spl_on_level[i]), jnp.sum(is_spl_on_level[i] | (lvl > lvl_max))
+                jnp.sum(is_spl_on_level[i]), jnp.sum(new)
             )
 
-            new_is_spl.append(is_spl_on_level[i] | (lvl > lvl_max))
+            new_is_spl.append(new)
         
         is_spl_on_level = jnp.array(new_is_spl)
 

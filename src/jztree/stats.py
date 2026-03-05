@@ -23,6 +23,7 @@ class AllocStats:
     max_part_frac_domain: float | None = None
     max_part_frac_interaction: float | None = None
     max_node_frac: float | None = None
+    max_node_frac_interaction: float | None = None
     max_reg_frac_leaf: float | None = None
     max_reg_leaf_lvl: int | None = None
     max_reg_frac_node: float | None = None    
@@ -34,16 +35,18 @@ class AllocStats:
         self.max_part_frac_sort = max_allow_None(self.max_part_frac_sort, float(npart/size))
 
     def record_filled_domain(self, npart, size):
-        self.max_part_frac_interaction = max_allow_None(self.max_part_frac_interaction, float(npart/size))
+        self.max_part_frac_domain = max_allow_None(self.max_part_frac_domain, float(npart/size))
 
     def record_filled_part_interactions(self, npart, size):
-        self.max_part_frac_domain = max_allow_None(self.max_part_frac_domain, float(npart/size))
+        self.max_part_frac_interaction = max_allow_None(self.max_part_frac_interaction, float(npart/size))
 
     def record_filled_nodes(self, num, size):
         self.max_node_frac = max_allow_None(self.max_node_frac, float(num/size))
 
+    def record_filled_nodes_interaction(self, num, size):
+        self.max_node_frac_interaction = max_allow_None(self.max_node_frac_interaction, float(num/size))
+
     def record_leaf_regularization(self, lvl, nleaves_pre, nleaves_post):
-        # print(f"reg: {lvl} {nleaves_pre}, {nleaves_post}")
         self.max_reg_frac_leaf = max_allow_None(self.max_reg_frac_leaf, float(nleaves_post/nleaves_pre))
         self.max_reg_leaf_lvl = max_allow_None(self.max_reg_leaf_lvl, lvl)
 
@@ -58,14 +61,20 @@ class AllocStats:
 
     def print_suggestions(self, cfg: FofConfig):
         print("--- Allocation Info ---")
-        fill_frac = max_allow_None(self.max_part_frac_sort, self.max_part_frac_domain)
-        fill_frac = max_allow_None(fill_frac, self.max_part_frac_interaction)
-        if fill_frac is not None:
-            print(f"Filled at most {fill_frac:.1%} of particles. (Affected by padding.)")
+        if self.max_part_frac_sort is not None:
+            print(f"Filled at most {self.max_part_frac_sort:.1%} of particles during sort. (Affected by padding.)")
+        if self.max_part_frac_domain is not None:
+            print(f"Filled at most {self.max_part_frac_domain:.1%} of particles during domain adjustment. (Affected by padding.)")
+        if self.max_part_frac_interaction is not None:
+            print(f"Filled at most {self.max_part_frac_interaction:.1%} of particles during interactions. (Affected by padding.)")
         if self.max_node_frac is not None:
-            print(f"Filled at most {self.max_node_frac:.1%} of nodes. Could decrease alloc_fac_nodes "
-                  f"at most from {cfg.tree.alloc_fac_nodes} "
-                  f"to {cfg.tree.alloc_fac_nodes * self.max_node_frac:.2f}")
+            print(f"Filled at most {self.max_node_frac:.1%} of nodes in tree-construction.")
+        if self.max_node_frac_interaction is not None:
+            print(f"Filled at most {self.max_node_frac_interaction:.1%} of nodes during interaction.")
+        frac = max_allow_None(self.max_node_frac, self.max_node_frac_interaction)
+        if frac is not None:
+            print(f"Could decrease alloc_fac_nodes at most from {cfg.tree.alloc_fac_nodes} "
+                  f"to {cfg.tree.alloc_fac_nodes * frac:.2f}")
         if self.max_ilist_frac_fof is not None:
             print(f"Filled at most {self.max_ilist_frac_fof:.1%} of interaction list. Could decrease "
                   f"alloc_fac_ilist at most from {cfg.alloc_fac_ilist} to "
@@ -76,7 +85,8 @@ class AllocStats:
                   f"{cfg.alloc_fac_distr_links*self.max_links_frac:.2g}")
         if self.max_reg_frac_leaf is not None:
             print(f"Regularization increased number of leaves at most by {self.max_reg_frac_leaf - 1.:.2%}")
-            print(f"Regularization increased number of nodes on a level at most by {self.max_reg_frac_node - 1.:.2%}")
+        if self.max_reg_frac_node is not None:
+            print(f"Regularization increased number of nodes on any level at most by {self.max_reg_frac_node - 1.:.2%}")
         print("-------")
 
 @jax.tree_util.register_dataclass
@@ -113,6 +123,9 @@ class Statistics:
 
     def print_info(self):
         self.interaction.print_info()
+
+    def reduce_multi_host(self):
+        return reduce_stats_multihost(gather_stats_multihost(self))
 
 # ContextVar doesn't work well with callbacks and shardmap...
 # That's why we simply set a single global variable

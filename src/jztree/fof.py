@@ -420,8 +420,11 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         # Request the remote node children that we need to interact with
         (poslvl, ids, pid), parent_spl, dev_spl = all_to_all_request_children(
             ilist.dev_spl, ilist.ids, parent_spl, (poslvl, jnp.arange(size), pid),
-            axis_name=axis_name
+            axis_name=axis_name, err_hint_child="\nHint: Increase alloc_fac_nodes.",
+            err_hint_parent="\nHint: Increase alloc_fac_nodes."
         )
+
+        stats_callback("allocation", AllocStats.record_filled_nodes_interaction, dev_spl[-1], size)
 
         # Treat remote nodes as roots
         irank = inverse_of_splits(dev_spl, size)
@@ -468,8 +471,12 @@ def distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
 
     numpart = node_data.spl[-1]
     (posz, pids), spl, dev_spl = all_to_all_request_children(
-        ilist.dev_spl, ilist.ids, node_data.spl, (posz, jnp.arange(size)), axis_name=axis_name
+        ilist.dev_spl, ilist.ids, node_data.spl, (posz, jnp.arange(size)), axis_name=axis_name,
+        err_hint_parent="\nHint: Increase alloc_fac_nodes.",
+        err_hint_child="\nHint: Increase padding."
     )
+
+    stats_callback("allocation", AllocStats.record_filled_part_interactions, dev_spl[-1], size)
 
     # Treat remote nodes as roots
     irank = inverse_of_splits(dev_spl, size)
