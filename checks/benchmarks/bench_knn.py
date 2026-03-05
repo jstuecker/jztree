@@ -1,11 +1,6 @@
 import pytest
 import jax
 import jax.numpy as jnp
-from dataclasses import replace
-from jztree.tree import pos_zorder_sort
-from jztree.knn import prepare_knn, prepare_knn_z, evaluate_knn, evaluate_knn_z, knn, knn_z
-from jztree import stats
-from jztree.config import KNNConfig, RegularizationConfig
 import jztree as jz
 
 import importlib
@@ -19,7 +14,7 @@ def bench_knn_steps(jax_bench, pos):
 
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
 
-    posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
+    posz, idz = jb.measure(fn_jit=jz.tree.pos_zorder_sort.jit, x=pos, tag="zsort")[1]
     th = jb.measure(fn_jit=jz.knn.build_tree_hierarchy.jit, tag="tree",
                     part=posz, cfg_tree=cfg.tree)[1]
     
@@ -34,21 +29,6 @@ def bench_knn_steps(jax_bench, pos):
     
     jb.measure(fn_jit=jz.knn.distr_knn.jit, tag="total_z", part=posz, k=k, th=th)
     jb.measure(fn_jit=jz.knn.distr_knn.jit, tag="total", part=pos, k=k)
-    
-    # data = jb.measure(fn_jit=prepare_knn.jit, pos0=pos, k=k, tag="prepare")[1]
-    # data2 = jb.measure(fn_jit=prepare_knn_z.jit, posz=posz, k=k, tag="prepare_z_new")[1]
-
-    # jb.measure(fn_jit=evaluate_knn.jit, d=data, tag="eval")
-        
-    # jb.measure(fn_jit=knn.jit, pos0=pos, k=k, tag="total")
-    # jb.measure(fn_jit=knn_z.jit, posz=posz, k=k, tag="total_z")
-
-    # query particles with a different seed
-    # pos_q = jax.random.uniform(jax.random.PRNGKey(1), (len(pos),3), dtype=jnp.float32)
-    # pos_qz = pos_zorder_sort.jit(pos_q)[0]
-
-    # jb.measure(fn_jit=evaluate_knn_z.jit, d=data2, posz_query=pos_qz, tag="eval_q_z")
-    # jb.measure(fn_jit=knn.jit, pos0=pos_q, k=k, pos_query=pos_q, tag="total_q_z")
 
 @pytest.mark.shrink_in_quick(keep_index=5)
 @pytest.mark.parametrize("k", [2,8,12,23,32,64,128,220])
@@ -64,8 +44,8 @@ def bench_knn_N(jax_bench, N):
 
     pos = jax.random.uniform(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
 
-    jb.measure(fn_jit=knn.jit, pos0=pos, k=4, tag="jztree_k4")
-    jb.measure(fn_jit=knn.jit, pos0=pos, k=16, tag="jztree_k16")
+    jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=4, tag="jztree_k4")
+    jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="jztree_k16")
 
     if has_jaxkd:
         import jaxkd
@@ -81,26 +61,26 @@ def bench_knn_setup(jax_bench):
     N = 1e6
     jb = jax_bench(jit_rounds=5, jit_loops=5, jit_warmup=1)
 
-    cfg = KNNConfig()
+    cfg = jz.config.KNNConfig()
     cfg.tree.regularization = None
 
     print("\nUniform:")
-    with stats.statistics() as st:
+    with jz.stats.statistics() as st:
         pos = jax.random.uniform(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
-        jb.measure(fn_jit=knn.jit, pos0=pos, k=16, tag="uniform")
+        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="uniform")
         st.print_suggestions(cfg)
 
     print("\nGaus:")
-    with stats.statistics() as st:
+    with jz.stats.statistics() as st:
         pos = jax.random.normal(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
-        jb.measure(fn_jit=knn.jit, pos0=pos, k=16, tag="gaus")
+        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="gaus")
         st.print_suggestions(cfg)
 
     print("\nGaus (regularized):")
-    cfg.tree.regularization = RegularizationConfig()
-    with stats.statistics() as st:
+    cfg.tree.regularization = jz.config.RegularizationConfig()
+    with jz.stats.statistics() as st:
         pos = jax.random.normal(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
-        jb.measure(fn_jit=knn.jit, pos0=pos, k=16, tag="gaus(reg)")
+        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16,  tag="gaus(reg)")
         st.print_suggestions(cfg)
 
 @pytest.mark.parametrize("dim", [2,3])
@@ -111,8 +91,8 @@ def bench_knn_dtype_dim(jax_bench, dim):
     k = 16
 
     pos = jax.random.uniform(jax.random.key(0), (N,dim))
-    jb.measure(fn_jit=knn.jit, pos0=pos, k=k, tag="float")
+    jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="float")
 
     with jax.enable_x64():
         pos = jax.random.uniform(jax.random.key(0), (N,dim), dtype=jnp.float64)
-        jb.measure(fn_jit=knn.jit, pos0=pos, k=k, tag="double")
+        jb.measure(fn_jit=jz.knn.distr_knn.jit, part=pos, k=16, tag="double")

@@ -25,7 +25,7 @@ def test_distr_knn():
     rnn, inn = squeeze_any((rnn, inn), rnn.shape[1], part.num, part.num_total)
 
     part_fl = squeeze_particles(part)
-    rnn_ref, inn_ref = knn.knn.jit(part_fl.pos, k=4)
+    rnn_ref, inn_ref = knn.distr_knn.jit(part_fl.pos, k=4)
 
     assert jnp.all(inn == inn_ref)
     assert jnp.allclose(rnn, rnn_ref, rtol=1e-6, atol=1e-6)

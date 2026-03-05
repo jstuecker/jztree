@@ -4,8 +4,6 @@ import pytest
 import numpy as np
 from scipy.spatial import cKDTree
 from jztree.config import KNNConfig
-from jztree.knn import knn_z, _segment_sort, prepare_knn, evaluate_knn_z, prepare_knn_z, evaluate_knn, knn
-from jztree.tree import pos_zorder_sort
 import jztree as jz
 from jztree_utils import ics
 
@@ -24,7 +22,7 @@ def test_segment_sort():
     r = jax.random.uniform(jax.random.PRNGKey(1), (spl[-1],), minval=0, maxval=1)
 
     ikey  = jnp.arange(len(r))
-    rnew, inew = _segment_sort(spl, r, ikey, smem_size=64)
+    rnew, inew = jz.knn._segment_sort(spl, r, ikey, smem_size=64)
 
     # for this test, we can emulate a segmented sort through a lexsort in jax
     # (it takes a factor 10 longer though)
@@ -55,14 +53,14 @@ def check_against_ckdtree(posz, k=16, boxsize=0.):
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("xmin,xmax", [(-0.3,0.7), (0.1, 0.4), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
 def test_domain(xmin, xmax):
-    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=xmin, xmax=xmax))
+    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=xmin, xmax=xmax))
 
     check_against_ckdtree(posz)
 
 # @pytest.mark.shrink_in_quick(keep_index=6)
 @pytest.mark.parametrize("k", [4,8,12,16,32,53,133])
 def test_k(k):
-    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10.))
+    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10.))
 
     check_against_ckdtree(posz, k=k)
 
@@ -70,41 +68,29 @@ def test_k(k):
 @pytest.mark.parametrize("dim", [2,3])
 def test_dim(dim):
     k = 13
-    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10., dim=dim))
+    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10., dim=dim))
 
     check_against_ckdtree(posz, k=k)
 
 def test_double():
     k = 13
     with jax.enable_x64():
-        posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10., dtype=jnp.float64))
+        posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=10., dtype=jnp.float64))
         check_against_ckdtree(posz, k=k)
 
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("boxsize", [0.03,1.,170.])
 def test_boxsize(boxsize):
-    posz, idz = pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=boxsize))
+    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=1024*256, xmin=0., xmax=boxsize))
 
     check_against_ckdtree(posz, boxsize=boxsize)
 
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("npart", [1e5, 1e6, 4e6])
 def test_npart(npart):
-    posz, idz = pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
+    posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
 
     check_against_ckdtree(posz)
-
-@pytest.mark.skip_in_quick
-def test_query_skip():
-    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
-
-    data = prepare_knn.jit(pos0, k=16)
-
-    rnnz, innz = evaluate_knn_z.jit(data)
-    rnnz2, innz2 = evaluate_knn_z.jit(data, posz_query=data.posz[::2])
-
-    assert jnp.all(rnnz[::2] == rnnz2)
-    print(jnp.all(innz[::2] == innz2))
 
 def test_io_order():
     # tests (and demonstrates) the different output/input ordering options
@@ -122,67 +108,3 @@ def test_io_order():
     print("ids also depent on input order used to define the data")
     assert jnp.all(inn00[idz] == idz[innzz])
     assert jnp.all(inn0z == innzz)
-
-@pytest.mark.skip_in_quick
-def test_twice_knn():
-    """Test that running the knn twice works. (Might fail with stream capture problems.)"""
-    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
-
-    def twice_knn(pos0):
-        rnn, inn = knn(pos0, k=16)
-        pos0 = pos0 + rnn[:,0:1] * 1e-3 # Basically adds zero, since nearest neighbor distance is 0
-        rnn, inn = knn(pos0, k=16)
-        return rnn, inn
-    twice_knn.jit = jax.jit(twice_knn)
-
-    rnn, inn = twice_knn.jit(pos0)
-
-    assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
-
-@pytest.mark.skip_in_quick
-def test_twice_query():
-    """Test that running the knn twice works. (Might fail with stream capture problems.)"""
-    pos0 = get_pos(1024*128, xmin=0., xmax=1.0, seed=1)
-    posa = get_pos(1024*32, xmin=0., xmax=1.0, seed=2)
-    posb = get_pos(1024*32, xmin=0., xmax=1.0, seed=3)
-
-    def twice_knn(pos0, posa, posb):
-        rnna, inn = knn(pos0, k=16, pos_query=posa)
-        rnnb, inn = knn(pos0, k=16, pos_query=posb)
-        return 0.5*(rnna+rnnb), inn
-    twice_knn.jit = jax.jit(twice_knn)
-
-    rnn, inn = twice_knn.jit(pos0, posa, posb)
-
-    assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
-
-@pytest.mark.skip_in_quick
-@pytest.mark.slow
-def test_scan_knn():
-    pos0 = get_pos(1024*128, xmin=0., xmax=1.0)
-
-    def myknn(pos0, i):
-        rnn, inn = knn(pos0, k=16)
-        return pos0+1e-3, jnp.mean(rnn)
-    myknn.jit = jax.jit(myknn)
-
-    pos, rmean = jax.lax.scan(myknn, pos0, jnp.arange(0,10))
-
-    rmean2 = jnp.mean(knn(pos, k=16)[0])
-
-    assert jnp.allclose(rmean, rmean2)
-
-@pytest.mark.skip_in_quick
-def test_scan_query():
-    pos0 = get_pos(1024*128, xmin=0., xmax=1.0, seed=1)
-    posa = get_pos(1024*32, xmin=0., xmax=1.0, seed=2)
-    posb = get_pos(1024*32, xmin=0., xmax=1.0, seed=3)
-
-    def myknn(carry, i):
-        pos0, posa, posb = carry
-        rnna, inna = knn(pos0, k=16, pos_query=posa)
-        rnnb, innb = knn(pos0, k=16, pos_query=posb)
-        return (pos0+rnna[0,0], posa+rnnb[0,0], posb+rnnb[0,0]), jnp.mean(rnna + rnnb)
-    # myknn.jit = jax.jit(myknn)
-
-    res, rmean = jax.lax.scan(myknn, (pos0, posa, posb), jnp.arange(0,10))

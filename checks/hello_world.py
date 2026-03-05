@@ -1,9 +1,9 @@
 import jax
 import jax.numpy as jnp
-from jztree.knn import knn
+import jztree as jz
 
 pos0 = jax.random.uniform(jax.random.PRNGKey(1), (1024*128,3), dtype=jnp.float32, minval=0.1, maxval=0.4)
-rnn, inn = knn.jit(pos0, boxsize=None, k=8)
+rnn, inn = jz.knn.distr_knn.jit(pos0, boxsize=None, k=8)
 
 print("rnn:", rnn[0:3])
 
