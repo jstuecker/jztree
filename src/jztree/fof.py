@@ -392,7 +392,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
     lvl_max = th.info().max_lvl()
     node_lvl = th.lvl.append(jnp.full(size, lvl_max), nsup, fill_value=lvl_max, resize=True)
-    l2p = th.splits_leaf_to_part(size=size+1)
+    l2p = th.splits_leaf_to_part()
 
     # initialize labels of top-level
     igroup = pcast_vma(jnp.arange(size), axis_name)

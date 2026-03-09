@@ -422,6 +422,8 @@ class TreeHierarchy():
     ispl_n2n: PackedArray
     ispl_n2l: PackedArray
 
+    ispl_l2p_per_type: List[jax.Array]
+
     # tree plane data:
     lvl: PackedArray
     geom_cent: PackedArray
@@ -431,7 +433,8 @@ class TreeHierarchy():
     def splits_leaf_to_part(self, ptype: int = 0, size: int | None = None) -> jax.Array:
         if size is None:
             size = self.size()+1
-        return self.ispl_n2n.get(0, size)
+        return self.ispl_l2p_per_type[ptype][:size]
+    # self.ispl_n2n.get(0, size)
     
     def npart(self, level: int, size=None) -> jax.Array:
         if size is None:

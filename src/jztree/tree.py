@@ -354,8 +354,11 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
 
     return ext_ll, ext_lr, ext_rl, ext_rr
 
-def zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: Any | None = None
-                   ) -> Tuple[Pos, TreeHierarchy]:
+def zsort_and_tree(
+        part: Pos,
+        cfg_tree: TreeConfig = TreeConfig(),
+        data: Any | None = None
+    ) -> Tuple[Pos, TreeHierarchy]:
     rank, ndev, axis_name = get_rank_info()
 
     npart_tot = get_num_total(part, default_to_length=(ndev==1))
@@ -380,6 +383,7 @@ def zsort_and_tree(part: Pos, cfg_tree: TreeConfig = TreeConfig(), data: Any | N
 zsort_and_tree.smap = shard_map_constructor(
     zsort_and_tree, in_specs=(P(-1), None, P(-1)), static_argnames="cfg_tree"
 )
+
 
 def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True, block_size=32
                    ) -> PosMass:
@@ -530,10 +534,23 @@ def define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
 
     return node_sizes
 
-def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: int, 
-                           npart: int | None = None, lvl_bound = None,
-                           cfg_reg: RegularizationConfig | None = None
-                           ) -> Tuple[jax.Array, PackedArray, PackedArray]:
+def splits_per_type(spl, ptype, num_types, npart):
+    spls = []
+    for t in range(num_types):
+        prefix = cumsum_starting_with_zero((ptype == t) & (jnp.arange(len(ptype)) < npart))
+        spls.append(prefix[spl])
+    return jnp.stack(spls, axis=0)
+
+def define_split_hierarchy(
+        posz: jax.Array,
+        node_sizes: Tuple[int],
+        alloc_size: int,
+        npart: int | None = None,
+        ptype: jax.Array | None = None,
+        num_types: int | None = None,
+        lvl_bound = None,
+        cfg_reg: RegularizationConfig | None = None
+    ) -> Tuple[jax.Array, PackedArray, PackedArray]:
     """Finds the splitting point of the tree hierarchy
 
     returns
@@ -547,15 +564,22 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
         lvl_max = LevelInfo(posz.shape[-1], posz.dtype).max_lvl()
         lvl_bound = (lvl_max, lvl_max)
     
-    ispl =  detect_leaf_boundaries(
-        posz, leaf_size=node_sizes[0], npart=npart, alloc_size=alloc_size, lvl_bound=lvl_bound,
+    ispl = detect_leaf_boundaries(
+        posz, ptype=ptype, num_types=num_types,
+        leaf_size=node_sizes[0], npart=npart, alloc_size=alloc_size, lvl_bound=lvl_bound,
         cfg_reg=cfg_reg
     )
 
     nleaves = jnp.argmax(ispl)
     lvl, lbound, rbound = determine_znode_boundaries(posz[ispl[:-1]], nleaves=nleaves)
 
-    npart_if_not_split = ispl[rbound] - ispl[lbound]
+    if ptype is not None:
+        # If we have multiple types, we require that the number per type does not exceed a maximum
+        ispl_per_type = splits_per_type(ispl, ptype, num_types, npart)
+        npart_if_not_split = jnp.max(ispl_per_type[:,rbound] - ispl_per_type[:,lbound], axis=0)
+    else:
+        npart_if_not_split = ispl[rbound] - ispl[lbound]
+        ispl_per_type = ispl.reshape((1,) + ispl.shape)
 
     # At each level of the hierarchy, the active nodes are determined by the node sizes
     is_spl_on_level = npart_if_not_split[None,:] > jnp.array(node_sizes, dtype=jnp.int32)[:,None]
@@ -623,7 +647,7 @@ def define_split_hierarchy(posz: jax.Array, node_sizes: Tuple[int], alloc_size: 
     fill_val = jnp.pad(nnodes_on_level[:-1], (1,0), constant_values=ispl[-1])
     ispl_n2n = PackedArray.from_data(ispl_n2n, level_spl, fill_values=fill_val)
     
-    return ispl, ispl_n2l, ispl_n2n
+    return ispl, ispl_per_type, ispl_n2l, ispl_n2n
 
 def get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedArray, PackedArray]:
     prop_array_spl = cumsum_starting_with_zero(ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1)
@@ -645,8 +669,14 @@ def get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedA
 
     return node_mcent, node_mass
 
-def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bound=None
-                         ) -> TreeHierarchy:
+def build_tree_hierarchy(
+        part: PosMass | jax.Array,
+        cfg_tree: TreeConfig,
+        lvl_bound: jax.Array | None = None,
+        ptype: jax.Array | None = None,
+        num_types: jax.Array | None = None,
+        npart_tot: int | None = None
+    ) -> TreeHierarchy:
     """Builds a tree hierarchy from z-order positions
 
     The zeroth level of the tree corresponds to leaves, which contain multiple particles.
@@ -667,7 +697,8 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
     rank, ndev, axis_name = get_rank_info()
 
     posz = get_pos(part)
-    npart_tot = get_num_total(part, default_to_length=(ndev==1))
+    if npart_tot is None:
+        npart_tot = get_num_total(part, default_to_length=(ndev==1))
     np_per_dev = npart_tot // ndev # static estimate of number of unpadded-particles
     npart = get_num(part, default_to_nancount=True)
 
@@ -675,13 +706,15 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
 
     alloc_size = estimate_node_number(np_per_dev, cfg_tree.max_leaf_size, cfg_tree.alloc_fac_nodes)
 
-    ispl, ispl_n2l, ispl_n2n = define_split_hierarchy(
-        posz, node_sizes, alloc_size, npart=npart, lvl_bound=lvl_bound,
+    ispl_l2p, ispl_per_type, ispl_n2l, ispl_n2n = define_split_hierarchy(
+        posz, node_sizes, alloc_size, npart=npart,
+        ptype=ptype, num_types=num_types,
+        lvl_bound=lvl_bound,
         cfg_reg=cfg_tree.regularization
     )
 
     # We can handle all levels at once for node geometry:
-    ispl_n2p = ispl[ispl_n2l.data] # node to particle relation
+    ispl_n2p = ispl_l2p[ispl_n2l.data] # node to particle relation
     lvl, geom_cent = get_node_geometry(
         posz, ispl_n2p[:-1], ispl_n2p[1:], num=ispl_n2l.nfilled()-1, result="lvl_cent"
     )
@@ -702,7 +735,9 @@ def build_tree_hierarchy(part: PosMass | jax.Array, cfg_tree: TreeConfig, lvl_bo
 
     size_leaves = estimate_node_number(np_per_dev, cfg_tree.max_leaf_size)
     th = TreeHierarchy(
-        size_leaves, ispl_n2n, ispl_n2l, lvl, geom_cent, mass = nmass, mass_cent = nmass_cent
+        size_leaves, ispl_n2n, ispl_n2l, ispl_per_type,
+        lvl, geom_cent,
+        mass = nmass, mass_cent = nmass_cent
     )
     
     return th
