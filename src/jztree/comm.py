@@ -7,19 +7,10 @@ from typing import Tuple, Any, TypeAlias
 
 from .jax_ext import get_rank_info, tree_map_by_len, raise_if
 from .tools import cumsum_starting_with_zero, inverse_of_splits, ragged_transpose
+from .tools import leading_len, pytree_len, empty_like, invalidate
 
 # Currently jax doesn't have a typehint for pytrees. We simply define one ourselves for clarity
 Pytree: TypeAlias = Any
-
-# ------------------------------------------------------------------------------------------------ #
-#                                           Type helpers                                           #
-# ------------------------------------------------------------------------------------------------ #
-
-def leading_len(x):
-    if jnp.size(x) == 1:
-        return 1
-    else:
-        return len(x)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                Distributed Initialization Helpers                                #
@@ -65,33 +56,6 @@ def should_init_jax_distributed() -> bool:
 #                                       Tiny Helper Functions                                      #
 # ------------------------------------------------------------------------------------------------ #
 
-def pytree_len(x):
-    """Returns the size of the largest first axis of any leaf of a pytree"""
-    leaves = jax.tree_util.tree_leaves(x)
-
-    return max(leading_len(x) for x in leaves)
-
-def value_for_dtype(dtype, float_val=jnp.nan, int_val=0):
-    if dtype.kind == "f":
-        return float_val
-    else:
-        return int_val
-
-def empty_like(x, float_val=jnp.nan, int_val=0, by_len=True):
-    def empty_el(xi):
-        return jnp.full_like(xi, fill_value=value_for_dtype(xi.dtype, float_val, int_val))
-
-    if by_len:
-        return tree_map_by_len(empty_el, x, pytree_len(x))
-    else:
-        return jax.tree.map(empty_el, x)
-
-def invalidate(arr, mask, invalid_float=jnp.nan, invalid_int=0):
-    def inv(x):
-        mask_rs = jnp.reshape(mask, mask.shape + (1,)*(x.ndim-1))
-        return jnp.where(mask_rs, value_for_dtype(x.dtype, invalid_float, invalid_int), x)
-    
-    return tree_map_by_len(inv, arr, pytree_len(arr))
 
 # ------------------------------------------------------------------------------------------------ #
 #                              Packing Helpers for more efficient comm                             #

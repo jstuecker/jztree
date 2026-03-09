@@ -72,6 +72,33 @@ def log(txt,
     jax.debug.print(txt, *args, ordered=ordered, partitioned=partitioned, **kwargs)
 
 # ------------------------------------------------------------------------------------------------ #
+#                                       Invalidation Helpers                                       #
+# ------------------------------------------------------------------------------------------------ #
+
+def value_for_dtype(dtype, float_val=jnp.nan, int_val=0):
+    if dtype.kind == "f":
+        return float_val
+    else:
+        return int_val
+
+def empty_like(x, float_val=jnp.nan, int_val=0, by_len=True):
+    def empty_el(xi):
+        return jnp.full_like(xi, fill_value=value_for_dtype(xi.dtype, float_val, int_val))
+
+    if by_len:
+        return tree_map_by_len(empty_el, x, pytree_len(x))
+    else:
+        return jax.tree.map(empty_el, x)
+
+def invalidate(arr, mask, invalid_float=jnp.nan, invalid_int=0):
+    def inv(x):
+        mask_rs = jnp.reshape(mask, mask.shape + (1,)*(x.ndim-1))
+        return jnp.where(mask_rs, value_for_dtype(x.dtype, invalid_float, invalid_int), x)
+    
+    return tree_map_by_len(inv, arr, pytree_len(arr))
+
+
+# ------------------------------------------------------------------------------------------------ #
 #                               Some frequently used helper functions                              #
 # ------------------------------------------------------------------------------------------------ #
 
