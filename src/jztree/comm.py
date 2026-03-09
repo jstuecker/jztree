@@ -7,7 +7,7 @@ from typing import Tuple, Any, TypeAlias
 
 from .jax_ext import get_rank_info, tree_map_by_len, raise_if
 from .tools import cumsum_starting_with_zero, inverse_of_splits, ragged_transpose
-from .tools import leading_len, pytree_len, empty_like, invalidate
+from .jax_ext import empty_like, invalidate, pytree_len, leading_len
 
 # Currently jax doesn't have a typehint for pytrees. We simply define one ourselves for clarity
 Pytree: TypeAlias = Any

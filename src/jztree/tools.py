@@ -5,7 +5,7 @@ import jax
 from jax.experimental import io_callback
 import jax.numpy as jnp
 from typing import TypeAlias, Any, Tuple
-from .jax_ext import tree_map_by_len
+from .jax_ext import tree_map_by_len, pytree_len
 
 from .config import LoggingConfig
 
@@ -70,33 +70,6 @@ def log(txt,
             txt = f"[{_callsite()}] {txt}"
 
     jax.debug.print(txt, *args, ordered=ordered, partitioned=partitioned, **kwargs)
-
-# ------------------------------------------------------------------------------------------------ #
-#                                       Invalidation Helpers                                       #
-# ------------------------------------------------------------------------------------------------ #
-
-def value_for_dtype(dtype, float_val=jnp.nan, int_val=0):
-    if dtype.kind == "f":
-        return float_val
-    else:
-        return int_val
-
-def empty_like(x, float_val=jnp.nan, int_val=0, by_len=True):
-    def empty_el(xi):
-        return jnp.full_like(xi, fill_value=value_for_dtype(xi.dtype, float_val, int_val))
-
-    if by_len:
-        return tree_map_by_len(empty_el, x, pytree_len(x))
-    else:
-        return jax.tree.map(empty_el, x)
-
-def invalidate(arr, mask, invalid_float=jnp.nan, invalid_int=0):
-    def inv(x):
-        mask_rs = jnp.reshape(mask, mask.shape + (1,)*(x.ndim-1))
-        return jnp.where(mask_rs, value_for_dtype(x.dtype, invalid_float, invalid_int), x)
-    
-    return tree_map_by_len(inv, arr, pytree_len(arr))
-
 
 # ------------------------------------------------------------------------------------------------ #
 #                               Some frequently used helper functions                              #
@@ -225,18 +198,6 @@ def set_range(arr : jax.Array, values, start, end):
 # ------------------------------------------------------------------------------------------------ #
 #                                       Ragged Array Helpers                                       #
 # ------------------------------------------------------------------------------------------------ #
-
-def leading_len(x):
-    if jnp.size(x) == 1:
-        return 1
-    else:
-        return len(x)
-
-def pytree_len(x):
-    """Returns the size of the largest first axis of any leaf of a pytree"""
-    leaves = jax.tree_util.tree_leaves(x)
-
-    return max(leading_len(x) for x in leaves)
 
 def ragged_transpose(data: jax.Array, n: jax.Array, axes: Tuple[int]):
     """Transposes a matrix of segments in a (ragged) flat array

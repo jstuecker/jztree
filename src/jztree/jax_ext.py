@@ -3,6 +3,7 @@
 # ------------------------------------------------------------------------------------------------ #
 
 import inspect
+import numpy as np
 from typing import Tuple, TypeAlias, Any
 from functools import wraps
 import jax
@@ -13,8 +14,46 @@ from jax.experimental import io_callback
 Pytree: TypeAlias = Any
 
 # ------------------------------------------------------------------------------------------------ #
+#                                       Invalidation Helpers                                       #
+# ------------------------------------------------------------------------------------------------ #
+
+def value_for_dtype(dtype, float_val=jnp.nan, int_val=0):
+    if dtype.kind == "f":
+        return float_val
+    else:
+        return int_val
+
+def empty_like(x, float_val=jnp.nan, int_val=0, by_len=True):
+    def empty_el(xi):
+        return jnp.full_like(xi, fill_value=value_for_dtype(xi.dtype, float_val, int_val))
+
+    if by_len:
+        return tree_map_by_len(empty_el, x, pytree_len(x))
+    else:
+        return jax.tree.map(empty_el, x)
+
+def invalidate(arr, mask, invalid_float=jnp.nan, invalid_int=0):
+    def inv(x):
+        mask_rs = jnp.reshape(mask, mask.shape + (1,)*(x.ndim-1))
+        return jnp.where(mask_rs, value_for_dtype(x.dtype, invalid_float, invalid_int), x)
+    
+    return tree_map_by_len(inv, arr, pytree_len(arr))
+
+# ------------------------------------------------------------------------------------------------ #
 #                                          Mapping PyTrees                                         #
 # ------------------------------------------------------------------------------------------------ #
+
+def leading_len(x):
+    if jnp.size(x) == 1:
+        return 1
+    else:
+        return len(x)
+
+def pytree_len(x):
+    """Returns the size of the largest first axis of any leaf of a pytree"""
+    leaves = jax.tree_util.tree_leaves(x)
+
+    return max(leading_len(x) for x in leaves)
 
 def tree_map_by_len(fn, tree: Pytree, N: int, axis: int = 0) -> Pytree:
     """
@@ -31,6 +70,58 @@ def tree_map_by_len(fn, tree: Pytree, N: int, axis: int = 0) -> Pytree:
 
     return jax.tree_util.tree_map(lambda x: fn(x) if should_map(x) else x, tree)
 
+def concatenate_pytrees(*xnum):
+    assert len(xnum) % 2 == 0
+    xs, nums = xnum[::2], xnum[1::2]
+    num_keys = len(xs)
+    
+    treedef = jax.tree_util.tree_flatten(xs[0])[1]
+
+    leaves = [jax.tree_util.tree_flatten(x)[0] for x in xs]
+    new_leaves = []
+    for i in range(len(leaves[0])):
+        l = [leaves[t][i] for t in range(num_keys)]
+        if(jnp.ndim(l[0]) > 0):
+            valid_mask = jnp.concatenate([jnp.arange(len(l[t])) < nums[t] for t in range(num_keys)])
+            new = jnp.concatenate(l)
+            new_leaves.append(
+                jnp.compress(valid_mask, new, size=len(valid_mask), axis=0,
+                             fill_value=value_for_dtype(new.dtype))
+            )
+        else:
+            new_leaves.append(l)
+
+    return jax.tree_util.tree_unflatten(treedef, new_leaves)
+
+def separate_pytrees(x, key, out_sizes, num):
+    size = len(key)
+    num_keys = len(out_sizes)
+
+    assert np.max(out_sizes) <= size
+    
+    key = jnp.where(jnp.arange(size) < num, key, num_keys)
+    isort = jnp.argsort(key)
+
+    leaves, treedef = jax.tree_util.tree_flatten(x)
+
+    res, nums = [], []
+    offset = 0
+    for t in range(0, num_keys):
+        new_num = jnp.sum(key == t)
+        invalid = jnp.arange(out_sizes[t]) >= new_num
+        ifrom = jnp.roll(isort, -offset)[:out_sizes[t]]
+        new_leaves = []
+        for l in leaves:
+            if (jnp.ndim(l) >= 1) and (len(l) == size):
+                new_leaves.append(invalidate(l[ifrom], invalid))
+            else:
+                new_leaves.append(l)
+        offset += new_num
+
+        res.append(jax.tree_util.tree_unflatten(treedef, new_leaves))
+        nums.append(new_num)
+    
+    return res, nums
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          Raising Errors                                          #
