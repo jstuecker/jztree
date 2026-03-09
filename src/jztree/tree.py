@@ -3,14 +3,16 @@ import jax
 import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 from typing import Tuple, Any
+from dataclasses import replace
 
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList, LevelInfo
 from .data import get_num_total, get_pos, get_num, verify_ilist, same_width_int
 from .config import TreeConfig, RegularizationConfig
-from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, masked_to_dense
+from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits
 from .comm import send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
+from .jax_ext import concatenate_pytrees, separate_pytrees
 from .stats import statistics, stats_callback, AllocStats
 
 from jztree_cuda import ffi_tree, ffi_sort
@@ -357,33 +359,87 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
 def zsort_and_tree(
         part: Pos,
         cfg_tree: TreeConfig = TreeConfig(),
-        data: Any | None = None
+        data: Any | None = None,
+        ptype: jax.Array | None = None,
+        num_types: int | None = None
     ) -> Tuple[Pos, TreeHierarchy]:
     rank, ndev, axis_name = get_rank_info()
 
     npart_tot = get_num_total(part, default_to_length=(ndev==1))
+    dt = (data, ptype)
+
     if ndev > 1:
-        partz, dataz = distr_zsort(part, data=data, nsamp=cfg_tree.nsamp)
+        partz, dtz = distr_zsort(part, data=dt, nsamp=cfg_tree.nsamp)
     else:
         partz, isort = pos_zorder_sort(part)
-        dataz = tree_map_by_len(lambda x: x[isort], data, len(get_pos(partz)))
+        dtz = tree_map_by_len(lambda x: x[isort], dt, len(get_pos(partz)))
 
     if ndev > 1:
         top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
-        partz, dataz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, dataz=dataz)
+        partz, dtz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, dataz=dtz)
     else:
         lvl_bound = None
 
-    th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
-
-    if data is None:
-        return partz, th
+    if ptype is None:
+        th = build_tree_hierarchy(partz, cfg_tree, lvl_bound=lvl_bound)
     else:
-        return partz, dataz, th
+        th = build_tree_hierarchy(
+            partz, cfg_tree, lvl_bound=lvl_bound, ptype=dtz[1], num_types=num_types
+        )
+
+    out_part = [partz]
+    if data is not None:
+        out_part.append(dtz[0])
+    if ptype is not None:
+        out_part.append(dtz[1])
+    
+    return (*out_part, th)
+zsort_and_tree.jit = jax.jit(zsort_and_tree, static_argnames="cfg_tree")
 zsort_and_tree.smap = shard_map_constructor(
     zsort_and_tree, in_specs=(P(-1), None, P(-1)), static_argnames="cfg_tree"
 )
 
+def zsort_and_tree_multi_type(
+        part: Tuple[Pos, ...],
+        cfg_tree: TreeConfig = TreeConfig(),
+        data: Any | None = None
+    ) -> Tuple[Tuple[Pos, ...], TreeHierarchy]:
+    num_types = len(part)
+    size_of_type = tuple(len(get_pos(p)) for p in part)
+    num_of_type = jnp.array(tuple(get_num(p) for p in part))
+    
+    if data is not None:
+        part_stacked, data_stacked = concatenate_pytrees(tuple(zip(part, data)), num_of_type)
+    else:
+        part_stacked = concatenate_pytrees(part, num_of_type)
+        data_stacked = None
+    
+    if hasattr(part_stacked, "num"):
+        part_stacked.num = jnp.sum(num_of_type)
+    if hasattr(part_stacked, "num_total"):
+        part_stacked.num_total = sum(get_num_total(p, default_to_length=True) for p in part)
+
+    ptype = inverse_of_splits(cumsum_starting_with_zero(num_of_type), len(get_pos(part_stacked)))
+
+    partz_stacked, dataz_stacked, ptypez, th = zsort_and_tree(
+        part_stacked, cfg_tree=cfg_tree, data=data_stacked, ptype=ptype, num_types=num_types
+    )
+
+    part_data_z, num_of_type = separate_pytrees(
+        (partz_stacked, dataz_stacked), ptypez, out_sizes=size_of_type, num=get_num(partz_stacked)
+    )
+    partz, dataz = tuple(zip(*part_data_z)) # transpose
+    if hasattr(partz_stacked, "num"):
+        partz = tuple(replace(partz[t], num=num_of_type[t]) for t in range(num_types))
+
+    if data is not None:
+        return partz, dataz, th
+    else:
+        return partz, th
+zsort_and_tree_multi_type.jit = jax.jit(zsort_and_tree_multi_type, static_argnames="cfg_tree")
+zsort_and_tree_multi_type.smap = shard_map_constructor(
+    zsort_and_tree_multi_type, in_specs=(P(-1), None, P(-1)), static_argnames="cfg_tree"
+)
 
 def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True, block_size=32
                    ) -> PosMass:

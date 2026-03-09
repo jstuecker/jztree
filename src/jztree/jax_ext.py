@@ -70,9 +70,8 @@ def tree_map_by_len(fn, tree: Pytree, N: int, axis: int = 0) -> Pytree:
 
     return jax.tree_util.tree_map(lambda x: fn(x) if should_map(x) else x, tree)
 
-def concatenate_pytrees(*xnum):
-    assert len(xnum) % 2 == 0
-    xs, nums = xnum[::2], xnum[1::2]
+def concatenate_pytrees(xs, nums):
+    assert len(nums) == len(xs)
     num_keys = len(xs)
     
     treedef = jax.tree_util.tree_flatten(xs[0])[1]
