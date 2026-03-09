@@ -5,6 +5,8 @@ import pytest
 import numpy.testing as npt
 from jztree.config import TreeConfig
 from jztree.tree import get_node_geometry, search_sorted_z, pos_zorder_sort, build_tree_hierarchy
+from jztree_utils import ics
+import jztree as jz
 
 def test_tree_hierarchy(tree_hierarchy : TreeHierarchy):
     th = tree_hierarchy
@@ -47,6 +49,32 @@ def test_node_geometry(pos_mass_z: PosMass):
         if jnp.all(jnp.isfinite(ext[i])):
             assert jnp.any(cent[i] - ext[i]*0.25 >= pmin) or jnp.any(cent[i] + ext[i]*0.25 <= pmax)
 
+def test_multi_type_tree():
+    n1, n2 = int(1e5), int(2e5)
+    p1 = ics.uniform_particles(n1)
+    p2 = ics.uniform_particles(n2)
+
+    (p1z, p2z), th = jz.tree.zsort_and_tree_multi_type.jit((p1,p2), cfg_tree=jz.config.KNNConfig().tree)
+
+    ispl_t = th.ispl_l2p_per_type
+    assert jnp.all(ispl_t[0,1:] >= ispl_t[0,:-1])
+    assert jnp.all(ispl_t[1,1:] >= ispl_t[1,:-1])
+    assert ispl_t[0,-1] == n1
+    assert ispl_t[1,-1] == n2
+
+    nleaves = th.num(0)
+    cent = th.geom_cent.get(0, nleaves)
+    ext = jz.tree.lvl_to_ext(th.lvl.get(0, nleaves), th.info())
+
+    ileaf1 = jz.tools.inverse_of_splits(ispl_t[0], n1)
+    ileaf2 = jz.tools.inverse_of_splits(ispl_t[1], n2)
+
+    assert jnp.all(p1z.pos >= cent[ileaf1] - 0.5*ext[ileaf1])
+    assert jnp.all(p1z.pos <= cent[ileaf1] + 0.5*ext[ileaf1])
+
+    assert jnp.all(p2z.pos >= cent[ileaf2] - 0.5*ext[ileaf2])
+    assert jnp.all(p2z.pos <= cent[ileaf2] + 0.5*ext[ileaf2])
+    
 def get_pos(N=5555, xmin=0., xmax=1., seed=1):
     pos0 = jax.random.uniform(
         jax.random.PRNGKey(seed), (N,3), dtype=jnp.float32, minval=xmin, maxval=xmax

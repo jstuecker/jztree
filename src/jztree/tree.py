@@ -361,7 +361,8 @@ def zsort_and_tree(
         cfg_tree: TreeConfig = TreeConfig(),
         data: Any | None = None,
         ptype: jax.Array | None = None,
-        num_types: int | None = None
+        num_types: int | None = None,
+        shrink: bool = True
     ) -> Tuple[Pos, TreeHierarchy]:
     rank, ndev, axis_name = get_rank_info()
 
@@ -388,9 +389,9 @@ def zsort_and_tree(
         )
 
     out_part = [partz]
-    if data is not None:
+    if (data is not None) or not shrink:
         out_part.append(dtz[0])
-    if ptype is not None:
+    if (ptype is not None) or not shrink:
         out_part.append(dtz[1])
     
     return (*out_part, th)
@@ -422,7 +423,8 @@ def zsort_and_tree_multi_type(
     ptype = inverse_of_splits(cumsum_starting_with_zero(num_of_type), len(get_pos(part_stacked)))
 
     partz_stacked, dataz_stacked, ptypez, th = zsort_and_tree(
-        part_stacked, cfg_tree=cfg_tree, data=data_stacked, ptype=ptype, num_types=num_types
+        part_stacked, cfg_tree=cfg_tree, data=data_stacked, ptype=ptype, num_types=num_types,
+        shrink=False
     )
 
     part_data_z, num_of_type = separate_pytrees(
