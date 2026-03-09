@@ -427,11 +427,16 @@ class TreeHierarchy():
     geom_cent: PackedArray
     mass: PackedArray | None = None
     mass_cent: PackedArray | None = None
+
+    def splits_leaf_to_part(self, ptype: int = 0, size: int | None = None) -> jax.Array:
+        if size is None:
+            size = self.size()+1
+        return self.ispl_n2n.get(0, size)
     
     def npart(self, level: int, size=None) -> jax.Array:
         if size is None:
             size = self.size()
-        ispl_n2p = self.ispl_n2n.get(0)[self.ispl_n2l.get(level, size+1)]
+        ispl_n2p = self.splits_leaf_to_part()[self.ispl_n2l.get(level, size+1)]
         return ispl_n2p[1:] - ispl_n2p[:-1]
 
     def center(self) -> PackedArray:

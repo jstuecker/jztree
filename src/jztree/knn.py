@@ -230,7 +230,7 @@ def knn(
     # Build Leaf-leaf interaction list through dual tree walk
     ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
 
-    spl = th.ispl_n2n.get(0, th.size()+1)
+    spl = th.splits_leaf_to_part()
 
     # Request particle data for interactions
     if ndev > 1:

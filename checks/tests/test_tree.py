@@ -95,7 +95,7 @@ def test_leaf_search(pos_mass_z: PosMass, tree_hierarchy: TreeHierarchy):
     # Check whether we can learn the right leaf numbers just from the leaf positions
     nleaves = tree_hierarchy.lvl.num(0)
     xleaf = tree_hierarchy.geom_cent.get(0, nleaves)
-    spl = tree_hierarchy.ispl_n2n.get(0, nleaves+1)
+    spl = tree_hierarchy.splits_leaf_to_part(size=nleaves+1)
 
     ileaf = search_sorted_z(xleaf, pos_mass_z.pos, leaf_search=True)
     spl2 = jnp.searchsorted(ileaf, jnp.arange(len(xleaf)+1), side="left")

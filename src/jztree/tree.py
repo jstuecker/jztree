@@ -191,6 +191,8 @@ def detect_leaf_boundaries(
         alloc_size: int | None = None,
         cfg_reg: RegularizationConfig | None = None
     ) -> jax.Array:
+    """Leaves are defined so that no single type has more than leaf_size particles in each leaf"""
+    
     if alloc_size is None:
         alloc_size = int(div_ceil(len(posz), np.maximum(leaf_size//2, 1))) + 1
     if npart is None:

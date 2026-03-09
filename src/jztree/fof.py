@@ -392,7 +392,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
     lvl_max = th.info().max_lvl()
     node_lvl = th.lvl.append(jnp.full(size, lvl_max), nsup, fill_value=lvl_max, resize=True)
-    l2p = th.ispl_n2n.get(0, size+1)
+    l2p = th.splits_leaf_to_part(size=size+1)
 
     # initialize labels of top-level
     igroup = pcast_vma(jnp.arange(size), axis_name)
@@ -447,7 +447,7 @@ def _distr_fof_hierarchy(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         0, th.num_planes(), handle_plane, (igroup, ilist, link_data)
     )
 
-    node_data = FofNodeData(th.lvl.get(0, size), igroup, spl_n2n.get(0, size+1))
+    node_data = FofNodeData(th.lvl.get(0, size), igroup, spl=l2p)
 
     return node_data, ilist, link_data
 _distr_fof_hierarchy.jit = jax.jit(
