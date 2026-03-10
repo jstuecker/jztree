@@ -32,14 +32,15 @@ def test_segment_sort():
     print(f"Ids different {jnp.sum(inew != inew2)}/{len(inew)} (this is ok, if radii are identical):")
     assert jnp.all(rnew == r[inew2])
 
-def check_against_ckdtree(posz, k=16, boxsize=0.):
+def check_against_ckdtree(pos, k=16, boxsize=0., pos_query=None):
     cfg = KNNConfig()
-    # rnn, inn = knn_z(posz, k=k, boxsize=boxsize, cfg=cfg)
 
-    rnn, inn = jz.knn.knn(posz, k=k, boxsize=boxsize, result="rad_globalidx")
+    rnn, inn = jz.knn.knn(pos, k=k, boxsize=boxsize, result="rad_globalidx", part_query=pos_query)
 
-    tree = cKDTree(np.array(posz), boxsize=boxsize)
-    rnn2, inn2 = tree.query(np.array(posz), k=k)
+    tree = cKDTree(np.array(pos), boxsize=boxsize)
+    if pos_query is None:
+        pos_query = pos
+    rnn2, inn2 = tree.query(np.array(pos_query), k=k)
 
     assert jnp.all(rnn[:,1:] >= rnn[:,:-1]), "Radii should be sorted"
     assert jnp.allclose(rnn, rnn2, rtol=1e-4), "Only small differences may arise due to float64 precision in cKDTree"
@@ -48,7 +49,7 @@ def check_against_ckdtree(posz, k=16, boxsize=0.):
     nids_diff = jnp.sum(inn2[:,:-1] != inn[:,:-1])
     print(f"Ids different: {nids_diff}. Expected up to: {degenerate_radii}")
 
-    assert  nids_diff/len(posz) <= 1e-2, "A lot of ids are different (some expected due to degenerate radii)"
+    assert  nids_diff/len(pos_query) <= 1e-2, "A lot of ids are different (some expected due to degenerate radii)"
 
 @pytest.mark.skip_in_quick
 @pytest.mark.parametrize("xmin,xmax", [(-0.3,0.7), (0.1, 0.4), (0.25,0.5), (-1, 0), (0, 1e6), (-1, 1), (-0.5, 1.)])
@@ -91,6 +92,12 @@ def test_npart(npart):
     posz, idz = jz.tree.pos_zorder_sort.jit(get_pos(N=int(npart), xmin=-1., xmax=1.))
 
     check_against_ckdtree(posz)
+
+def test_query():
+    pos = get_pos(N=int(1e5), xmin=-1., xmax=1.)
+    posq = get_pos(N=int(1.3e5), xmin=-0.5, xmax=0.5)
+
+    check_against_ckdtree(pos, pos_query=posq)
 
 def test_io_order():
     # tests (and demonstrates) the different output/input ordering options

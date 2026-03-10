@@ -732,8 +732,7 @@ def build_tree_hierarchy(
         cfg_tree: TreeConfig,
         lvl_bound: jax.Array | None = None,
         ptype: jax.Array | None = None,
-        num_types: jax.Array | None = None,
-        npart_tot: int | None = None
+        num_types: jax.Array | None = None
     ) -> TreeHierarchy:
     """Builds a tree hierarchy from z-order positions
 
@@ -755,8 +754,7 @@ def build_tree_hierarchy(
     rank, ndev, axis_name = get_rank_info()
 
     posz = get_pos(part)
-    if npart_tot is None:
-        npart_tot = get_num_total(part, default_to_length=(ndev==1))
+    npart_tot = get_num_total(part, default_to_length=(ndev==1))
     np_per_dev = npart_tot // ndev # static estimate of number of unpadded-particles
     npart = get_num(part, default_to_nancount=True)
 

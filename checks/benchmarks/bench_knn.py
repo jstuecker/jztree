@@ -15,7 +15,7 @@ def bench_knn_steps(jax_bench, pos):
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
 
     posz, idz = jb.measure(fn_jit=jz.tree.pos_zorder_sort.jit, x=pos, tag="zsort")[1]
-    th = jb.measure(fn_jit=jz.knn.build_tree_hierarchy.jit, tag="tree",
+    th = jb.measure(fn_jit=jz.tree.build_tree_hierarchy.jit, tag="tree",
                     part=posz, cfg_tree=cfg.tree)[1]
     
     ilist = jb.measure(fn_jit=jz.knn._knn_dual_walk.jit, tag="treewalk",
@@ -56,6 +56,24 @@ def bench_knn_N(jax_bench, N):
 
         jb.measure(fn_jit=f.jit, pos=pos, k=4, tag="jaxkd_cuda_k4")
         jb.measure(fn_jit=f.jit, pos=pos, k=16, tag="jaxkd_cuda_k16")
+
+@pytest.mark.shrink_in_quick(keep_index=1)
+@pytest.mark.parametrize("query_frac", [0.2,1.0,5.0])
+def bench_knn_query(jax_bench, query_frac):
+    N = int(1e6)
+    jb = jax_bench(jit_rounds=5, jit_loops=5, jit_warmup=1)
+
+    cfg = jz.config.KNNConfig(alloc_fac_ilist=300.)
+
+    pos = jax.random.uniform(jax.random.key(0), (int(N), 3), dtype=jnp.float32)
+    posq = jax.random.uniform(jax.random.key(0), (int(N*query_frac), 3), dtype=jnp.float32)
+
+    jb.measure(fn_jit=jz.knn.knn.jit, part=pos, part_query=posq, k=16, cfg=cfg, tag="equal_distr")
+
+    posq = jax.random.uniform(
+        jax.random.key(0), (int(N*query_frac), 3), dtype=jnp.float32, minval=0.3, maxval=0.8
+    )
+    jb.measure(fn_jit=jz.knn.knn.jit, part=pos, part_query=posq, k=16, cfg=cfg, tag="diff_distr")
 
 def bench_knn_setup(jax_bench):
     N = 1e6

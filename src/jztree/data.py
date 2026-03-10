@@ -436,10 +436,10 @@ class TreeHierarchy():
         return self.ispl_l2p_per_type[ptype][:size]
     # self.ispl_n2n.get(0, size)
     
-    def npart(self, level: int, size=None) -> jax.Array:
+    def npart(self, level: int, ptype: int = 0, size=None) -> jax.Array:
         if size is None:
             size = self.size()
-        ispl_n2p = self.splits_leaf_to_part()[self.ispl_n2l.get(level, size+1)]
+        ispl_n2p = self.splits_leaf_to_part(ptype)[self.ispl_n2l.get(level, size+1)]
         return ispl_n2p[1:] - ispl_n2p[:-1]
 
     def center(self) -> PackedArray:
