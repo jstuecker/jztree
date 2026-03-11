@@ -8,7 +8,7 @@ from jax.sharding import PartitionSpec as P
 
 from .config import KNNConfig
 from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierarchy, DistrKNNData, RankIdx
-from .data import Pos, RankIdx, get_pos, get_num
+from .data import Pos, RankIdx, get_pos, get_num, get_num_total
 from .tree import pos_zorder_sort, grouped_dense_interaction_list, zsort_and_tree_multi_type
 from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list, zsort_and_tree
 from .tools import inverse_indices, inverse_of_splits, masked_to_dense, masked_scatter, masked_inverse
@@ -215,47 +215,33 @@ def knn(
         )
         return ridx, get_num(part, default_to_length=(ndev==1))
 
-    # Sort particles and build tree:
-    # Depending on which output order is requested we need to change how we keep track
-    # of the origin.
-    # Depending on whether we have query particles separate from the source particles, we
-    # need to sort and build the tree with only one or jointly with two particle populations.
+    origin, num_origin = init_origin(part)
+
+    # Reorder particles, build tree and keep track of the original task and index of each particle
     if th is not None:
-        assert part_query is None, "Querying with pre-sorted particles not supported"
-        partz = part # if we have a tree already, particles need to be sorted
-        origin, num_origin = init_origin(part)
+        assert part_query is None, "Querying with pre-sorted particles is not supported yet"
+        partz = partz_q = part
         origin_q, num_origin_q = origin, num_origin
-    elif (output_order == "input") and (part_query is None): 
-        origin, num_origin = init_origin(part) # track pre-sort origin
+    elif part_query is None:
         partz, origin, th = zsort_and_tree(part, cfg.tree, data=origin)
         partz_q, origin_q, num_origin_q = partz, origin, num_origin
-    elif (output_order == "input") and (part_query is not None):
-        origin, num_origin = init_origin(part)
+    else:
         origin_q, num_origin_q = init_origin(part_query)
         (partz, partz_q), (origin, origin_q), th = zsort_and_tree_multi_type(
             (part, part_query), cfg_tree=cfg.tree, data=(origin, origin_q)
         )
-    elif (output_order == "z") and (part_query is None):
-        partz, th = zsort_and_tree(part, cfg.tree)
-        origin, num_origin = init_origin(partz) # track post-sort origin
-        partz_q, origin_q, num_origin_q = partz, origin, num_origin
-    elif (output_order == "z") and (part_query is not None):
-        (partz, partz_q), th = zsort_and_tree_multi_type(
-            (part, part_query), cfg_tree=cfg.tree
-        )
-        origin, num_origin = init_origin(part)
-        origin_q, num_origin_q = init_origin(part_query)
-    else:
-        raise ValueError("Got an unexpected i/o combination")
+
+    if output_order == "z": # overwrite origin with the z-order location
+        origin, num_origin = init_origin(partz)
+        origin_q, num_origin_q = init_origin(partz_q)
 
     origin_cts = jax.lax.all_gather(num_origin, axis_name=axis_name)
 
     # Build Leaf-leaf interaction list through dual tree walk
     ilist = _knn_dual_walk(th, k, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist)
 
-    spl = th.splits_leaf_to_part(ptype=0)
-
     # Request particle data for interactions
+    spl = th.splits_leaf_to_part(ptype=0)
     if ndev > 1:
         (partz_req, origin_req), spl, dev_spl = all_to_all_request_children(
             ilist.dev_spl, ilist.ids, spl, (partz, origin), axis_name=axis_name,
@@ -270,78 +256,65 @@ def knn(
         ilist = ilist.without_remote_query_points(rank)
     else:
         partz_req, origin_req = partz, origin
-    
-    if part_query is None:
-        partz_q = partz # Could use partz here if I remove unused nodes from ilist
-        spl_q = th.splits_leaf_to_part(ptype=0)
-    else:
-        spl_q = th.splits_leaf_to_part(ptype=1)
+
+    spl_q = th.splits_leaf_to_part(ptype = 0 if part_query is None else 1)
 
     # Evaluate knn
     rnnz, innz = _knn_leaf2leaf(
         ilist, spl, get_pos(partz_req), k=k, boxsize=boxsize, splQ=spl_q, xQ=get_pos(partz_q)
     )
     
-    res = []
-    if type(result) == str:
-        res_keys = result.split("_")
-        for key in res_keys:
-            if key == "rad":
-                res.append(rnnz)
-            elif key == "drad": # Same as rad, but result will be differentible
-                x, xq = get_pos(partz_req), get_pos(partz_q)
-                res.append(jnp.linalg.norm(xq[:,None] - x[innz], axis=-1))
-            elif key == "rankidx":
-                nn_origin = jax.tree.map(lambda x: x[innz], origin_req)
-                res.append(nn_origin)
-            elif key == "globalidx":
-                if (ndev > 1) and (part.num_total >= 2**31):
-                    raise ValueError("I have > 2**31 particles, globalidx will overflow. Use rankidx instead!")
-                # dtype = jnp.int64 if ndev > 1 else jnp.int32  !!! address this later
-                dtype = jnp.int32
-                # with jax.enable_x64():
-                if ndev > 1:
-                    dev_offsets = jnp.cumsum(origin_cts, dtype=dtype) - origin_cts.astype(dtype)
-                    gidx = dev_offsets[origin_req.rank].astype(dtype) + origin_req.idx.astype(dtype)
-                    res.append(gidx[innz])
-                else:
-                    res.append(origin_req.idx[innz])
-            elif key == "part":
-                res.append(tree_map_by_len(lambda x: x[innz], partz_req, len(origin_req.idx)))
-            elif key == "reduce":
-                assert reduce_func is not None, "Please provide reduce_func if using 'reduce'"
-                x = reduce_func(part=partz_req, rnn=rnnz, inn=innz, origin=origin)
-                assert len(x) == len(rnnz)
-                res.append(x)
-            elif hasattr(partz_req, key):
-                arr = getattr(partz_req, key)
-                res.append(tree_map_by_len(lambda x: x[innz], arr, len(origin_req.idx)))
-            else:
-                raise ValueError(f"Invalid result key {key}")
-    else:
-        raise NotImplementedError()
+    # Infer requested result data
+    if type(result) != str:
+        raise NotImplementedError("result must be a string")
     
-    if len(res) == 1:
-        res = res[0]
-    else:
-        res = tuple(res)
+    res = []
+    res_keys = result.split("_")
+    for key in res_keys:
+        if key == "rad":
+            res.append(rnnz)
+        elif key == "drad": # Same as rad, but result will be differentible
+            x, xq = get_pos(partz_req), get_pos(partz_q)
+            res.append(jnp.linalg.norm(xq[:,None] - x[innz], axis=-1))
+        elif key == "rankidx":
+            res.append(jax.tree.map(lambda x: x[innz], origin_req))
+        elif key == "globalidx":
+            if get_num_total(part, default_to_length=(ndev==1)) >= 2**31:
+                raise ValueError("I have > 2**31 particles, globalidx will overflow. Use rankidx instead!")
+            if ndev > 1:
+                dev_offsets = jnp.cumsum(origin_cts) - origin_cts
+                gidx = dev_offsets[origin_req.rank] + origin_req.idx
+                res.append(gidx[innz])
+            else:
+                res.append(origin_req.idx[innz])
+        elif key == "part":
+            res.append(tree_map_by_len(lambda x: x[innz], partz_req, len(origin_req.idx)))
+        elif key == "reduce":
+            assert reduce_func is not None, "Please provide reduce_func if using 'reduce'"
+            x = reduce_func(part=partz_req, rnn=rnnz, inn=innz, origin=origin)
+            assert (len(x) == len(rnnz)) or (output_order=="z")
+            res.append(x)
+        elif hasattr(partz_req, key):
+            arr = getattr(partz_req, key)
+            res.append(tree_map_by_len(lambda x: x[innz], arr, len(origin_req.idx)))
+        else:
+            raise ValueError(f"Invalid result key {key}")
+    
+    res = tuple(res) if len(res) > 1 else res[0]
 
-    if output_order == "z":
-        return res
-    elif output_order == "input":
+    if output_order == "input":
         if ndev > 1:
             (res, idx), dev_spl = all_to_all_with_irank(
                 origin_q.rank, (res, origin_q.idx), num=partz_q.num, axis_name=axis_name,
                 err_hint="\nThis should never fail..."
             )
-            num = dev_spl[-1]
         else:
-            num, idx = num_origin_q, origin_q.idx
-        inverse = masked_inverse(idx, mask=jnp.arange(len(idx)) < num)
+            idx = origin_q.idx
+        inverse = masked_inverse(idx, mask=jnp.arange(len(idx)) < num_origin_q)
 
-        return tree_map_by_len(lambda x: x[inverse], res, len(origin_q.idx))
-    else:
-        raise ValueError(f"Unknown output order {output_order}")
+        res = tree_map_by_len(lambda x: x[inverse], res, len(origin_q.idx))
+    
+    return res
 knn.jit = jax.jit(knn,
     static_argnames=("k", "boxsize", "result", "reduce_func", "output_order", "cfg")
 )
