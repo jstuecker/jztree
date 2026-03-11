@@ -20,6 +20,10 @@ def bench_knn_steps(jax_bench, pos):
     
     ilist = jb.measure(fn_jit=jz.knn._knn_dual_walk.jit, tag="treewalk",
                        th=th, k=k, alloc_fac_ilist=cfg.alloc_fac_ilist)[1]
+    
+    jb.measure(fn_jit=jz.knn._segment_sort.jit, tag="ilist_sort",
+               spl=ilist.ispl, key=ilist.rad2, val=ilist.iother)[1]
+
     rnn, inn = jb.measure(fn_jit=jz.knn._knn_leaf2leaf.jit, tag="leaf2leaf",
                           ilist=ilist, splT=th.splits_leaf_to_part(), xT=posz, k=k)[1]
     inverse = jnp.zeros_like(idz).at[idz].set(jnp.arange(len(idz)))
