@@ -397,7 +397,7 @@ def zsort_and_tree(
     return (*out_part, th)
 zsort_and_tree.jit = jax.jit(zsort_and_tree, static_argnames="cfg_tree")
 zsort_and_tree.smap = shard_map_constructor(
-    zsort_and_tree, in_specs=(P(-1), None, P(-1)), static_argnames="cfg_tree"
+    zsort_and_tree, in_specs=(P(-1), None, P(-1), P(-1), None, None), static_argnames="cfg_tree"
 )
 
 def zsort_and_tree_multi_type(

@@ -359,6 +359,6 @@ knn.jit = jax.jit(knn,
     static_argnames=("k", "boxsize", "result", "reduce_func", "output_order", "cfg")
 )
 knn.smap = shard_map_constructor(knn,
-    in_specs=(P(-1), None, None, P(-1), None, None, None, None),
+    in_specs=(P(-1), None, None, P(-1), P(-1), None, None, None, None),
     static_argnames=("k", "boxsize", "result", "reduce_func", "output_order", "cfg")
 )
