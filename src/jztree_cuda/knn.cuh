@@ -281,7 +281,8 @@ __global__ void KnnLeaf2LeafKernel(
         
         if(qoff + threadIdx.x < iqend) {
             #pragma unroll
-            for(size_t dk = 0; dk < min(kmax, ksize-koffset); dk++) {
+            for(size_t dk = 0; dk < kmax; dk++) {
+                if(dk >= ksize-koffset) continue;
                 size_t iout = (size_t)ipartQ * (size_t)ksize + (size_t)koffset + dk;
                 knn_rad[iout] = sqrt(nearestK.r2s[dk]);
                 knn_id[iout] = nearestK.ids[dk];
