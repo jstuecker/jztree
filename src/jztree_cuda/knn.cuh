@@ -635,7 +635,7 @@ std::string KnnNode2Node(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
     }
-    if(k <= 32) {
+    else if(k <= 32) {
         KnnNode2NodeFindRmax<16,dim,tvec><<<size_parents, blocksize_fill, smem_alloc_size, stream>>>(
             par_ilist, parent_spl, nodes, nodes_npart, node_rmax2, k, boxsize
         );
