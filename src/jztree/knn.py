@@ -123,6 +123,7 @@ def _segment_sort(spl, key, val, smem_size=512):
         spl, key, val, smem_size=np.uint64(smem_size)
     )
     return key_sorted, val_sorted
+_segment_sort.jit = jax.jit(_segment_sort, static_argnames="smem_size")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          Dual Tree Walk                                          #
@@ -179,7 +180,7 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
         
         return ilist
 
-    ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist)
+    ilist = jax.lax.fori_loop(0, nlevels, handle_level, ilist, unroll=True)
     
     return ilist
 _knn_dual_walk.jit = jax.jit(_knn_dual_walk, static_argnames=["k", "boxsize", "alloc_fac_ilist"])
