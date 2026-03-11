@@ -203,13 +203,11 @@ def knn(
         output_order: str = "input",
         cfg: KNNConfig = KNNConfig()
     ):
-    assert output_order in ("z", "input", "remote")
+    assert output_order in ("z", "input")
 
     rank, ndev, axis_name = get_rank_info()
 
-    size = len(get_pos(part))
-
-    def define_origin(part):
+    def init_origin(part):
         size = len(get_pos(part))
         ridx = RankIdx(
             rank = jnp.full(size, rank, dtype=jnp.int32) if ndev > 1 else None,
@@ -225,28 +223,28 @@ def knn(
     if th is not None:
         assert part_query is None, "Querying with pre-sorted particles not supported"
         partz = part # if we have a tree already, particles need to be sorted
-        origin, num_origin = define_origin(part)
+        origin, num_origin = init_origin(part)
         origin_q, num_origin_q = origin, num_origin
     elif (output_order == "input") and (part_query is None): 
-        origin, num_origin = define_origin(part) # track pre-sort origin
+        origin, num_origin = init_origin(part) # track pre-sort origin
         partz, origin, th = zsort_and_tree(part, cfg.tree, data=origin)
         partz_q, origin_q, num_origin_q = partz, origin, num_origin
     elif (output_order == "input") and (part_query is not None):
-        origin, num_origin = define_origin(part)
-        origin_q, num_origin_q = define_origin(part_query)
+        origin, num_origin = init_origin(part)
+        origin_q, num_origin_q = init_origin(part_query)
         (partz, partz_q), (origin, origin_q), th = zsort_and_tree_multi_type(
             (part, part_query), cfg_tree=cfg.tree, data=(origin, origin_q)
         )
-    elif (output_order in ("z", "remote")) and (part_query is None):
+    elif (output_order == "z") and (part_query is None):
         partz, th = zsort_and_tree(part, cfg.tree)
-        origin, num_origin = define_origin(partz) # track post-sort origin
+        origin, num_origin = init_origin(partz) # track post-sort origin
         partz_q, origin_q, num_origin_q = partz, origin, num_origin
-    elif (output_order in ("z", "remote")) and (part_query is not None):
+    elif (output_order == "z") and (part_query is not None):
         (partz, partz_q), th = zsort_and_tree_multi_type(
             (part, part_query), cfg_tree=cfg.tree
         )
-        origin, num_origin = define_origin(part)
-        origin_q, num_origin_q = define_origin(part_query)
+        origin, num_origin = init_origin(part)
+        origin_q, num_origin_q = init_origin(part_query)
     else:
         raise ValueError("Got an unexpected i/o combination")
 
@@ -268,20 +266,20 @@ def knn(
         stats_callback("allocation", AllocStats.record_filled_part_interactions,
             dev_spl[-1], len(origin_req.idx)
         )
+
+        ilist = ilist.without_remote_query_points(rank)
     else:
         partz_req, origin_req = partz, origin
-
+    
     if part_query is None:
-        partz_q = partz_req # Could use partz here if I remove unused nodes from ilist
-        spl_q = spl
+        partz_q = partz # Could use partz here if I remove unused nodes from ilist
+        spl_q = th.splits_leaf_to_part(ptype=0)
     else:
-        assert ndev == 1, "Not yet handling multi-GPU here. Need to align nodes with ilist"
         spl_q = th.splits_leaf_to_part(ptype=1)
 
     # Evaluate knn
     rnnz, innz = _knn_leaf2leaf(
-        ilist, spl, get_pos(partz_req), k=k, boxsize=boxsize,
-        splQ = spl_q, xQ=get_pos(partz_q)
+        ilist, spl, get_pos(partz_req), k=k, boxsize=boxsize, splQ=spl_q, xQ=get_pos(partz_q)
     )
     
     res = []
@@ -327,24 +325,13 @@ def knn(
         res = res[0]
     else:
         res = tuple(res)
-    
-    # Now put results in desired output order
-    if output_order == "remote":
-        return res
-
-    if ndev > 1: # remove remote entries (!!! can remove this after separating query points)
-        idx = jnp.arange(len(origin_req.idx), dtype=jnp.int32)
-        mask = (idx >= dev_spl[rank]) & (idx < dev_spl[rank+1])
-        res, num = masked_to_dense(res, mask)
 
     if output_order == "z":
         return res
     elif output_order == "input":
         if ndev > 1:
-            print("Warning... need to fix and test this")
             (res, idx), dev_spl = all_to_all_with_irank(
-                # origin_q.rank, (res, origin_q.idx), num=num, axis_name=axis_name,
-                origin.rank, (res, origin.idx), num=num, axis_name=axis_name,
+                origin_q.rank, (res, origin_q.idx), num=partz_q.num, axis_name=axis_name,
                 err_hint="\nThis should never fail..."
             )
             num = dev_spl[-1]

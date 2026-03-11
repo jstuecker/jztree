@@ -29,3 +29,23 @@ def test_distr_knn():
 
     assert jnp.all(inn == inn_ref)
     assert jnp.allclose(rnn, rnn_ref, rtol=1e-6, atol=1e-6)
+
+@pytest.mark.shrink_in_quick
+@pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")
+def test_distr_query():
+    cfg = KNNConfig()
+    cfg.tree.alloc_fac_nodes = 2.0
+
+    part = ics.uniform_particles.smap(mesh, jit=True)(1000000, npad=400000)
+    partq = ics.uniform_particles.smap(mesh, jit=True)(1200000, npad=500000, seed=100)
+    
+    rnn, inn = knn.knn.smap(mesh, jit=True)(
+        part, k=4, output_order="input", result="rad_globalidx", part_query=partq
+    )
+    rnn, inn = squeeze_any((rnn, inn), rnn.shape[1], partq.num, partq.num_total)
+
+    part_fl, partq_fl = squeeze_particles(part), squeeze_particles(partq)
+    rnn_ref, inn_ref = knn.knn.jit(part_fl, k=4, cfg=cfg, part_query=partq_fl)
+
+    assert jnp.all(inn == inn_ref)
+    assert jnp.allclose(rnn, rnn_ref, rtol=1e-6, atol=1e-6)

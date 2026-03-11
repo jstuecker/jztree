@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import List, Iterator
 import jax
@@ -493,6 +493,20 @@ class InteractionList:
         else:
             return i0, i1
     
+    def without_remote_query_points(self, rank: int) -> 'InteractionList':
+        """
+        By default the interaction list carries remote and local points both on ispl so that
+        query and source indices are consistent.
+        However, this function redefines the interaction list so that ispl is only defined for 
+        local query points, but interaction indices may still point to remote points
+        """
+        idx = jnp.arange(len(self.ispl))
+        mask = (idx >= self.dev_spl[rank]) & (idx <= self.dev_spl[rank+1])
+        ispl_new = jnp.compress(
+            mask, self.ispl, size=len(self.ispl), fill_value=self.ispl[self.dev_spl[rank+1]]
+        )
+        return replace(self, ispl=ispl_new)
+
     def filter(self, mask: jax.Array, size: int | None = None) -> 'InteractionList':
         """Returns a filtered interaction list according to the boolean mask"""
         if size is None:
