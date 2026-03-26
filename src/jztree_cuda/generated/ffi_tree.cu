@@ -176,6 +176,8 @@ ffi::Error FindNodeBoundariesFFIHost(
     using TFunc = const void*;
 
     static const std::map<TTuple, TFunc> instance_map = {
+        { {1, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<1, float>) },
+        { {1, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<1, double>) },
         { {2, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<2, float>) },
         { {2, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<2, double>) },
         { {3, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<3, float>) },
@@ -189,7 +191,7 @@ ffi::Error FindNodeBoundariesFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FindNodeBoundariesFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(1, float), (1, double), (2, float), (2, double), (3, float), (3, double)"
         );
     }
     const void* instance = it->second;

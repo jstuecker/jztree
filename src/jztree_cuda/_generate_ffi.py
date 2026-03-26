@@ -138,7 +138,7 @@ functions["FlagLeafBoundaries"].par["size_part"].expression = "posz.dimensions()
 functions["FlagLeafBoundaries"].grid_size_expression = "div_ceil(size_part+1, block_size)"
 functions["FlagLeafBoundaries"].smem_size_expression = "(block_size + 2*scan_size + 1) * (sizeof(int32_t) + sizeof(uint8_t))"
 
-add_dim_dtype_templates(functions["FindNodeBoundaries"], "pos_in")
+add_dim_dtype_templates(functions["FindNodeBoundaries"], "pos_in", dimensions=(1,2,3))
 functions["FindNodeBoundaries"].par["size_nodes"].expression = "nodes_levels->element_count()"
 functions["FindNodeBoundaries"].grid_size_expression = "div_ceil(size_nodes, block_size)"
 
