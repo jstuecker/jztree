@@ -11,11 +11,11 @@ knn_types = ("float", "double")
 sort_types = ("float", "double", "int32_t", "int64_t")
 
 # Supported dimensions
-dimensions = (2,3)
+dimensions = (2,3,4,5,6,7,8,9,10)
 
 # knn
 kmax_instance_values = (4, 8, 16, 32)
-knn_dim = (2,3)
+knn_dim = (2,3,4,5,6,7,8,9,10)
 
 fof_types = ("float", "double")
 fof_dim = (2,3)
@@ -138,7 +138,7 @@ functions["FlagLeafBoundaries"].par["size_part"].expression = "posz.dimensions()
 functions["FlagLeafBoundaries"].grid_size_expression = "div_ceil(size_part+1, block_size)"
 functions["FlagLeafBoundaries"].smem_size_expression = "(block_size + 2*scan_size + 1) * (sizeof(int32_t) + sizeof(uint8_t))"
 
-add_dim_dtype_templates(functions["FindNodeBoundaries"], "pos_in", dimensions=(1,2,3))
+add_dim_dtype_templates(functions["FindNodeBoundaries"], "pos_in", dimensions=(1,) + dimensions)
 functions["FindNodeBoundaries"].par["size_nodes"].expression = "nodes_levels->element_count()"
 functions["FindNodeBoundaries"].grid_size_expression = "div_ceil(size_nodes, block_size)"
 

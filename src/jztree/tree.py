@@ -75,7 +75,7 @@ def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
     # assert x.dtype == jnp.float32
     assert x.ndim == 2
     dim = x.shape[-1]
-    assert dim in (2,3)
+    assert dim in (2,3,4,5,6,7,8,9,10)
 
     idtype = same_width_int(x.dtype)
 

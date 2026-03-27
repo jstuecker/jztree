@@ -78,7 +78,21 @@ ffi::Error FlagLeafBoundariesFFIHost(
         { {2, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<2, float>) },
         { {2, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<2, double>) },
         { {3, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<3, float>) },
-        { {3, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<3, double>) }
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<3, double>) },
+        { {4, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<4, float>) },
+        { {4, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<4, double>) },
+        { {5, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<5, float>) },
+        { {5, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<5, double>) },
+        { {6, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<6, float>) },
+        { {6, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<6, double>) },
+        { {7, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<7, float>) },
+        { {7, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<7, double>) },
+        { {8, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<8, float>) },
+        { {8, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<8, double>) },
+        { {9, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<9, float>) },
+        { {9, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<9, double>) },
+        { {10, DT::F32}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<10, float>) },
+        { {10, DT::F64}, reinterpret_cast<TFunc>(&FlagLeafBoundaries<10, double>) }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -88,7 +102,7 @@ ffi::Error FlagLeafBoundariesFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FlagLeafBoundariesFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (2, double), (3, float), (3, double), (4, float), (4, double), (5, float), (5, double), (6, float), (6, double), (7, float), (7, double), (8, float), (8, double), (9, float), (9, double), (10, float), (10, double)"
         );
     }
     const void* instance = it->second;
@@ -181,7 +195,21 @@ ffi::Error FindNodeBoundariesFFIHost(
         { {2, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<2, float>) },
         { {2, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<2, double>) },
         { {3, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<3, float>) },
-        { {3, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<3, double>) }
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<3, double>) },
+        { {4, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<4, float>) },
+        { {4, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<4, double>) },
+        { {5, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<5, float>) },
+        { {5, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<5, double>) },
+        { {6, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<6, float>) },
+        { {6, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<6, double>) },
+        { {7, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<7, float>) },
+        { {7, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<7, double>) },
+        { {8, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<8, float>) },
+        { {8, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<8, double>) },
+        { {9, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<9, float>) },
+        { {9, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<9, double>) },
+        { {10, DT::F32}, reinterpret_cast<TFunc>(&FindNodeBoundaries<10, float>) },
+        { {10, DT::F64}, reinterpret_cast<TFunc>(&FindNodeBoundaries<10, double>) }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -191,7 +219,7 @@ ffi::Error FindNodeBoundariesFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in FindNodeBoundariesFFIHost -- Only supporting:\n"\
-            "(1, float), (1, double), (2, float), (2, double), (3, float), (3, double)"
+            "(1, float), (1, double), (2, float), (2, double), (3, float), (3, double), (4, float), (4, double), (5, float), (5, double), (6, float), (6, double), (7, float), (7, double), (8, float), (8, double), (9, float), (9, double), (10, float), (10, double)"
         );
     }
     const void* instance = it->second;
@@ -293,10 +321,38 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
         { {true, 2, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 2, double> },
         { {true, 3, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 3, float> },
         { {true, 3, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 3, double> },
+        { {true, 4, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 4, float> },
+        { {true, 4, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 4, double> },
+        { {true, 5, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 5, float> },
+        { {true, 5, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 5, double> },
+        { {true, 6, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 6, float> },
+        { {true, 6, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 6, double> },
+        { {true, 7, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 7, float> },
+        { {true, 7, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 7, double> },
+        { {true, 8, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 8, float> },
+        { {true, 8, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 8, double> },
+        { {true, 9, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 9, float> },
+        { {true, 9, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 9, double> },
+        { {true, 10, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 10, float> },
+        { {true, 10, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<true, 10, double> },
         { {false, 2, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 2, float> },
         { {false, 2, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 2, double> },
         { {false, 3, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 3, float> },
-        { {false, 3, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 3, double> }
+        { {false, 3, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 3, double> },
+        { {false, 4, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 4, float> },
+        { {false, 4, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 4, double> },
+        { {false, 5, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 5, float> },
+        { {false, 5, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 5, double> },
+        { {false, 6, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 6, float> },
+        { {false, 6, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 6, double> },
+        { {false, 7, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 7, float> },
+        { {false, 7, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 7, double> },
+        { {false, 8, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 8, float> },
+        { {false, 8, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 8, double> },
+        { {false, 9, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 9, float> },
+        { {false, 9, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 9, double> },
+        { {false, 10, DT::F32}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 10, float> },
+        { {false, 10, DT::F64}, &GetBoundaryExtendPerLevelDispatchWrapper<false, 10, double> }
     };
 
     const TTuple key = TTuple(left, dim, tvec);
@@ -306,7 +362,7 @@ ffi::Error GetBoundaryExtendPerLevelFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (left, dim, tvec)"\
             " in GetBoundaryExtendPerLevelFFIHost -- Only supporting:\n"\
-            "(true, 2, float), (true, 2, double), (true, 3, float), (true, 3, double), (false, 2, float), (false, 2, double), (false, 3, float), (false, 3, double)"
+            "(true, 2, float), (true, 2, double), (true, 3, float), (true, 3, double), (true, 4, float), (true, 4, double), (true, 5, float), (true, 5, double), (true, 6, float), (true, 6, double), (true, 7, float), (true, 7, double), (true, 8, float), (true, 8, double), (true, 9, float), (true, 9, double), (true, 10, float), (true, 10, double), (false, 2, float), (false, 2, double), (false, 3, float), (false, 3, double), (false, 4, float), (false, 4, double), (false, 5, float), (false, 5, double), (false, 6, float), (false, 6, double), (false, 7, float), (false, 7, double), (false, 8, float), (false, 8, double), (false, 9, float), (false, 9, double), (false, 10, float), (false, 10, double)"
         );
     }
     GetBoundaryExtendPerLevelDispatchFn instance = it->second;
@@ -409,7 +465,21 @@ ffi::Error GetNodeGeometryFFIHost(
         { {2, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<2, float>) },
         { {2, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<2, double>) },
         { {3, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<3, float>) },
-        { {3, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<3, double>) }
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<3, double>) },
+        { {4, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<4, float>) },
+        { {4, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<4, double>) },
+        { {5, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<5, float>) },
+        { {5, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<5, double>) },
+        { {6, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<6, float>) },
+        { {6, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<6, double>) },
+        { {7, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<7, float>) },
+        { {7, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<7, double>) },
+        { {8, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<8, float>) },
+        { {8, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<8, double>) },
+        { {9, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<9, float>) },
+        { {9, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<9, double>) },
+        { {10, DT::F32}, reinterpret_cast<TFunc>(&GetNodeGeometry<10, float>) },
+        { {10, DT::F64}, reinterpret_cast<TFunc>(&GetNodeGeometry<10, double>) }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -419,7 +489,7 @@ ffi::Error GetNodeGeometryFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in GetNodeGeometryFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (2, double), (3, float), (3, double), (4, float), (4, double), (5, float), (5, double), (6, float), (6, double), (7, float), (7, double), (8, float), (8, double), (9, float), (9, double), (10, float), (10, double)"
         );
     }
     const void* instance = it->second;
@@ -503,7 +573,21 @@ ffi::Error CenterOfMassFFIHost(
         { {2, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<2, float>) },
         { {2, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<2, double>) },
         { {3, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<3, float>) },
-        { {3, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<3, double>) }
+        { {3, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<3, double>) },
+        { {4, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<4, float>) },
+        { {4, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<4, double>) },
+        { {5, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<5, float>) },
+        { {5, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<5, double>) },
+        { {6, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<6, float>) },
+        { {6, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<6, double>) },
+        { {7, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<7, float>) },
+        { {7, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<7, double>) },
+        { {8, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<8, float>) },
+        { {8, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<8, double>) },
+        { {9, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<9, float>) },
+        { {9, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<9, double>) },
+        { {10, DT::F32}, reinterpret_cast<TFunc>(&CenterOfMass<10, float>) },
+        { {10, DT::F64}, reinterpret_cast<TFunc>(&CenterOfMass<10, double>) }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -513,7 +597,7 @@ ffi::Error CenterOfMassFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in CenterOfMassFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (2, double), (3, float), (3, double), (4, float), (4, double), (5, float), (5, double), (6, float), (6, double), (7, float), (7, double), (8, float), (8, double), (9, float), (9, double), (10, float), (10, double)"
         );
     }
     const void* instance = it->second;

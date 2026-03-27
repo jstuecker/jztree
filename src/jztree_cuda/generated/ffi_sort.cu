@@ -86,7 +86,35 @@ ffi::Error PosZorderSortFFIHost(
         { {3, DT::F32}, &PosZorderSortDispatchWrapper<3, float> },
         { {3, DT::F64}, &PosZorderSortDispatchWrapper<3, double> },
         { {3, DT::S32}, &PosZorderSortDispatchWrapper<3, int32_t> },
-        { {3, DT::S64}, &PosZorderSortDispatchWrapper<3, int64_t> }
+        { {3, DT::S64}, &PosZorderSortDispatchWrapper<3, int64_t> },
+        { {4, DT::F32}, &PosZorderSortDispatchWrapper<4, float> },
+        { {4, DT::F64}, &PosZorderSortDispatchWrapper<4, double> },
+        { {4, DT::S32}, &PosZorderSortDispatchWrapper<4, int32_t> },
+        { {4, DT::S64}, &PosZorderSortDispatchWrapper<4, int64_t> },
+        { {5, DT::F32}, &PosZorderSortDispatchWrapper<5, float> },
+        { {5, DT::F64}, &PosZorderSortDispatchWrapper<5, double> },
+        { {5, DT::S32}, &PosZorderSortDispatchWrapper<5, int32_t> },
+        { {5, DT::S64}, &PosZorderSortDispatchWrapper<5, int64_t> },
+        { {6, DT::F32}, &PosZorderSortDispatchWrapper<6, float> },
+        { {6, DT::F64}, &PosZorderSortDispatchWrapper<6, double> },
+        { {6, DT::S32}, &PosZorderSortDispatchWrapper<6, int32_t> },
+        { {6, DT::S64}, &PosZorderSortDispatchWrapper<6, int64_t> },
+        { {7, DT::F32}, &PosZorderSortDispatchWrapper<7, float> },
+        { {7, DT::F64}, &PosZorderSortDispatchWrapper<7, double> },
+        { {7, DT::S32}, &PosZorderSortDispatchWrapper<7, int32_t> },
+        { {7, DT::S64}, &PosZorderSortDispatchWrapper<7, int64_t> },
+        { {8, DT::F32}, &PosZorderSortDispatchWrapper<8, float> },
+        { {8, DT::F64}, &PosZorderSortDispatchWrapper<8, double> },
+        { {8, DT::S32}, &PosZorderSortDispatchWrapper<8, int32_t> },
+        { {8, DT::S64}, &PosZorderSortDispatchWrapper<8, int64_t> },
+        { {9, DT::F32}, &PosZorderSortDispatchWrapper<9, float> },
+        { {9, DT::F64}, &PosZorderSortDispatchWrapper<9, double> },
+        { {9, DT::S32}, &PosZorderSortDispatchWrapper<9, int32_t> },
+        { {9, DT::S64}, &PosZorderSortDispatchWrapper<9, int64_t> },
+        { {10, DT::F32}, &PosZorderSortDispatchWrapper<10, float> },
+        { {10, DT::F64}, &PosZorderSortDispatchWrapper<10, double> },
+        { {10, DT::S32}, &PosZorderSortDispatchWrapper<10, int32_t> },
+        { {10, DT::S64}, &PosZorderSortDispatchWrapper<10, int64_t> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -96,7 +124,7 @@ ffi::Error PosZorderSortFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in PosZorderSortFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t)"
+            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t), (4, float), (4, double), (4, int32_t), (4, int64_t), (5, float), (5, double), (5, int32_t), (5, int64_t), (6, float), (6, double), (6, int32_t), (6, int64_t), (7, float), (7, double), (7, int32_t), (7, int64_t), (8, float), (8, double), (8, int32_t), (8, int64_t), (9, float), (9, double), (9, int32_t), (9, int64_t), (10, float), (10, double), (10, int32_t), (10, int64_t)"
         );
     }
     PosZorderSortDispatchFn instance = it->second;
@@ -183,7 +211,35 @@ ffi::Error SearchSortedZFFIHost(
         { {3, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<3, float>) },
         { {3, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<3, double>) },
         { {3, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<3, int32_t>) },
-        { {3, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<3, int64_t>) }
+        { {3, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<3, int64_t>) },
+        { {4, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<4, float>) },
+        { {4, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<4, double>) },
+        { {4, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<4, int32_t>) },
+        { {4, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<4, int64_t>) },
+        { {5, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<5, float>) },
+        { {5, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<5, double>) },
+        { {5, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<5, int32_t>) },
+        { {5, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<5, int64_t>) },
+        { {6, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<6, float>) },
+        { {6, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<6, double>) },
+        { {6, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<6, int32_t>) },
+        { {6, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<6, int64_t>) },
+        { {7, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<7, float>) },
+        { {7, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<7, double>) },
+        { {7, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<7, int32_t>) },
+        { {7, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<7, int64_t>) },
+        { {8, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<8, float>) },
+        { {8, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<8, double>) },
+        { {8, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<8, int32_t>) },
+        { {8, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<8, int64_t>) },
+        { {9, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<9, float>) },
+        { {9, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<9, double>) },
+        { {9, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<9, int32_t>) },
+        { {9, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<9, int64_t>) },
+        { {10, DT::F32}, reinterpret_cast<TFunc>(&SearchSortedZ<10, float>) },
+        { {10, DT::F64}, reinterpret_cast<TFunc>(&SearchSortedZ<10, double>) },
+        { {10, DT::S32}, reinterpret_cast<TFunc>(&SearchSortedZ<10, int32_t>) },
+        { {10, DT::S64}, reinterpret_cast<TFunc>(&SearchSortedZ<10, int64_t>) }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -193,7 +249,7 @@ ffi::Error SearchSortedZFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in SearchSortedZFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t)"
+            "(2, float), (2, double), (2, int32_t), (2, int64_t), (3, float), (3, double), (3, int32_t), (3, int64_t), (4, float), (4, double), (4, int32_t), (4, int64_t), (5, float), (5, double), (5, int32_t), (5, int64_t), (6, float), (6, double), (6, int32_t), (6, int64_t), (7, float), (7, double), (7, int32_t), (7, int64_t), (8, float), (8, double), (8, int32_t), (8, int64_t), (9, float), (9, double), (9, int32_t), (9, int64_t), (10, float), (10, double), (10, int32_t), (10, int64_t)"
         );
     }
     const void* instance = it->second;

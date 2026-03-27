@@ -110,7 +110,21 @@ ffi::Error KnnLeaf2LeafFFIHost(
         { {2, DT::F32}, &KnnLeaf2LeafDispatchWrapper<2, float> },
         { {2, DT::F64}, &KnnLeaf2LeafDispatchWrapper<2, double> },
         { {3, DT::F32}, &KnnLeaf2LeafDispatchWrapper<3, float> },
-        { {3, DT::F64}, &KnnLeaf2LeafDispatchWrapper<3, double> }
+        { {3, DT::F64}, &KnnLeaf2LeafDispatchWrapper<3, double> },
+        { {4, DT::F32}, &KnnLeaf2LeafDispatchWrapper<4, float> },
+        { {4, DT::F64}, &KnnLeaf2LeafDispatchWrapper<4, double> },
+        { {5, DT::F32}, &KnnLeaf2LeafDispatchWrapper<5, float> },
+        { {5, DT::F64}, &KnnLeaf2LeafDispatchWrapper<5, double> },
+        { {6, DT::F32}, &KnnLeaf2LeafDispatchWrapper<6, float> },
+        { {6, DT::F64}, &KnnLeaf2LeafDispatchWrapper<6, double> },
+        { {7, DT::F32}, &KnnLeaf2LeafDispatchWrapper<7, float> },
+        { {7, DT::F64}, &KnnLeaf2LeafDispatchWrapper<7, double> },
+        { {8, DT::F32}, &KnnLeaf2LeafDispatchWrapper<8, float> },
+        { {8, DT::F64}, &KnnLeaf2LeafDispatchWrapper<8, double> },
+        { {9, DT::F32}, &KnnLeaf2LeafDispatchWrapper<9, float> },
+        { {9, DT::F64}, &KnnLeaf2LeafDispatchWrapper<9, double> },
+        { {10, DT::F32}, &KnnLeaf2LeafDispatchWrapper<10, float> },
+        { {10, DT::F64}, &KnnLeaf2LeafDispatchWrapper<10, double> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -120,7 +134,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in KnnLeaf2LeafFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (2, double), (3, float), (3, double), (4, float), (4, double), (5, float), (5, double), (6, float), (6, double), (7, float), (7, double), (8, float), (8, double), (9, float), (9, double), (10, float), (10, double)"
         );
     }
     KnnLeaf2LeafDispatchFn instance = it->second;
@@ -272,7 +286,21 @@ ffi::Error KnnNode2NodeFFIHost(
         { {2, DT::F32}, &KnnNode2NodeDispatchWrapper<2, float> },
         { {2, DT::F64}, &KnnNode2NodeDispatchWrapper<2, double> },
         { {3, DT::F32}, &KnnNode2NodeDispatchWrapper<3, float> },
-        { {3, DT::F64}, &KnnNode2NodeDispatchWrapper<3, double> }
+        { {3, DT::F64}, &KnnNode2NodeDispatchWrapper<3, double> },
+        { {4, DT::F32}, &KnnNode2NodeDispatchWrapper<4, float> },
+        { {4, DT::F64}, &KnnNode2NodeDispatchWrapper<4, double> },
+        { {5, DT::F32}, &KnnNode2NodeDispatchWrapper<5, float> },
+        { {5, DT::F64}, &KnnNode2NodeDispatchWrapper<5, double> },
+        { {6, DT::F32}, &KnnNode2NodeDispatchWrapper<6, float> },
+        { {6, DT::F64}, &KnnNode2NodeDispatchWrapper<6, double> },
+        { {7, DT::F32}, &KnnNode2NodeDispatchWrapper<7, float> },
+        { {7, DT::F64}, &KnnNode2NodeDispatchWrapper<7, double> },
+        { {8, DT::F32}, &KnnNode2NodeDispatchWrapper<8, float> },
+        { {8, DT::F64}, &KnnNode2NodeDispatchWrapper<8, double> },
+        { {9, DT::F32}, &KnnNode2NodeDispatchWrapper<9, float> },
+        { {9, DT::F64}, &KnnNode2NodeDispatchWrapper<9, double> },
+        { {10, DT::F32}, &KnnNode2NodeDispatchWrapper<10, float> },
+        { {10, DT::F64}, &KnnNode2NodeDispatchWrapper<10, double> }
     };
 
     const TTuple key = TTuple(dim, tvec);
@@ -282,7 +310,7 @@ ffi::Error KnnNode2NodeFFIHost(
         return ffi::Error::Internal(
             "\nUnsupported template parameter combination for (dim, tvec)"\
             " in KnnNode2NodeFFIHost -- Only supporting:\n"\
-            "(2, float), (2, double), (3, float), (3, double)"
+            "(2, float), (2, double), (3, float), (3, double), (4, float), (4, double), (5, float), (5, double), (6, float), (6, double), (7, float), (7, double), (8, float), (8, double), (9, float), (9, double), (10, float), (10, double)"
         );
     }
     KnnNode2NodeDispatchFn instance = it->second;

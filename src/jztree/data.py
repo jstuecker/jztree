@@ -71,7 +71,7 @@ def validate_particles(part):
 
 def get_pos(part: Pos):
     if isinstance(part, jax.Array):
-        assert (part.shape[-1] in (2,3)) and (part.ndim == 2)
+        assert (part.shape[-1] <= 10) and (part.ndim == 2)
         return part
     elif hasattr(part, "pos"):
         assert part.pos.ndim == 2
