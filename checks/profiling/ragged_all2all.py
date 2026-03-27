@@ -75,7 +75,10 @@ def main():
         plt.xlabel("Data per GPU (MB)")
         plt.yscale("log")
         plt.xscale("log")
-        plt.savefig(f"ragged_performance_{jax.device_count()}.png", bbox_inches="tight")
+
+        os.makedirs("out", exist_ok=True)
+
+        plt.savefig(f"out/ragged_performance_{jax.device_count()}.png", bbox_inches="tight")
 
         if save_reference:
             np.save("reference.npy", np.stack([means, stds, means_rag, stds_rag], axis=0))
