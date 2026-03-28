@@ -181,7 +181,7 @@ plt.savefig("out/libraries.pdf", bbox_inches="tight")
 # ------------------------------------------------------------------------------------------------ #
 
 
-plt.figure(figsize=(5,3.5))
+plt.figure(figsize=(4,3.))
 
 res = np.load("out/faiss_dim.npy")
 ds, ts = res[:,0], res[:,1]

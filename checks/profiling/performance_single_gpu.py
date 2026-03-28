@@ -96,7 +96,7 @@ else:
     res = bench_k()
     np.savez("out/knn_k.npz", **res)
 
-plt.figure(figsize=(5,3.5))
+plt.figure(figsize=(4,3.))
 plt.loglog(res["k"], res["uniform"], marker="o", label=r"$N = 10^6$")
 plt.xlabel("k")
 plt.ylabel("Time [ms]")
@@ -143,7 +143,7 @@ else:
     res = bench_query()
     np.savez("out/knn_query.npz", **res)
 
-plt.figure(figsize=(5,3.5))
+plt.figure(figsize=(4,3.))
 plt.loglog(res["n"], res[str(int(1e6))], marker="o", label=r"$N_{\rm{src}} = 10^6$")
 plt.axhline(res[str(None)][2], color="C0", ls="dashed", xmin=0, xmax=0.37)
 plt.loglog(res["n"], res[str(int(1e7))], marker="o", label=r"$N_{\rm{src}} = 10^7$")
