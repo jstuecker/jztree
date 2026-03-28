@@ -38,13 +38,19 @@ def hernquist_particles(N, a=1., M=1., anisotropy=0., seed=None):
     pos, vel, mass = prof.sample_particles(N, result="pos_vel_m", rpmin=1e-6*a, ramax=1e6*a)
     return ParticleData(pos=pos, mass=mass, vel=vel)
 
-def discodj_particles(res):
-    from discodj_examples.simulations import disco_sim
-    pos = disco_sim(res=res, res_pm=res)[1].reshape(-1,3)
+def discodj_particles(res, boxsize=100.):
+    from discodj import DiscoDJ
+    dj = DiscoDJ(dim=3, res=res, boxsize=boxsize)
+    dj = dj.with_timetables()
+    dj = dj.with_linear_ps()
+    dj = dj.with_ics()
+    dj = dj.with_lpt(n_order=1)
+    X, P, a = dj.run_nbody(a_ini=0.02, a_end=1.0, n_steps=10, res_pm=res, stepper="bullfrog")
+    pos = X.reshape(-1,3)
 
     mass = jnp.ones(len(pos), dtype=pos.dtype) / res**3
     return PosMass(pos=pos, mass=mass)
-discodj_particles.jit = jax.jit(discodj_particles, static_argnames=("res"))
+discodj_particles.jit = jax.jit(discodj_particles, static_argnames=("res", "boxsize"))
 
 def multi_gpu_dj_sim(boxsize = 1000., num_per_device=512**3) -> ParticleData:
     from discodj import DiscoDJ
