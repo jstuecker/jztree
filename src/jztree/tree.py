@@ -109,7 +109,10 @@ def pos_zorder_sort(x: jax.Array | Pos):
             def apply_sort(val):
                 return val[idz]
             out = tree_map_by_len(apply_sort, x, len(posz))
-            out.pos = posz # overwiting here allows jit to discard the unnecessary position gather
+            try:
+                out.pos = posz  # overwiting here allows jit to discard the unnecessary position gather
+            except AttributeError:
+                pass
 
             return out, idz
     
