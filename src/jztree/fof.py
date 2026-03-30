@@ -751,6 +751,16 @@ def fof_catalogue_from_groups(
         m_x_vel = sum_particles((part.vel - vel0[part_gr_idx]) * part_mass[...,None])
         cata.com_vel = (m_x_vel / gr_mass[:,None]) + vel0
 
+    if getattr(part, "v_rad", None) is not None:
+        sum_v_rad = sum_particles(part.v_rad * part_mass)
+        cata.v_rad = sum_v_rad / gr_mass
+
+
+    if getattr(part, "zplus1", None) is not None:
+        scale_factor = 1 / part.zplus1
+        sum_scale_factor = sum_particles(scale_factor * part_mass)
+        cata.scale_factor = sum_scale_factor / gr_mass
+
     # remove the first "fake" group that we inserted:
     def remove_first(x):
         return x[1:] if len(x) == size_cata+1 else x

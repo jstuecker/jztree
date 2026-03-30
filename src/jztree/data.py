@@ -614,6 +614,8 @@ class FofCatalogue:
     com_pos: jax.Array | None = None
     com_vel: jax.Array | None = None
     com_inertia_radius: jax.Array | None = None
+    scale_factor: jax.Array | None = None
+    v_rad: jax.Array | None = None
     offset_rank: jax.Array | None = None # Only provided for squeezed catalogues
 
     def flatten(self):
