@@ -71,7 +71,8 @@ def bench_ndev(ndev):
 
     return res
 
-ndevices = jax.device_count()
+# ndevices = jax.device_count()
+ndevices = 4
 fname = f"out/fof_devices_{ndevices}.npz"
 
 if not os.path.exists(fname):
@@ -96,3 +97,44 @@ plt.xlabel("N per GPU")
 plt.ylabel("Time [ms]")
 
 plt.savefig("out/fof_devices.pdf", bbox_inches="tight")
+
+# ------------------------------------------------------------------------------------------------ #
+#                                           Library plot                                           #
+# ------------------------------------------------------------------------------------------------ #
+
+data = np.load("out/fof_results_gadget_hfof.npz")
+
+plt.figure(figsize=(5,3.5))
+
+plt.loglog(data["n"], data["hfof_ms"], marker="o", label="hfof [1 CPU]")
+plt.loglog(data["n"], data["g4_peano_n1_ms"] + data["g4_fofcomplete_n1_ms"], marker="o", label="Gadget [1 CPU]")
+plt.loglog(data["n"], data["g4_peano_n32_ms"] + data["g4_fofcomplete_n32_ms"], marker="o", label="Gadget [32 CPUs]")
+
+print(np.cbrt(data["n"]), (data["g4_peano_n32_ms"] + data["g4_fofcomplete_n32_ms"])[-1], data["jzfof_ms"][-1])
+for ndev in (1,):
+    color = plt.get_cmap("viridis")(np.log2(ndev) / 6)
+    res = np.load(f"out/fof_devices_{ndev}.npz")
+
+    print(res["time"])
+    plt.loglog(res["n"], res["time"], label=f"jz-tree [{ndev}GPU{'s' if ndev > 1 else ''}]", marker="o", color="black")
+
+print(6583.27 / 1243.826)
+
+plt.xlim(None, 2e8)
+plt.xlabel("N")
+plt.ylabel("Time [ms]")
+
+ax = plt.gca()
+ax2 = ax.secondary_xaxis("top", functions=(lambda x: np.cbrt(x), lambda x: x**3))
+ngs = [64, 88, 128, 180, 252, 360, 512]
+lab = [rf"${ng}^3$" for ng in ngs]
+ax2.set_xticks(ngs, lab)
+import matplotlib.ticker as ticker
+ax2.xaxis.set_minor_locator(ticker.NullLocator())
+
+plt.legend()
+
+plt.savefig("out/fof_libraries.pdf", bbox_inches="tight")
+
+print(data)
+print(data.keys())
