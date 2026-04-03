@@ -27,17 +27,18 @@ djsim.jit = jax.jit(djsim, static_argnames=("ngrid", "boxsize", "pad"))
 
 jb = JaxBench(jit_rounds=10, jit_warmup=1)
 
-res = dict(ngrid = [], t = [])
+res = dict(ngrid = [], t = [], t2 = [])
 for ngrid, pad in ((64,0), (88,0), (128,1), (180,0), (252,0), (360,0), (512,1)):
     x = djsim.jit(ngrid, ngrid*1., pad=pad)
 
-    # timing1 = jb.measure(fn_jit=jfof.fofkd.fof_clusters_jit, pos=x, b=0.2, cuda=True, write=False)[0]
+    timing1 = jb.measure(fn_jit=jfof.fofkd.fof_clusters_jit, k=14, pos=x, b=0.2, max_iters=100, cuda=True, write=False)[0]
     
-    fof_fn = fof_e.make_fof_frozen(k=8, max_iters=300, min_size=20, b=0.20, cuda=True)
-    fof_fn = jax.jit(fof_e.wrap_pos_arg(fof_fn))
-    timing2 = jb.measure(fn_jit=fof_fn, pos=x, write=False)[0]
+    # fof_fn = fof_e.make_fof_frozen(k=8, max_iters=300, min_size=20, b=0.20, cuda=True)
+    # fof_fn = jax.jit(fof_e.wrap_pos_arg(fof_fn))
+    # timing2 = jb.measure(fn_jit=fof_fn, pos=x, write=False)[0]
 
     res["ngrid"].append(ngrid)
-    res["t"].append(timing2.jit_mean_ms)
+    res["t"].append(timing1.jit_mean_ms)
+    # res["t2"].append(timing2.jit_mean_ms)
 
 np.savez("out/jfof_timing.npz", **res)
