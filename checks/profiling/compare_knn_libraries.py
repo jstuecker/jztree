@@ -33,7 +33,7 @@ def bench_scipy():
         t0 = time.perf_counter()
         for i in range(4):
             tree = KDTree(x)
-            tree.query(xq, k=30, workers=8)
+            tree.query(xq, k=30, workers=32)
         ts.append((time.perf_counter() - t0) / 4. * 1e3)
     return dict(ns=ns, ts=ts)
 
@@ -44,7 +44,7 @@ else:
     np.savez("out/scipy.npz", **res)
 
 plt.figure(figsize=(5,3.5))
-plt.plot(res["ns"], res["ts"], label="scipy[8CPU]", marker="o")
+plt.plot(res["ns"], res["ts"], label="scipy [32CPU]", marker="o")
 
 res = np.load("out/faiss.npy")
 ns, ts = res[:,0], res[:,1]

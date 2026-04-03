@@ -106,9 +106,14 @@ data = np.load("out/fof_results_gadget_hfof.npz")
 
 plt.figure(figsize=(5,3.5))
 
-plt.loglog(data["n"], data["hfof_ms"], marker="o", label="hfof [1 CPU]")
-plt.loglog(data["n"], data["g4_peano_n1_ms"] + data["g4_fofcomplete_n1_ms"], marker="o", label="Gadget [1 CPU]")
-plt.loglog(data["n"], data["g4_peano_n32_ms"] + data["g4_fofcomplete_n32_ms"], marker="o", label="Gadget [32 CPUs]")
+plt.loglog(data["n"], data["hfof_ms"], marker="o", label="hfof [1CPU]")
+plt.loglog(data["n"], data["g4_peano_n1_ms"] + data["g4_fofcomplete_n1_ms"], marker="o", label="Gadget4 [1CPU]")
+plt.loglog(data["n"], data["g4_peano_n32_ms"] + data["g4_fofcomplete_n32_ms"], marker="o", label="Gadget4 [32CPU]")
+
+res = np.load("out/jfof_timing.npz")
+plt.loglog(res["ngrid"]**3, res["t"], marker="o", label="jfof [1GPU]")
+
+print("jfof", res["t"][-1], res["t"][-1]/1243.826)
 
 print(np.cbrt(data["n"]), (data["g4_peano_n32_ms"] + data["g4_fofcomplete_n32_ms"])[-1], data["jzfof_ms"][-1])
 for ndev in (1,):
@@ -118,7 +123,16 @@ for ndev in (1,):
     print(res["time"])
     plt.loglog(res["n"], res["time"], label=f"jz-tree [{ndev}GPU{'s' if ndev > 1 else ''}]", marker="o", color="black")
 
+print((data["g4_peano_n1_ms"] + data["g4_fofcomplete_n1_ms"])[-1])
+print((data["hfof_ms"] + data["hfof_ms"])[-1])
+print((data["g4_peano_n32_ms"] + data["g4_fofcomplete_n32_ms"])[-1])
+print(res["time"][-1])
 print(6583.27 / 1243.826)
+
+print((data["g4_peano_n1_ms"] + data["g4_fofcomplete_n1_ms"])[-1]/res["time"][-1])
+print((data["hfof_ms"] + data["hfof_ms"])[-1]/res["time"][-1])
+print((data["g4_peano_n32_ms"] + data["g4_fofcomplete_n32_ms"])[-1]/res["time"][-1])
+
 
 plt.xlim(None, 2e8)
 plt.xlabel("N")
