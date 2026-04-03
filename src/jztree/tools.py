@@ -5,7 +5,7 @@ import jax
 from jax.experimental import io_callback
 import jax.numpy as jnp
 from typing import TypeAlias, Any, Tuple
-from .jax_ext import tree_map_by_len, pytree_len
+from .jax_ext import tree_map_by_len, pytree_len, pcast_like
 
 from .config import LoggingConfig
 
@@ -13,6 +13,7 @@ Pytree: TypeAlias = Any
 
 from jztree_cuda import ffi_tools
 jax.ffi.register_ffi_target("RearangeSegments", ffi_tools.RearangeSegments(), platform="CUDA")
+jax.ffi.register_ffi_target("MapInRange", ffi_tools.MapInRange(), platform="CUDA")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                             FFI Calls                                            #
@@ -30,6 +31,13 @@ def rearange_segments(data, seg_spl_out, seg_offset_in, block_size=64):
             size=np.int64(len(data)), dtype_bytes=size_bytes(data[0]),
             grid_size=np.uint64(div_ceil(len(data), block_size)), block_size=np.uint64(block_size)
         )[0]
+
+def map_in_range(range, input, imap, block_size=64):
+    data_out = jax.ShapeDtypeStruct(input.shape, input.dtype)
+    out = jax.ffi.ffi_call("MapInRange", (data_out,), input_output_aliases={1:0})(
+            range, input, imap, block_size=np.uint64(block_size)
+    )[0]
+    return pcast_like(out, like=input)
 
 # ------------------------------------------------------------------------------------------------ #
 #                                          Errors and Logs                                         #

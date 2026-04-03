@@ -56,5 +56,17 @@ __global__ void RearangeSegments(
     }
 }
 
+__global__ void MapInRange(
+    const int* range,
+    const int* input,
+    const int* map,
+    int* output
+) {
+    int imin = range[0], imax = range[1];
+    int idx = blockDim.x * blockIdx.x + threadIdx.x;
+    if((idx >= range[0]) && (idx < range[1])) {
+        output[idx] = map[input[idx]];
+    }
+}
 
 #endif

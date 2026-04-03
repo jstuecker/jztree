@@ -92,9 +92,68 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: MapInRange                                */
+/* ---------------------------------------------------------------------------------------------- */
+
+
+ffi::Error MapInRangeFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer range,
+    ffi::AnyBuffer input,
+    ffi::AnyBuffer map,
+    ffi::Result<ffi::AnyBuffer> output,
+    size_t block_size
+) {
+    dim3 blockDim(block_size);
+    dim3 gridDim(div_ceil(input.element_count(), block_size));
+    size_t smem = 0;
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    void* range_arg = range.untyped_data();
+    void* input_arg = input.untyped_data();
+    void* map_arg = map.untyped_data();
+    void* output_arg = output->untyped_data();
+    void* args[] = {
+        &range_arg,
+        &input_arg,
+        &map_arg,
+        &output_arg
+    };
+    const void* instance = (const void*)MapInRange;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    MapInRangeFFI, MapInRangeFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // range
+        .Arg<ffi::AnyBuffer>() // input
+        .Arg<ffi::AnyBuffer>() // map
+        .Ret<ffi::AnyBuffer>() // output
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
 NB_MODULE(ffi_tools, m) {
     m.def("RearangeSegments", []() { return EncapsulateFfiCall(&RearangeSegmentsFFI); });
+    m.def("MapInRange", []() { return EncapsulateFfiCall(&MapInRangeFFI); });
 }

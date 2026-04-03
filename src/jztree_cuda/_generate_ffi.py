@@ -172,11 +172,12 @@ gen.generate_ffi_module_file(
 
 functions = parse.get_functions_from_file(
     str(HERE / "tools.cuh"),
-    names=["RearangeSegments"],
+    names=["RearangeSegments", "MapInRange"],
     only_kernels=False
 )
 
 functions["RearangeSegments"].par["size_seg"].expression = "seg_spl_out.element_count()-1"
+functions["MapInRange"].grid_size_expression = "div_ceil(input.element_count(), block_size)"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tools.cu"), 

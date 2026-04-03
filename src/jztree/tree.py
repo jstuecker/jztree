@@ -8,7 +8,7 @@ from dataclasses import replace
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList, LevelInfo
 from .data import get_num_total, get_pos, get_num, verify_ilist, same_width_int
 from .config import TreeConfig, RegularizationConfig
-from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits
+from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, map_in_range
 from .comm import send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
@@ -986,8 +986,11 @@ def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | N
     # change the label and the offsets of the interaction list
     ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
 
+    # do isrc = prefix[ilist.iother], but faster:
+    isrc = map_in_range(jnp.array((0, ilist.ispl[-1])), ilist.iother, prefix)
+
     ilist = InteractionList(
-        ispl, prefix[ilist.iother], rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
+        ispl, isrc, rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
     )
     
     return verify_ilist(ilist)
