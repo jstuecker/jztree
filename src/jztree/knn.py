@@ -192,7 +192,6 @@ _knn_dual_walk.smap = shard_map_constructor(_knn_dual_walk,
 # ------------------------------------------------------------------------------------------------ #
 #                                       User Exposed Function                                      #
 # ------------------------------------------------------------------------------------------------ #
-
 def knn(
         part: jax.Array | Pos,
         k: int,
@@ -203,7 +202,33 @@ def knn(
         reduce_func: Callable | None = None,
         output_order: str = "input",
         cfg: KNNConfig = KNNConfig()
-    ):
+    ) -> Any:
+    """The main function executing the nearest neighbour search.
+    
+    By default this returns (rnn, inn) -- the radii and indices of the k nearest
+    neighbours. Arguments may modify returned results and their ordering.    
+
+    Args:
+        part: Source positions, may be a jax.Array or a more complex dataclass
+            following the :class:`jztree.data.Pos` interface.
+        k: Number of neighbours to calculate per particle
+        boxsize: If provided, distance calculations are wrapped periodically.
+        th: May be provided to skip building a new tree-hierarchy inside of this function.
+            See :func:`jztree.tree.zsort_and_tree`. If this argument is provided, particles 
+            are assumed to be already in z-order.
+        part_query: Query positions, defaults to :paramref:`part`.
+        result: String indicating the desired return values. May have any of the following
+            separated by underscores: "rad" (radii), "drad" (differentible radii), "rankidx"
+            (origin rank and index), "globalidx" (linear global index), "part" (mapped source
+            particles), "reduce" (see :paramref:`reduce_func`) or the name of any attribute
+            on the particle data structure.
+        reduce_func: Will be called with the neighbour list in z-order to get a summary
+            statistic per query particle. Useful to avoid communicating the neighbour
+            list to origin tasks in distributed setups. Requires "reduce" inside of 
+            :paramref:`result`.
+        output_order: May be "input" or "z".
+        cfg: Config object that controls lower-level details of the algorithm
+    """
     assert output_order in ("z", "input")
 
     rank, ndev, axis_name = get_rank_info()

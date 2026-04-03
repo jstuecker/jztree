@@ -25,16 +25,27 @@ def same_width_int(dtype: jnp.dtype) -> jnp.dtype:
 @jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
 class Pos: # this class is mostly defined to declare an interface that particle class should follow
+    """A dataclass holding positions.
+    
+    :paramref:`num` and :paramref:`num_total` are only required for multi-GPU setups where
+    the number of filled entries may be less than the size and run-time dependent
+    
+    Args:
+        pos: Position array of shape (size, dim)
+        num: Filled count (<=size) on local device, needed for multi-GPU, may be dynamic
+        num_total: Total count on all devices, static
+    """
     pos: jax.Array
 
-    num: jax.Array | None = None
+    num: int | jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
 @jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
 class PosMass:
-    pos: jax.Array  # (Nparticles, 3)
-    mass: jax.Array  # (Nparticles,) or scalar
+    """Dataclass holding positions and masses, see :class:`Pos` for details"""
+    pos: jax.Array
+    mass: jax.Array
 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
@@ -42,6 +53,7 @@ class PosMass:
 @jax.jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
 class ParticleData:
+    """Dataclass holding positions and optional data, see :class:`Pos` for details"""
     pos: jax.Array # (Nparticles, 3)
     mass: jax.Array | None = None # (Nparticles,) or scalar
     vel: jax.Array | None = None # (Nparticles, 3)
@@ -49,20 +61,6 @@ class ParticleData:
 
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
-
-def validate_particles(part):
-    if getattr(part, "num", None) is not None:
-        assert jnp.ndim(part.num) == 0
-
-    pos = getattr(part, "pos", None)
-    assert (pos is not None) and (pos.shape[-1] == 3), "pos must be (N,3)"
-
-    if getattr(part, "mass", None) is not None:
-        if jnp.size(part.mass) > 1:
-            assert part.mass.shape == pos.shape[:-1], "mass must be of shape (1,) or (N,)"
-
-    if getattr(part, "vel", None) is not None:
-        assert (part.vel.shape[-1] == 3) and (part.vel.shape == pos.shape)
 
 # ------------------------------------------------------------------------------------------------ #
 #                     Helpful methods for accessing and manipulating particles                     #
@@ -249,6 +247,7 @@ class PosLvlId(PosLvl):
 @jax.tree_util.register_dataclass
 @dataclass
 class PackedArray:
+    """A dataclass allowing to stack several dynamic arrays into a single buffer"""
     data: jax.Array
     ispl: jax.Array
     fill_values: jax.Array | None = None

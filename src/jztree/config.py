@@ -2,16 +2,19 @@ from dataclasses import dataclass
 
 @dataclass(unsafe_hash=True)
 class LoggingConfig():
+    """Config controlling logging."""
     level : int = 1
     show_loc : bool = True
 
 @dataclass(unsafe_hash=True)
 class RegularizationConfig():
+    """Config controlling regularization."""
     regularize_percentile: float = 90.
     max_volume_fac: float = 20.
 
 @dataclass(unsafe_hash=True)
 class TreeConfig():
+    """Config controlling tree structure and allocation."""
     # structure:
     max_leaf_size: int = 32
     coarse_fac: float = 6.0
@@ -29,10 +32,12 @@ class TreeConfig():
 
 @dataclass(unsafe_hash=True)
 class FofCatalogueConfig():
+    """Config controlling aspects of friends-of-friends catalogues"""
     npart_min: int = 20
 
 @dataclass(unsafe_hash=True)
 class FofConfig:
+    """Main nested config for friends-of-friends"""
     alloc_fac_ilist: float = 32.
     alloc_fac_distr_links: float = 0.01
 
@@ -47,6 +52,7 @@ class FofConfig:
 
 @dataclass(unsafe_hash=True)
 class KNNConfig:
+    """Main nested config for k nearest neighbour search"""
     alloc_fac_ilist: float = 256.
 
     tree: TreeConfig = TreeConfig(

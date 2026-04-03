@@ -854,7 +854,7 @@ def distr_fof_and_catalogue(
         input_z_ordered: bool = False,
         th: TreeHierarchy | None = None
     ) -> Tuple[ParticleData, FofCatalogue]:
-    """Returns particles in FoF-order and the FoFCatalogue"""
+    """Returns particles in FoF-order and the FoFCatalogue... among ohters"""
     assert len(part.pos) < 2**31, "Allocation too large... may lead to int32 overflows"
 
     if input_z_ordered:

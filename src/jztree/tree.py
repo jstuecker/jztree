@@ -92,14 +92,21 @@ def _zsort_impl(x: jax.Array, block_size=64):
 
     return pos, ids
 
-def zsort(x: jax.Array | Pos):
-    """Brings 3d-positions into z-order
+def zsort(pos: jax.Array | Pos) -> Tuple[jax.Array | Pos, jax.Array]:
+    """Brings position vectors into z-order
 
     If x is a pytree, it needs to have a "pos" attribute which will be used as the sorting key. 
     All remaining leaves of the pytree will be sorted accordingly along the leading axis (which 
     should have consistent length)
+
+    Args:
+        pos: Can be a jax.Array or a more complicated particle data structure following the
+            :class:`jztree.data.Pos` interface. All pytree-leaves with the same leading shape 
+            as the .pos atribute will be sorted.
+    Returns:
+        (posz, idz) -- Sorted positions and ids so that posz = pos[idz]
     """
-    assert get_pos(x).ndim == 2, "positions must have shape (N,3)"
+    assert get_pos(pos).ndim == 2, "positions must have shape (N,3)"
 
     @jax.custom_vjp
     def eval(x):
@@ -130,7 +137,7 @@ def zsort(x: jax.Array | Pos):
     
     eval.defvjp(eval_fwd, eval_bwd)
 
-    return eval(x)
+    return eval(pos)
 zsort.jit = jax.jit(zsort)
 
 def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
@@ -360,6 +367,10 @@ def zsort_and_tree(
         num_types: int | None = None,
         shrink: bool = True
     ) -> Tuple[Pos, TreeHierarchy]:
+    """Brings particles into z-order and creates a tree hierarchy
+    
+    supports multi-GPU and may be called inside of a shard_map
+    """
     rank, ndev, axis_name = get_rank_info()
 
     npart_tot = get_num_total(part, default_to_length=(ndev==1))
