@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from dataclasses import replace
 from jztree.config import FofConfig
 from jztree.tree import zsort, build_tree_hierarchy
-from jztree.fof import _fof_hierarchy, _fof_leaf2leaf, fof_labels
+from jztree.fof import _fof_dual_walk, _fof_leaf2leaf, fof_labels
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
 
@@ -25,7 +25,7 @@ def bench_fof_steps(jax_bench, pos, N):
         part=posz, cfg_tree=cfg.tree, tag="tree"
     )[1]
 
-    node_data, ilist = jb.measure(fn_jit=_fof_hierarchy.jit, 
+    node_data, ilist = jb.measure(fn_jit=_fof_dual_walk.jit, 
         th=th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist, tag="node_node"
     )[1]
     jb.measure(fn_jit=_fof_leaf2leaf.jit, 

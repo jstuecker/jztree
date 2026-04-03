@@ -6,8 +6,8 @@ import numpy as np
 
 from jztree.config import FofConfig
 from jztree.tree import zsort_and_tree
-from jztree.fof import distr_fof_labels_z_with_tree, _distr_fof_hierarchy, distr_fof_leaf2leaf
-from jztree.fof import fof_catalogue_from_groups, distr_fof_order, distr_fof_and_catalogue
+from jztree.fof import distr_fof_labels_z_with_tree, _distr_fof_dual_walk, _distr_fof_leaf2leaf
+from jztree.fof import _fof_catalogue_from_groups, _distr_fof_order, distr_fof_and_catalogue
 from jztree.jax_ext import get_rank_info, shard_map_constructor
 from jztree_utils import ics
 
@@ -53,24 +53,24 @@ def bench_fof_steps(jax_bench, pos, ndev):
 
     def node_node_fof(th, partz):
         cfg = FofConfig()
-        return _distr_fof_hierarchy(
+        return _distr_fof_dual_walk(
             th, rlink=rlink, boxsize=0., alloc_fac_ilist=cfg.alloc_fac_ilist, size_links=int(len(partz.pos)*0.5)
         )
     node_node_fof = shard_map_constructor(node_node_fof)(mesh, jit=True)
     node_data, ilist, link_data = jb.measure(None, node_node_fof, th, partz, tag=f"node-node")[1]
 
     def particle_fof(node_data, ilist, link_data, partz):
-        return distr_fof_leaf2leaf(
+        return _distr_fof_leaf2leaf(
             node_data, ilist, link_data, partz.pos, rlink=rlink, boxsize=0.
         )
     particle_fof = shard_map_constructor(particle_fof)(mesh, jit=True)
     labels = jb.measure(None, particle_fof, node_data, ilist, link_data, partz, tag=f"part-part")[1]
 
-    partf, counts = jb.measure(None, distr_fof_order.smap(mesh, jit=True),
+    partf, counts = jb.measure(None, _distr_fof_order.smap(mesh, jit=True),
         labels, partz, tag=f"fof-order"
     )[1]
 
-    cata = jb.measure(None, fof_catalogue_from_groups.smap(mesh, jit=True),
+    cata = jb.measure(None, _fof_catalogue_from_groups.smap(mesh, jit=True),
         partf, counts, tag=f"catalogue"
     )[1]
 
