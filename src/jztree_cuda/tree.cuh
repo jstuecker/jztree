@@ -428,4 +428,33 @@ __global__ void CenterOfMass(
     }
 }
 
+/* ---------------------------------------------------------------------------------------------- */
+/*                                   Interaction List Reduction                                   */
+/* ---------------------------------------------------------------------------------------------- */
+
+__global__ void FlagInteractingNodes(
+    const int* __restrict__ isplit,
+    const int* __restrict__ isrc,
+    bool* flag,
+    const int size_nodes,
+    const int size_ilist
+) {
+    // Flags all nodes that appear as source or receiving index in the interaction list
+
+    int inode = blockIdx.x;
+    
+    int ilow = isplit[inode], iup = min(isplit[inode + 1], size_ilist);
+    if(ilow >= iup)
+        return;
+
+    if(threadIdx.x == 0)
+        flag[inode] = true;
+
+    for(int i=ilow + threadIdx.x; i<iup; i += blockDim.x) {
+        int idx = isrc[i];
+        if((idx >= 0) && (idx < size_nodes))
+            flag[idx] = true;
+    }
+}
+
 #endif // TREE_H

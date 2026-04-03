@@ -632,6 +632,67 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
 );
 
 /* ---------------------------------------------------------------------------------------------- */
+/*                             FFI call to CUDA kernel: FlagInteractingNodes                      */
+/* ---------------------------------------------------------------------------------------------- */
+
+
+ffi::Error FlagInteractingNodesFFIHost(
+    cudaStream_t stream,
+    ffi::AnyBuffer isplit,
+    ffi::AnyBuffer isrc,
+    ffi::Result<ffi::AnyBuffer> flag,
+    size_t block_size
+) {
+    int size_nodes = isplit.element_count() - 1;
+    int size_ilist = isrc.element_count();
+    dim3 blockDim(block_size);
+    dim3 gridDim(isplit.element_count() - 1);
+    size_t smem = 0;
+    
+    // Initialize output buffers
+    cudaMemsetAsync(flag->untyped_data(), 0, flag->size_bytes(), stream);
+    
+    // Build a bundled argument list for cudaLaunchKernel
+    void* isplit_arg = isplit.untyped_data();
+    void* isrc_arg = isrc.untyped_data();
+    void* flag_arg = flag->untyped_data();
+    void* args[] = {
+        &isplit_arg,
+        &isrc_arg,
+        &flag_arg,
+        &size_nodes,
+        &size_ilist
+    };
+    const void* instance = (const void*)FlagInteractingNodes;
+
+    cudaLaunchKernel(
+        instance,
+        gridDim,
+        blockDim,
+        args,
+        smem,
+        stream
+    );
+
+    cudaError_t last_error = cudaGetLastError();
+    if (last_error != cudaSuccess) {
+        return ffi::Error::Internal(std::string("CUDA error: ") + cudaGetErrorString(last_error));
+    }
+    return ffi::Error::Success();
+}
+
+XLA_FFI_DEFINE_HANDLER_SYMBOL(
+    FlagInteractingNodesFFI, FlagInteractingNodesFFIHost,
+    ffi::Ffi::Bind()
+        .Ctx<ffi::PlatformStream<cudaStream_t>>()
+        .Arg<ffi::AnyBuffer>() // isplit
+        .Arg<ffi::AnyBuffer>() // isrc
+        .Ret<ffi::AnyBuffer>() // flag
+        .Attr<size_t>("block_size"),
+    {xla::ffi::Traits::kCmdBufferCompatible}
+);
+
+/* ---------------------------------------------------------------------------------------------- */
 /*                               Module declaration through nanobind                              */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -641,4 +702,5 @@ NB_MODULE(ffi_tree, m) {
     m.def("GetBoundaryExtendPerLevel", []() { return EncapsulateFfiCall(&GetBoundaryExtendPerLevelFFI); });
     m.def("GetNodeGeometry", []() { return EncapsulateFfiCall(&GetNodeGeometryFFI); });
     m.def("CenterOfMass", []() { return EncapsulateFfiCall(&CenterOfMassFFI); });
+    m.def("FlagInteractingNodes", []() { return EncapsulateFfiCall(&FlagInteractingNodesFFI); });
 }

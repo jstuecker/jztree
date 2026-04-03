@@ -125,7 +125,7 @@ gen.generate_ffi_module_file(
 functions = parse.get_functions_from_file(
     str(HERE / "tree.cuh"),
     names=["FlagLeafBoundaries", "FindNodeBoundaries", "GetNodeGeometry", "CenterOfMass",
-           "GetBoundaryExtendPerLevel"],
+           "GetBoundaryExtendPerLevel", "FlagInteractingNodes"],
     only_kernels=False
 )
 
@@ -155,6 +155,10 @@ add_dim_dtype_templates(functions["CenterOfMass"], "pos")
 functions["CenterOfMass"].grid_size_expression = "div_ceil(isplit.element_count() - 1, block_size)"
 functions["CenterOfMass"].par["nnodes"].expression = "isplit.element_count() - 1"
 
+functions["FlagInteractingNodes"].init_outputs_zero = True
+functions["FlagInteractingNodes"].grid_size_expression = "isplit.element_count() - 1"
+functions["FlagInteractingNodes"].par["size_nodes"].expression = "isplit.element_count() - 1"
+functions["FlagInteractingNodes"].par["size_ilist"].expression = "isrc.element_count()"
 
 gen.generate_ffi_module_file(
     output_file = str(HERE / "generated/ffi_tree.cu"), 

@@ -24,6 +24,7 @@ jax.ffi.register_ffi_target("FindNodeBoundaries", ffi_tree.FindNodeBoundaries(),
 jax.ffi.register_ffi_target("GetNodeGeometry", ffi_tree.GetNodeGeometry(), platform="CUDA")
 jax.ffi.register_ffi_target("GetBoundaryExtendPerLevel", ffi_tree.GetBoundaryExtendPerLevel(), platform="CUDA")
 jax.ffi.register_ffi_target("CenterOfMass", ffi_tree.CenterOfMass(), platform="CUDA")
+jax.ffi.register_ffi_target("FlagInteractingNodes", ffi_tree.FlagInteractingNodes(), platform="CUDA")
 
 # ------------------------------------------------------------------------------------------------ #
 #                                         Helper Functions                                         #
@@ -925,7 +926,14 @@ def masked_scatter(mask, arr, indices, values):
     indices = jnp.where(mask, indices, len(arr))
     return arr.at[indices].set(values)
 
-def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | None = None
+def _flag_interacting_nodes(ilist: InteractionList, block_size=64):
+    outputs = (jax.ShapeDtypeStruct((ilist.ispl.size-1,), jnp.uint8),)
+
+    return jax.ffi.ffi_call("FlagInteractingNodes", outputs, vmap_method="sequential")(
+        ilist.ispl, ilist.iother, block_size=np.uint64(block_size), 
+    )[0].astype(jnp.bool)
+
+def simplify_interaction_list_old(ilist: InteractionList, always_keep: jax.Array | None = None
                               ) -> InteractionList:
     """Get reduced version of the interaction and node list skipping nodes without interactions
     
@@ -956,6 +964,34 @@ def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | N
     )
     
     return verify_ilist(ilist)
+
+def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | None = None
+                              ) -> InteractionList:
+    """Get reduced version of the interaction and node list skipping nodes without interactions
+    
+    Useful in multi-GPU scenarios where many non-local nodes will not have any local interactions
+    """
+    # flag all nodes that appear at least in one interaction
+    flag = _flag_interacting_nodes(ilist)
+
+    if always_keep is not None:
+        flag = flag | always_keep
+    
+    # create reduced id list
+    prefix = cumsum_starting_with_zero(flag)
+
+    reduced_ids = masked_scatter(flag, jnp.zeros_like(ilist.ids), prefix[:-1], ilist.ids)
+    reduced_dev_spl = prefix[ilist.dev_spl]
+
+    # change the label and the offsets of the interaction list
+    ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
+
+    ilist = InteractionList(
+        ispl, prefix[ilist.iother], rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
+    )
+    
+    return verify_ilist(ilist)
+
 
 # ------------------------------------------------------------------------------------------------ #
 #                                       Tree Walking Helpers                                       #
