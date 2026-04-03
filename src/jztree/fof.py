@@ -6,11 +6,11 @@ import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 
 from .config import FofConfig, FofCatalogueConfig
-from .data import  FofData, PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
+from .data import  PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
 from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num, verify_ilist
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from .tools import bucket_prefix_sum, masked_to_dense
-from .tree import pos_zorder_sort, grouped_dense_interaction_list, build_tree_hierarchy
+from .tree import zsort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, zsort_and_tree, distr_grouped_dense_interaction_list
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
@@ -787,7 +787,7 @@ def fof_labels_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofCon
 fof_labels_z.jit = jax.jit(fof_labels_z, static_argnames=["rlink", "boxsize", "cfg"])
 
 def fof_labels(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
-    posz, idz = pos_zorder_sort(pos)
+    posz, idz = zsort(pos)
     
     igroupz = fof_labels_z(posz, rlink, boxsize=boxsize, cfg=cfg)
 
@@ -855,7 +855,7 @@ def fof_and_catalogue(
     if input_z_ordered:
         partz = part
     else:
-        partz = pos_zorder_sort(part)[0]
+        partz = zsort(part)[0]
     igroup = fof_labels_z(partz.pos, rlink=rlink, boxsize=boxsize, cfg=cfg)
     partf, counts = fof_order(igroup, partz)
     catalogue = fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)

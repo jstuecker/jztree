@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 from dataclasses import replace
 from jztree.config import FofConfig
-from jztree.tree import pos_zorder_sort, build_tree_hierarchy
+from jztree.tree import zsort, build_tree_hierarchy
 from jztree.fof import _fof_hierarchy, _fof_leaf2leaf, fof_labels
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
@@ -17,7 +17,7 @@ def bench_fof_steps(jax_bench, pos, N):
     rlink = 0.2 * boxsize / N**(1/3)
     pos = jax.random.uniform(jax.random.PRNGKey(0), (N, 3), minval=0.0, maxval=boxsize)
 
-    posz, idz = jb.measure(fn=pos_zorder_sort, fn_jit=pos_zorder_sort.jit, x=pos, tag="zsort")[1]
+    posz, idz = jb.measure(fn=zsort, fn_jit=zsort.jit, x=pos, tag="zsort")[1]
 
     cfg = FofConfig()
     th = jb.measure(

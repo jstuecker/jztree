@@ -4,7 +4,7 @@ from jztree.data import PosMass, TreeHierarchy
 import pytest
 import numpy.testing as npt
 from jztree.config import TreeConfig
-from jztree.tree import get_node_geometry, search_sorted_z, pos_zorder_sort, build_tree_hierarchy
+from jztree.tree import get_node_geometry, search_sorted_z, zsort, build_tree_hierarchy
 from jztree_utils import ics
 import jztree as jz
 
@@ -64,7 +64,7 @@ def test_multi_type_tree():
 
     nleaves = th.num(0)
     cent = th.geom_cent.get(0, nleaves)
-    ext = jz.tree.lvl_to_ext(th.lvl.get(0, nleaves), th.info())
+    ext = jz.tree._lvl_to_ext(th.lvl.get(0, nleaves), th.info())
 
     ileaf1 = jz.tools.inverse_of_splits(ispl_t[0], n1)
     ileaf2 = jz.tools.inverse_of_splits(ispl_t[1], n2)
@@ -102,21 +102,21 @@ def test_zsort_infinities():
         [ jnp.nan,  jnp.nan,  jnp.nan]
     ])
 
-    xz = pos_zorder_sort.jit(xin)[0]
+    xz = zsort.jit(xin)[0]
 
     assert jnp.all(xout[:-1] == xz[:-1])
     assert jnp.all(jnp.isnan(xz[-1]))  # have to split of nan comparison since nan != nan
 
 def test_search_sorted_z():
-    posz, idz = pos_zorder_sort.jit(get_pos(1387, xmin=0.1, xmax=0.4, seed=0))
-    posz2, idz2 = pos_zorder_sort.jit(get_pos(2222, xmin=0.1, xmax=0.4, seed=2))
+    posz, idz = zsort.jit(get_pos(1387, xmin=0.1, xmax=0.4, seed=0))
+    posz2, idz2 = zsort.jit(get_pos(2222, xmin=0.1, xmax=0.4, seed=2))
 
     iself = search_sorted_z.jit(posz, posz)
     assert jnp.all(iself == jnp.arange(len(posz), dtype=jnp.int32))
 
     i2 = search_sorted_z.jit(posz, posz2)
     pos_ins = jnp.insert(posz, i2, posz2, axis=0)
-    pos_ins_ref = pos_zorder_sort.jit(pos_ins)[0]
+    pos_ins_ref = zsort.jit(pos_ins)[0]
     assert jnp.all(pos_ins == pos_ins_ref), "If indices were right, we should already be in z-order"
 
 def test_leaf_search(pos_mass_z: PosMass, tree_hierarchy: TreeHierarchy):

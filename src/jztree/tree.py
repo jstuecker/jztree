@@ -8,7 +8,7 @@ from dataclasses import replace
 from .data import Pos, PosMass, PackedArray, TreeHierarchy, InteractionList, LevelInfo
 from .data import get_num_total, get_pos, get_num, verify_ilist, same_width_int
 from .config import TreeConfig, RegularizationConfig
-from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, map_in_range
+from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, map_in_range, masked_scatter
 from .comm import send_to_left, send_to_right, shift_particles_left
 from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
@@ -30,7 +30,7 @@ jax.ffi.register_ffi_target("FlagInteractingNodes", ffi_tree.FlagInteractingNode
 #                                         Helper Functions                                         #
 # ------------------------------------------------------------------------------------------------ #
 
-def lvl_to_lvlvec(level: jax.Array, dim: int, stacked: bool = True):
+def _lvl_to_lvlvec(level: jax.Array, dim: int, stacked: bool = True):
     olvl = level // dim
     omod = level - olvl*dim
 
@@ -42,17 +42,17 @@ def lvl_to_lvlvec(level: jax.Array, dim: int, stacked: bool = True):
     else:
         return lvec
 
-def lvl_to_ext(level: jax.Array, linfo: LevelInfo):
-    lvec = lvl_to_lvlvec(level, linfo.dim)
+def _lvl_to_ext(level: jax.Array, linfo: LevelInfo):
+    lvec = _lvl_to_lvlvec(level, linfo.dim)
     return jnp.astype(2., linfo.dtype) ** lvec
 
-def get_node_box(x, level_binary):
+def _get_node_box(x, level_binary):
     raise NotImplemented("implementation broken")
-    node_size = lvl_to_ext(level_binary)
+    node_size = _lvl_to_ext(level_binary)
     node_cent = x + jnp.sign(x)*(0.5 * node_size - jnp.mod(jnp.abs(x), node_size))
     return node_cent, node_size
 
-def level_histogram(lvl: jax.Array, linfo: LevelInfo, weights: jax.Array | None = None,
+def _level_histogram(lvl: jax.Array, linfo: LevelInfo, weights: jax.Array | None = None,
                     dtype: jnp.dtype = jnp.float32):
     rank, ndev, axis_name = get_rank_info()
 
@@ -72,7 +72,7 @@ def level_histogram(lvl: jax.Array, linfo: LevelInfo, weights: jax.Array | None 
 # ------------------------------------------------------------------------------------------------ #
 
 
-def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
+def _zsort_impl(x: jax.Array, block_size=64):
     # assert x.dtype == jnp.float32
     assert x.ndim == 2
     dim = x.shape[-1]
@@ -92,7 +92,7 @@ def _pos_zorder_sort_impl(x: jax.Array, block_size=64):
 
     return pos, ids
 
-def pos_zorder_sort(x: jax.Array | Pos):
+def zsort(x: jax.Array | Pos):
     """Brings 3d-positions into z-order
 
     If x is a pytree, it needs to have a "pos" attribute which will be used as the sorting key. 
@@ -104,9 +104,9 @@ def pos_zorder_sort(x: jax.Array | Pos):
     @jax.custom_vjp
     def eval(x):
         if isinstance(x, jax.Array):
-            return _pos_zorder_sort_impl(x)
+            return _zsort_impl(x)
         else: # assuming x is a pytree with x.pos attribute
-            posz, idz = _pos_zorder_sort_impl(x.pos)
+            posz, idz = _zsort_impl(x.pos)
             def apply_sort(val):
                 return val[idz]
             out = tree_map_by_len(apply_sort, x, len(posz))
@@ -131,7 +131,7 @@ def pos_zorder_sort(x: jax.Array | Pos):
     eval.defvjp(eval_fwd, eval_bwd)
 
     return eval(x)
-pos_zorder_sort.jit = jax.jit(pos_zorder_sort)
+zsort.jit = jax.jit(zsort)
 
 def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
     """Finds the indices in xz where elements of xz_query would be inserted to keep order.
@@ -149,18 +149,10 @@ def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
     return inds
 search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "leaf_search"))
 
-def weighted_percentile(x, weights, percentile):
-    # Determine percentile of the particle-weighted leaf-size distribution:
-    isort = jnp.argsort(x)
-    ncum = jnp.cumsum(weights[isort])
-
-    iperc = jnp.searchsorted(ncum, ncum[-1]*0.01*percentile, side="left")
-    return x[isort[iperc]]
-
 def find_regularization_level(lvl: jax.Array, linfo: LevelInfo, weights: jax.Array | None = None,
                               max_vol_fac: float = 50., min_percentile: float = 90.):
     """Determines the first level where the node volume is > max_vol_frac times the average vol."""
-    levels, counts = level_histogram(lvl, linfo, weights=weights)
+    levels, counts = _level_histogram(lvl, linfo, weights=weights)
 
     # Find a reference level (to avoid volume undeflows/overlows in the relevant domain)
     # We determine the min_percentile for this and we only consider to regularize
@@ -376,11 +368,11 @@ def zsort_and_tree(
     if ndev > 1:
         partz, dtz = distr_zsort(part, data=dt, nsamp=cfg_tree.nsamp)
     else:
-        partz, isort = pos_zorder_sort(part)
+        partz, isort = zsort(part)
         dtz = tree_map_by_len(lambda x: x[isort], dt, len(get_pos(partz)))
 
     if ndev > 1:
-        top_node_size = define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
+        top_node_size = _define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
         partz, dtz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, dataz=dtz)
     else:
         lvl_bound = None
@@ -474,18 +466,11 @@ center_of_mass.jit = jax.jit(center_of_mass, static_argnames=['kahan_summation',
 #                                       Domain Decomposition                                       #
 # ------------------------------------------------------------------------------------------------ #
 
-
-def determine_npart(x):
-    """Determines the number of valid particles (that are not nan)"""
-    valid = ~jnp.isnan(get_pos(x))
-    return jnp.sum(valid[...,0] & valid[...,1] & valid[...,2])
-
-    
 def distr_zsort(part: Pos, data: Any | None = None, nsamp: int = 1024, equalize: bool = True):
     rank, ndev, axis_name = get_rank_info()
 
     # if ndev == 1:
-    #     return pos_zorder_sort(part)[0]
+    #     return zsort(part)[0]
 
     pos = get_pos(part)
     numtot = get_num_total(part)
@@ -497,7 +482,7 @@ def distr_zsort(part: Pos, data: Any | None = None, nsamp: int = 1024, equalize:
     key = jax.random.key(0)
     isamp = jax.random.randint(key, shape=(nsamp,), minval=0, maxval=get_num(part))
     posall = jax.lax.all_gather(pos[isamp], axis_name=axis_name, tiled=True)
-    xpivot = pos_zorder_sort(posall)[0][nsamp::nsamp]
+    xpivot = zsort(posall)[0][nsamp::nsamp]
     xpivot = jnp.pad(xpivot, ((1,1), (0,0)), constant_values=jnp.inf).at[0].set(-jnp.inf)
 
     # Now organize and determine which chunks need to be send to each rank
@@ -508,7 +493,7 @@ def distr_zsort(part: Pos, data: Any | None = None, nsamp: int = 1024, equalize:
     
     part.num = dev_spl[-1]
 
-    partz, idz = pos_zorder_sort(part)
+    partz, idz = zsort(part)
     dataz = tree_map_by_len(lambda x: x[idz], data, len(get_pos(partz)))
 
     stats_callback("allocation", AllocStats.record_filled_sort, dev_spl[-1], len(part.pos))
@@ -575,7 +560,7 @@ adjust_domain_for_nodesize.jit = jax.jit(adjust_domain_for_nodesize, static_argn
 #                                      Tree Building Functions                                     #
 # ------------------------------------------------------------------------------------------------ #
 
-def estimate_node_number(npart, max_node_size, alloc_fac=1.):
+def _estimate_node_number(npart, max_node_size, alloc_fac=1.):
     """Gives an estimate of the number of nodes
     
     Assumes that particles are grouped in z-order into nodes that have <= node_size particles each.
@@ -586,8 +571,8 @@ def estimate_node_number(npart, max_node_size, alloc_fac=1.):
     # multiple nodes with size <= max_node_size/2 from being summarized.
     return int(div_ceil(npart*alloc_fac, np.maximum(max_node_size//2, 1))) + 1
 
-def define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
-    max_num_leaves = estimate_node_number(npart, cfg_tree.max_leaf_size)
+def _define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
+    max_num_leaves = _estimate_node_number(npart, cfg_tree.max_leaf_size)
 
     nlevels = np.log(max_num_leaves / cfg_tree.stop_coarsen) / np.log(cfg_tree.coarse_fac)
     nlevels = np.maximum(int(np.ceil(nlevels)), 1)
@@ -596,14 +581,14 @@ def define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
 
     return node_sizes
 
-def splits_per_type(spl, ptype, num_types, npart):
+def _splits_per_type(spl, ptype, num_types, npart):
     spls = []
     for t in range(num_types):
         prefix = cumsum_starting_with_zero((ptype == t) & (jnp.arange(len(ptype)) < npart))
         spls.append(prefix[spl])
     return jnp.stack(spls, axis=0)
 
-def define_split_hierarchy(
+def _define_split_hierarchy(
         posz: jax.Array,
         node_sizes: Tuple[int],
         alloc_size: int,
@@ -637,7 +622,7 @@ def define_split_hierarchy(
 
     if ptype is not None:
         # If we have multiple types, we require that the number per type does not exceed a maximum
-        ispl_per_type = splits_per_type(ispl, ptype, num_types, npart)
+        ispl_per_type = _splits_per_type(ispl, ptype, num_types, npart)
         npart_if_not_split = jnp.max(ispl_per_type[:,rbound] - ispl_per_type[:,lbound], axis=0)
     else:
         npart_if_not_split = ispl[rbound] - ispl[lbound]
@@ -711,7 +696,7 @@ def define_split_hierarchy(
     
     return ispl, ispl_per_type, ispl_n2l, ispl_n2n
 
-def get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedArray, PackedArray]:
+def _get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[PackedArray, PackedArray]:
     prop_array_spl = cumsum_starting_with_zero(ispl_n2n.ispl[1:] - ispl_n2n.ispl[:-1] - 1)
 
     def handle_mcent_level(i, carry):
@@ -762,11 +747,11 @@ def build_tree_hierarchy(
     np_per_dev = npart_tot // ndev # static estimate of number of unpadded-particles
     npart = get_num(part, default_to_nancount=True)
 
-    node_sizes = define_tree_level_node_sizes(npart_tot, cfg_tree)
+    node_sizes = _define_tree_level_node_sizes(npart_tot, cfg_tree)
 
-    alloc_size = estimate_node_number(np_per_dev, cfg_tree.max_leaf_size, cfg_tree.alloc_fac_nodes)
+    alloc_size = _estimate_node_number(np_per_dev, cfg_tree.max_leaf_size, cfg_tree.alloc_fac_nodes)
 
-    ispl_l2p, ispl_per_type, ispl_n2l, ispl_n2n = define_split_hierarchy(
+    ispl_l2p, ispl_per_type, ispl_n2l, ispl_n2n = _define_split_hierarchy(
         posz, node_sizes, alloc_size, npart=npart,
         ptype=ptype, num_types=num_types,
         lvl_bound=lvl_bound,
@@ -789,11 +774,11 @@ def build_tree_hierarchy(
 
     if cfg_tree.mass_centered:
         assert hasattr(part, "mass"), "To use mass centering, please provide PosMass input"
-        nmass_cent, nmass = get_tree_mass_centers(part, ispl_n2n)
+        nmass_cent, nmass = _get_tree_mass_centers(part, ispl_n2n)
     else:
         nmass_cent, nmass = None, None
 
-    size_leaves = estimate_node_number(np_per_dev, cfg_tree.max_leaf_size)
+    size_leaves = _estimate_node_number(np_per_dev, cfg_tree.max_leaf_size)
     th = TreeHierarchy(
         size_leaves, ispl_n2n, ispl_n2l, ispl_per_type,
         lvl, geom_cent,
@@ -807,7 +792,7 @@ build_tree_hierarchy.jit = jax.jit(build_tree_hierarchy, static_argnames=['cfg_t
 #                                     Interaction List Helpers                                     #
 # ------------------------------------------------------------------------------------------------ #
 
-def dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
+def _dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
                            node_range: jax.Array | None = None) -> InteractionList:
     """A dense interaction list where all nodes interact with all other nodes.
 
@@ -838,7 +823,7 @@ def dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
     stats_callback("allocation", AllocStats.record_filled_interactions, nint, size_ilist)
     
     return verify_ilist(InteractionList(ispl=ispl, iother=ilist))
-dense_interaction_list.jit = jax.jit(dense_interaction_list, static_argnames=['size_ilist', 'size_nodes'])
+_dense_interaction_list.jit = jax.jit(_dense_interaction_list, static_argnames=['size_ilist', 'size_nodes'])
 
 def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
                                    ngroup: int = 32, size_super: int | None = None,
@@ -914,17 +899,13 @@ def distr_grouped_dense_interaction_list(
         dev_spl = cumsum_starting_with_zero(nper_rank)
     
     # Define a dense interaction list on top-nodes:
-    ilist = dense_interaction_list(dev_spl[-1], size, size_ilist,
+    ilist = _dense_interaction_list(dev_spl[-1], size, size_ilist,
         node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
     )
     ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
     ilist.dev_spl = dev_spl
 
     return spl, ilist, nsuper
-
-def masked_scatter(mask, arr, indices, values):
-    indices = jnp.where(mask, indices, len(arr))
-    return arr.at[indices].set(values)
 
 def _flag_interacting_nodes(ilist: InteractionList, block_size=64):
     outputs = (jax.ShapeDtypeStruct((ilist.ispl.size-1,), jnp.uint8),)
@@ -994,55 +975,3 @@ def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | N
     )
     
     return verify_ilist(ilist)
-
-
-# ------------------------------------------------------------------------------------------------ #
-#                                       Tree Walking Helpers                                       #
-# ------------------------------------------------------------------------------------------------ #
-
-from dataclasses import dataclass
-from typing import Callable
-
-@dataclass
-class TreeWalkFunctions:
-    top_node_out: Callable
-    child_input: Callable
-    evaluate_n2n: Callable
-
-from typing import Callable
-def dual_tree_walk(
-    f: TreeWalkFunctions,
-    th: TreeHierarchy,
-    size_ilist: int
-):
-    nplanes = th.num_planes()
-
-    size = th.size()
-
-    spl, ilist, nsup = grouped_dense_interaction_list(
-        th.num(nplanes-1), size_ilist=size_ilist, ngroup=32, size_super=size
-    )
-
-    node_data = f.top_node_out(num=nsup, size=len(spl)-1)
-
-    # Add an extra-level to splits for super-nodes
-    spl_n2n = th.ispl_n2n.resize_levels(nplanes+1).set(nplanes, spl, nsup+1, fill_value=spl[-1])
-
-    def handle_level(i, carry):
-        level = nplanes - 1 - i
-        node_data, ilist = carry
-
-        spl = spl_n2n.get(level+1, size=size+1)
-
-        child_data = f.child_input(level=level, node_data=node_data, spl=spl)
-
-        child_res, child_ilist = f.evaluate_n2n(
-            level=level, ilist=ilist, node_data=node_data, spl=spl, child_data=child_data
-        )
-        
-        return child_res, child_ilist
-
-    for i in range(nplanes):
-        node_data, ilist = handle_level(i, (node_data, ilist))
-    
-    return node_data, ilist

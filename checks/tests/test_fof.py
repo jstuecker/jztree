@@ -7,7 +7,6 @@ import importlib
 from pathlib import Path
 from jztree.config import FofConfig
 from jztree.data import ParticleData, FofCatalogue, squeeze_catalogue, sort_catalogue
-from jztree.tree import pos_zorder_sort
 from jztree.fof import fof_labels, fof_is_superset, fof_and_catalogue
 from jztree.jax_ext import tree_map_by_len
 from jztree.tools import cumsum_starting_with_zero, inverse_of_splits

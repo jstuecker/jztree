@@ -1,10 +1,9 @@
 from dataclasses import dataclass, field, replace
 from functools import partial
-from typing import List, Iterator
+from typing import List
 import jax
 import jax.numpy as jnp
 
-from .config import TreeConfig
 from .jax_ext import pcast_like, pcast_vma, tree_map_by_len
 from .tools import set_range, inverse_of_splits, cumsum_starting_with_zero
 
@@ -589,21 +588,6 @@ class FofNodeData():
     igroup: jax.Array
     spl: jax.Array
 
-@partial(jax.tree_util.register_dataclass, 
-         meta_fields=["rlink", "boxsize"],
-         data_fields=["posz", "igroup", "node_lvl", "ilist", "spl"])
-@dataclass
-class FofData:
-    rlink : float
-    boxsize : float
-
-    posz: jax.Array       # z-sorted positions
-    # idz: jax.Array        # ids so that posz = pos0[idz]
-    igroup: jax.Array     # group labels
-    node_lvl: jax.Array   # node-levels
-    ilist: InteractionList  # interaction list (on leaf indices)
-    spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
-
 @jax.jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class FofCatalogue:
@@ -689,34 +673,8 @@ def catalogues_equal(c1: FofCatalogue, c2: FofCatalogue):
 
     return all_leaves_equal and (c1.ngroups == c2.ngroups)
 
-# ------------------------------------------------------------------------------------------------ #
-#                                     KNN Specific Data Classes                                    #
-# ------------------------------------------------------------------------------------------------ #
-
 @partial(jax.tree_util.register_dataclass)
 @dataclass(slots=True)
 class RankIdx:
     rank: jax.Array
     idx: jax.Array
-
-@partial(jax.tree_util.register_dataclass)
-@dataclass(slots=True)
-class KNNData:
-    k : int = static_field()
-    boxsize : float = static_field()
-
-    partz: PosId
-    spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
-    ilist: InteractionList
-
-@partial(jax.tree_util.register_dataclass)
-@dataclass(slots=True)
-class DistrKNNData:
-    k : int = static_field()
-    boxsize : float = static_field()
-
-    partz: PosId
-    spl: jax.Array        # leaf splits so that posz[spl[i]:spl[i+1]] are in leaf i
-    ilist: InteractionList
-
-    origin: RankIdx

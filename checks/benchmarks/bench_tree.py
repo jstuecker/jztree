@@ -1,7 +1,7 @@
 import pytest
 from dataclasses import replace
 from jztree.config import TreeConfig
-from jztree.tree import build_tree_hierarchy, pos_zorder_sort
+from jztree.tree import build_tree_hierarchy, zsort
 from jztree_utils import ics
 import jax
 import jax.numpy as jnp
@@ -10,7 +10,7 @@ import jax.numpy as jnp
 @pytest.mark.parametrize("npart", [1024*128,1024*1024, 1024*1024*8])
 def bench_build_tree_hierarchy(jax_bench, npart):
     pos_mass = ics.uniform_particles(npart)
-    pos_mass_z = pos_zorder_sort(pos_mass)[0]
+    pos_mass_z = zsort(pos_mass)[0]
 
     jb = jax_bench(jit_rounds=10, jit_warmup=5, eager_rounds=0, eager_warmup=0)
 
@@ -32,7 +32,7 @@ def bench_zsort(jax_bench, npart):
 
     def f():
         pos = ics.uniform_particles(npart)
-        return pos_zorder_sort(pos)
+        return zsort(pos)
     f.jit = jax.jit(f)
 
     jb.measure(fn_jit=f.jit, tag="zsort")

@@ -8,7 +8,7 @@ from jztree.config import FofConfig
 from jztree.tools import cumsum_starting_with_zero, multi_to_dense
 from jztree.data import ParticleData, Link, Label, flatten_particles, pad_particles
 from jztree.data import squeeze_particles, expand_particles, squeeze_catalogue, sort_catalogue
-from jztree.tree import zsort_and_tree, pos_zorder_sort
+from jztree.tree import zsort_and_tree, zsort
 from jztree.fof import _distr_link, _insert_links, distr_fof_labels_z_with_tree, fof_labels_z
 from jztree.fof import fof_and_catalogue, distr_fof_and_catalogue
 from jztree_utils import ics
@@ -79,7 +79,7 @@ def test_labels_vs_single(seed):
     igroup1 = multi_to_dense(igroup1, dev_spl, out_size=dev_spl[-1])
     partz = squeeze_particles(partz)
 
-    partz = pos_zorder_sort.jit(partz)[0]
+    partz = zsort.jit(partz)[0]
     igroup2 = fof_labels_z.jit(partz.pos, rlink=0.03)
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)

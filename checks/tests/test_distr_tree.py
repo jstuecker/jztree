@@ -6,7 +6,7 @@ from jax.sharding import PartitionSpec as P, NamedSharding, AxisType
 from jztree.jax_ext import get_rank_info, expanding_shard_map, shard_map_constructor
 from jztree.config import TreeConfig
 from jztree.data import Pos, PosMass, TreeHierarchy, squeeze_particles
-from jztree.tree import pos_zorder_sort, distr_zsort, adjust_domain_for_nodesize
+from jztree.tree import zsort, distr_zsort, adjust_domain_for_nodesize
 from jztree.tree import detect_leaf_boundaries, build_tree_hierarchy, zsort_and_tree
 from jztree_utils import ics
 
@@ -31,7 +31,7 @@ def test_mutli_zsort():
     part, partz = _distr_zsort.smapped()
 
     partz_mult = squeeze_particles(partz)
-    partz_sing = pos_zorder_sort(squeeze_particles(part))[0]
+    partz_sing = zsort(squeeze_particles(part))[0]
 
     assert len(partz_sing.pos) == len(partz_mult.pos) == partz_sing.num == partz_mult.num
     assert partz_mult.pos == pytest.approx(partz_sing.pos, abs=1e-5)
@@ -75,7 +75,7 @@ def test_tree_properties():
 
     # Build a reference structure
     partref = ics.uniform_particles.smap(mesh, jit=True)(1024*128, npad=1024*32)
-    partrefz = pos_zorder_sort(squeeze_particles(partref))[0]
+    partrefz = zsort(squeeze_particles(partref))[0]
 
     thref = build_tree_hierarchy(partrefz, cfg_tree)
 

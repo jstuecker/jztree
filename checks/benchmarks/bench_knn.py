@@ -14,7 +14,7 @@ def bench_knn_steps(jax_bench, pos):
 
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
 
-    posz, idz = jb.measure(fn_jit=jz.tree.pos_zorder_sort.jit, x=pos, tag="zsort")[1]
+    posz, idz = jb.measure(fn_jit=jz.tree.zsort.jit, x=pos, tag="zsort")[1]
     th = jb.measure(fn_jit=jz.tree.build_tree_hierarchy.jit, tag="tree",
                     part=posz, cfg_tree=cfg.tree)[1]
     

@@ -7,11 +7,11 @@ import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 
 from .config import KNNConfig
-from .data import KNNData, PosLvl, PosLvlNum, InteractionList, PosId, TreeHierarchy, DistrKNNData, RankIdx
+from .data import PosLvl, PosLvlNum, InteractionList, PosId, TreeHierarchy, RankIdx
 from .data import Pos, RankIdx, get_pos, get_num, get_num_total
-from .tree import pos_zorder_sort, grouped_dense_interaction_list, zsort_and_tree_multi_type
+from .tree import grouped_dense_interaction_list, zsort_and_tree_multi_type
 from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list, zsort_and_tree
-from .tools import inverse_indices, inverse_of_splits, masked_to_dense, masked_scatter, masked_inverse
+from .tools import masked_inverse
 from .jax_ext import raise_if, pcast_vma, pcast_like, shard_map_constructor, tree_map_by_len
 from .comm import get_rank_info, all_to_all_request_children, all_to_all_with_irank
 from .stats import stats_callback, AllocStats, InteractionStats
