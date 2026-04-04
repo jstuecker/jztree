@@ -110,7 +110,10 @@ def flatten_particles(part: Pos):
     return part_flat
 
 def expand_particles(part: Pos, ndev: int):
-    """Expands particles from shape (Ndev*N) -> (Ndev,N)"""
+    """Expands particles from shape (Ndev*N) -> (Ndev,N)
+    
+    Useful to interface with shard maps, since (Ndev,N) shape is assumed in general
+    """
     assert part.pos.ndim == 2, "Can only expand from (Ndev*N) to (Ndev,N)"
     assert len(part.pos) % ndev == 0
     assert part.num_total == len(part.pos), "So far this function cannot handle padded particles"
@@ -130,6 +133,7 @@ def expand_particles(part: Pos, ndev: int):
     return part_exp
 
 def pad_particles(part: Pos, num: int,  float_val:float = jnp.nan, int_val: int = 0):
+    """Pads particle data (to leave space for communication)."""
     if num == 0: return part
     
     assert part.pos.ndim == 2, "Positions should have shape (N,3)"
@@ -516,6 +520,7 @@ def verify_ilist(ilist: InteractionList):
 @jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class Label:
+    """A FoF-group label for multi-GPU, pointing a root particle's rank and index"""
     # global labels are pointing to a particle that may lie on another task
     irank: jax.Array
     igroup: jax.Array
@@ -676,6 +681,6 @@ def catalogues_equal(c1: FofCatalogue, c2: FofCatalogue):
 @partial(jax.tree_util.register_dataclass)
 @dataclass(slots=True)
 class RankIdx:
-    """Holds a rank and an index -- often used to indicate the origin of data."""
+    """Holds a rank and an index -- used to point to a particle in multi-GPU setups."""
     rank: jax.Array
     idx: jax.Array

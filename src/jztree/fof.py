@@ -807,7 +807,7 @@ def distr_fof_labels(
         part: Pos, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig(), 
         th: TreeHierarchy | None = None, linearize_labels: bool = False
     ) -> Tuple[Pos, Label]:
-    """Calculates the friends-of-friends group relation ship for multi-GPU cases
+    """Calculates the friends-of-friends group relation ship for multi-GPU cases.
 
     For single-GPU, please use :func:`fof_labels`
 
@@ -862,17 +862,37 @@ def fof_and_catalogue(
         cfg: FofConfig = FofConfig(),
         th: TreeHierarchy | None = None
     ) -> Tuple[ParticleData, FofCatalogue]:
-    """Returns particles in FoF-order and the FoFCatalogue"""
+    """Puts particles in FoF-order and calculates the FoF-catalogue
+    
+    Supports single- and multi-GPU.
+
+    Args:
+        part: particles, should follow at least the interface of :class:`jztree.data.Pos`
+            and may optionally contain additional elments as in 
+            :class:`jztree.data.ParticleData` for calculating additional data in the
+            catalogue. For multi-GPU, particles need to be padded to allow space for
+            communication.
+        rlink: (absolute) linking length
+        boxsize: if provided, distances use periodic wrapping
+        cfg: controls low-level details
+        th: May be provided to skip building a new tree-hierarchy inside of this function.
+            See :func:`jztree.tree.zsort_and_tree`. If this argument is provided, particles 
+            are assumed to be already in z-order.
+    Returns:
+        (partf, catalogue) -- particles in FoF-order and the group catalogue. Each group
+        forms a continous segment in the particle array, but the last group on each
+        rank may continue on the next rank.
+    """
     rank, ndev, axis_name = get_rank_info()
     
     if ndev == 1:
-        partz, igroup = fof_labels(part, rlink=rlink, th=th, boxsize=boxsize, cfg=cfg, output_order="z")
+        partz, igroup = fof_labels(part, rlink=rlink, th=th, boxsize=boxsize, cfg=cfg)
         partf, counts = _fof_order(igroup, partz)
-        catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
     else:
         partz, labels = distr_fof_labels(part, rlink=rlink, boxsize=boxsize, cfg=cfg, th=th)
         partf, counts = _distr_fof_order(labels, partz)
-        catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
+    
+    catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
     return partf, catalogue
 fof_and_catalogue.jit = jax.jit(fof_and_catalogue,

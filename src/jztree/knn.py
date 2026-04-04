@@ -219,8 +219,9 @@ def knn(
         part_query: Query positions, defaults to :paramref:`part`.
         result: String indicating the desired return values. May have any of the following
             separated by underscores: "rad" (radii), "drad" (differentible radii), "rankidx"
-            (origin rank and index), "globalidx" (linear global index), "part" (mapped source
-            particles), "reduce" (see :paramref:`reduce_func`) or the name of any attribute
+            (origin rank and index :class:`jztree.data.RankIdx`), "globalidx" 
+            (linear global index), "part" (mapped source particles), 
+            "reduce" (see :paramref:`reduce_func`) or the name of any attribute
             on the particle data structure.
         reduce_func: Will be called with the neighbour list in z-order to get a summary
             statistic per query particle. Useful to avoid communicating the neighbour
