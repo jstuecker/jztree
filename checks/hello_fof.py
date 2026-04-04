@@ -1,7 +1,7 @@
 import pytest
 from jztree.config import FofConfig
 from jztree.tree import zsort
-from jztree.fof import fof_labels_z
+from jztree.fof import fof_labels
 import jax
 import jax.numpy as jnp
 import pytest
@@ -16,8 +16,7 @@ rlink = 0.8 * boxsize / len(pos)**(1/3)
 cfg = FofConfig()
 
 # run jztree-fof
-posz, idz = zsort.jit(pos)
-igr_jz = fof_labels_z.jit(posz, rlink, boxsize=boxsize, cfg=cfg)
+posz, igr_jz = fof_labels.jit(pos, rlink, boxsize=boxsize, cfg=cfg, output_order="z")
 
 # check outputs
 group_sizes_jz = jnp.sort(jnp.bincount(igr_jz, minlength=len(posz)))[::-1]

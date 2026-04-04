@@ -6,8 +6,8 @@ import jax.numpy as jnp
 from jax.sharding import PartitionSpec as P
 
 from .config import FofConfig, FofCatalogueConfig
-from .data import  PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue
-from .data import InteractionList, PackedArray, TreeHierarchy, Pos, get_num, verify_ilist
+from .data import  PosLvl, Label, Link, FofNodeData, ParticleData, FofCatalogue, InteractionList
+from .data import PackedArray, TreeHierarchy, Pos, get_num, verify_ilist, get_pos
 from .tools import inverse_of_splits, cumsum_starting_with_zero, offset_sum, div_ceil
 from .tools import bucket_prefix_sum, masked_to_dense
 from .tree import zsort, grouped_dense_interaction_list, build_tree_hierarchy
@@ -497,7 +497,7 @@ _distr_fof_leaf2leaf.jit = jax.jit(_distr_fof_leaf2leaf, static_argnames=["rlink
 
 def _fof_order(igroup: jax.Array, part: ParticleData, npart: int | None = None):
     if npart is None:
-        npart = jnp.sum(~jnp.isnan(part.pos[...,0]))
+        npart = jnp.sum(~jnp.isnan(get_pos(part)[...,0]))
     igr = jnp.where(jnp.arange(len(igroup)) < npart, igroup, len(igroup))
     counts = jnp.zeros(len(igroup), dtype=igroup.dtype).at[igr].add(1)
 
@@ -715,7 +715,7 @@ def _fof_catalogue_from_groups(
             gr_mass = sum_particles(part_mass)
         cata.mass = gr_mass
     else:
-        part_mass = jnp.array(1., dtype=part.pos.dtype)
+        part_mass = jnp.array(1., dtype=get_pos(part).dtype)
         gr_mass = cata.count * part_mass
 
     if getattr(part, "pos", None) is not None:
@@ -757,26 +757,30 @@ _fof_catalogue_from_groups.smap = shard_map_constructor(_fof_catalogue_from_grou
 #                                          User Interface                                          #
 # ------------------------------------------------------------------------------------------------ #
 
-def fof_labels_z(posz: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
-    th = build_tree_hierarchy(posz, cfg_tree=cfg.tree)
+def fof_labels(part: jax.Array, rlink: float, boxsize: float = 0., 
+               cfg: FofConfig = FofConfig(), th: TreeHierarchy | None = None,
+               output_order: str = "input") -> Tuple[jax.Array, jax.Array]:
+    
+    if th is None:
+        partz, idz = zsort(part)
+        th = build_tree_hierarchy(partz, cfg_tree=cfg.tree)
+    else: # assume input is sorted
+        partz, idz = part, None
+
     node_data, ilist = _fof_dual_walk(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist
     )
-    return _fof_leaf2leaf(
-        node_data, ilist, posz, rlink=rlink, boxsize=boxsize
+    igroupz = _fof_leaf2leaf(
+        node_data, ilist, get_pos(partz), rlink=rlink, boxsize=boxsize
     )
-fof_labels_z.jit = jax.jit(fof_labels_z, static_argnames=["rlink", "boxsize", "cfg"])
 
-def fof_labels(pos: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig()) -> jax.Array:
-    posz, idz = zsort(pos)
-    
-    igroupz = fof_labels_z(posz, rlink, boxsize=boxsize, cfg=cfg)
+    if (output_order == "input") and (idz is not None):
+        igroup = igroupz.at[idz].set(idz[igroupz])
 
-    inv_sort = jnp.zeros(len(idz)).at[idz].set(jnp.arange(len(idz)))
-    igroup = igroupz.at[idz].set(idz[igroupz])
-
-    return igroup
-fof_labels.jit = jax.jit(fof_labels, static_argnames=["rlink", "boxsize", "cfg"])
+        return part, igroup
+    else:
+        return partz, igroupz
+fof_labels.jit = jax.jit(fof_labels, static_argnames=["rlink", "boxsize", "cfg", "output_order"])
 
 def distr_fof_labels_z_with_tree(
         posz: jax.Array, th: TreeHierarchy, rlink: float, 
@@ -827,23 +831,25 @@ def fof_and_catalogue(
         rlink: float,
         boxsize: float=0.,
         cfg: FofConfig = FofConfig(),
-        input_z_ordered: bool = False
+        th: TreeHierarchy | None = None
     ) -> Tuple[ParticleData, FofCatalogue]:
     """Returns particles in FoF-order and the FoFCatalogue"""
     rank, ndev, axis_name = get_rank_info()
     assert ndev == 1, "For distributed mode, please use distr_fof_and_catalogue"
 
-    if input_z_ordered:
-        partz = part
-    else:
-        partz = zsort(part)[0]
-    igroup = fof_labels_z(partz.pos, rlink=rlink, boxsize=boxsize, cfg=cfg)
+    # if th is not None:
+    #     # assume sorted particles
+    #     partz = part
+    # else:
+    #     partz, th = zsort_and_tree(part, cfg_tree=cfg.tree)
+    
+    partz, igroup = fof_labels(part, rlink=rlink, th=th, boxsize=boxsize, cfg=cfg, output_order="z")
     partf, counts = _fof_order(igroup, partz)
     catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
     return partf, catalogue
 fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
-    static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
+    static_argnames=["rlink", "boxsize", "cfg"]
 )
 
 def distr_fof_and_catalogue(

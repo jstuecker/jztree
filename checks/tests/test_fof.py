@@ -25,7 +25,7 @@ def test_vs_hfof_uniform():
 
     rlink = 0.8 * boxsize / len(pos)**(1/3)
 
-    igr_jz = fof_labels.jit(pos, rlink=rlink, boxsize=boxsize)
+    pos, igr_jz = fof_labels.jit(pos, rlink=rlink, boxsize=boxsize)
     igr_hfof = fof_hfof(pos, rlink, boxsize=boxsize)
 
     # Since labels may differ, test set wise >= from both directions
@@ -103,7 +103,7 @@ def camels_jz_fof(camels_data):
     cfg = FofConfig()
     cfg.tree.alloc_fac_nodes = 1.2
     
-    igr_jz = fof_labels.jit(part.pos, rlink, boxsize=boxsize, cfg=cfg)
+    part, igr_jz = fof_labels.jit(part, rlink, boxsize=boxsize, cfg=cfg)
 
     part_fof, cata = fof_and_catalogue.jit(part, rlink, boxsize, cfg=cfg)
 
@@ -118,7 +118,7 @@ def test_camels_labels(camels_data, camels_jz_fof):
     # This should guarantee that each group in jz is a super-group in camels
     cfg = FofConfig()
     cfg.tree.alloc_fac_nodes = 1.2
-    igr_jz = fof_labels.jit(part.pos, rlink*(1.01), boxsize=boxsize, cfg=cfg)
+    part, igr_jz = fof_labels.jit(part.pos, rlink*(1.01), boxsize=boxsize, cfg=cfg)
 
     counts_cam = jnp.zeros(len(part.pos), dtype=jnp.int32).at[igroup].add(1)[igroup]
     counts_jz = jnp.zeros(len(part.pos), dtype=jnp.int32).at[igr_jz].add(1)[igr_jz]
@@ -147,7 +147,7 @@ def test_camels_labels(camels_data, camels_jz_fof):
 
     # assert jnp.all(counts_jz >= counts_cam)
 
-@pytest.mark.skip_in_quick
+# @pytest.mark.skip_in_quick
 def test_camels_catalogue(camels_data, camels_jz_fof):
     print("Warning. The CAMELS catalogue is broken, I will replace this by another dataset soon!")
 
