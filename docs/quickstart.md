@@ -260,9 +260,9 @@ plt.scatter(pmax[:,0], pmax[:,1], marker=".", color="red", alpha=0.1);
 This example shows a few relevant details:
 * To be able to calculate group properties like masses or velocities, we should input a particle data structure with those fields.
 * We create and pass a config object to configure the minimal number of particles for groups (default is 20). Many functions in **jz-tree** have such a config interface for defining lower-level details.
-* `fof_and_catalogue` returns particles in group-prder and an instance of the dataclass **jztree.data.FofCatalouge**.
+* {py:func}`jztree.fof.fof_and_catalogue` returns particles in group-prder and an instance of the dataclass {py:class}`jztree.data.FofCatalogue`.
 * The returned catalogue is larger than the actual number of groups. This is necessary, because the number of groups is *data-dependent*, but allocations need to be known at jit-compile time. **jz-tree** uses a worst-case estimate of the allocation size.
-* The function `jz.data.squeeze_catalogue` can be used to squeeze the catalogue. (This cannot be done inside of a jitted context.)
+* The function {py:func}`jztree.data.squeeze_catalogue` can be used to squeeze the catalogue. (This cannot be done inside of a jitted context.)
 * We plot the haloes centers, with size given by their inertia radius and coloured by their mass. You can find all available fields (here)
 * Particles can be accessed per group as a continuous range `cata.offset[gid]: cata.offset[gid]+cata.count[gid]`. Here, we have plotted the particles of the most massive halo in red.
 
@@ -325,7 +325,7 @@ The relevant part of the error message says: "The interaction list allocation is
 
 This is actually quite understandable. For returning 2000 neighbours a much larger region needs to be checked than in typical scenarios... therefore, the code needs a larger allocation for the interaction list. As mentioned earlier, jax's jit compilation requires that allocations are predicted in advance. **jz-tree** trys its best to provide robust defaults, but it is of course not possible to provide a good estimate for every possible scenario.
 
-The solution simply to update our configuration to use a larger allocation and the code runs through fine!
+The solution is simply to update our configuration to use a larger allocation and the code runs through fine!
 
 
 ```python
