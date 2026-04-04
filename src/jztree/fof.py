@@ -759,7 +759,28 @@ _fof_catalogue_from_groups.smap = shard_map_constructor(_fof_catalogue_from_grou
 
 def fof_labels(part: jax.Array | Pos, rlink: float, boxsize: float = 0., 
                cfg: FofConfig = FofConfig(), th: TreeHierarchy | None = None,
-               output_order: str = "input") -> Tuple[jax.Array | Pos, jax.Array]:
+               output_order: str = "z") -> Tuple[jax.Array | Pos, jax.Array]:
+    """Calculates the friends-of-friends group relation ship for single-GPU cases
+
+    For multi-GPU, please use :func:`distr_fof_labels`
+
+    Args:
+        part: particles, can be a jax.Array or any particle data structure with
+            a .pos atribute
+        rlink: (absolute) linking length
+        boxsize: if provided, distances use periodic wrapping
+        cfg: controls low-level details
+        th: May be provided to skip building a new tree-hierarchy inside of this function.
+            See :func:`jztree.tree.zsort_and_tree`. If this argument is provided, particles 
+            are assumed to be already in z-order.
+        output_order: may be "z" or "input"
+    Returns:
+        (part, igroup) -- (possibly) reordered particles and group labels -- igroup points 
+        to the first particle in z-order that belongs to the same group.
+    """
+    rank, ndev, axis_name = get_rank_info()
+
+    assert ndev == 1, "Please use distr_fof_labels for multi-GPU"
     
     if th is None:
         partz, idz = zsort(part)
@@ -786,9 +807,24 @@ def distr_fof_labels(
         part: Pos, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig(), 
         th: TreeHierarchy | None = None, linearize_labels: bool = False
     ) -> Tuple[Pos, Label]:
-    """
-    linearize_labels: only for testing against single-gpu version - converts (irank,igroup) labels to 
-        dense global linear ones
+    """Calculates the friends-of-friends group relation ship for multi-GPU cases
+
+    For single-GPU, please use :func:`fof_labels`
+
+    Args:
+        part: particles, should have some padding and follow the :class:`jztree.data.Pos`
+            interface
+        rlink: (absolute) linking length
+        boxsize: if provided, distances use periodic wrapping
+        cfg: controls low-level details
+        th: May be provided to skip building a new tree-hierarchy inside of this function.
+            See :func:`jztree.tree.zsort_and_tree`. If this argument is provided, particles 
+            are assumed to be already in z-order.
+        linearize_labels: if true, group labels will be output as a scalar global index.
+            Only use this for comparing small setups against single-GPU.
+    Returns:
+        (partz, label) -- z-ordered particles and group labels -- label points to the rank
+        and index of the first particle in z-order that belongs to the same group.
     """
     rank, ndev, axis_name = get_rank_info()
 

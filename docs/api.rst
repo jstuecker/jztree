@@ -33,3 +33,4 @@ jztree.fof
 -----------
 .. automodule:: jztree.fof
    :members:
+   :member-order: bysource
