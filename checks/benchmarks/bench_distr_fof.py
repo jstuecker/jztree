@@ -6,7 +6,7 @@ import numpy as np
 
 from jztree.config import FofConfig
 from jztree.tree import zsort_and_tree
-from jztree.fof import distr_fof_labels_z_with_tree, _distr_fof_dual_walk, _distr_fof_leaf2leaf
+from jztree.fof import distr_fof_labels, _distr_fof_dual_walk, _distr_fof_leaf2leaf
 from jztree.fof import _fof_catalogue_from_groups, _distr_fof_order, distr_fof_and_catalogue
 from jztree.jax_ext import get_rank_info, shard_map_constructor
 from jztree_utils import ics
@@ -24,7 +24,7 @@ particles_and_tree.smap = shard_map_constructor(particles_and_tree,
 def run_fof(N, rlink=0.1):
     part, partz, th = particles_and_tree(N)
 
-    return distr_fof_labels_z_with_tree(partz.pos, th, rlink=rlink)
+    return distr_fof_labels(partz.pos, th=th, rlink=rlink)[1]
 run_fof.smap = shard_map_constructor(run_fof, in_specs=(None, None), static_argnums=(0,1))
 
 @pytest.mark.skipif(jax.device_count() <= 1, reason="Requires multiple devices")

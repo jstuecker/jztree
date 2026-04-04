@@ -782,9 +782,9 @@ def fof_labels(part: jax.Array, rlink: float, boxsize: float = 0.,
         return partz, igroupz
 fof_labels.jit = jax.jit(fof_labels, static_argnames=["rlink", "boxsize", "cfg", "output_order"])
 
-def distr_fof_labels_z_with_tree(
-        posz: jax.Array, th: TreeHierarchy, rlink: float, 
-        boxsize: float = 0., cfg: FofConfig = FofConfig(), linearize_labels: bool = False
+def distr_fof_labels(
+        part: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig(), 
+        th: TreeHierarchy | None = None, linearize_labels: bool = False
     ) -> Label:
     """
     linearize_labels: only for testing against single-gpu version - converts (irank,igroup) labels to 
@@ -792,35 +792,31 @@ def distr_fof_labels_z_with_tree(
     """
     rank, ndev, axis_name = get_rank_info()
 
+    if th is None:
+        partz, th = zsort_and_tree(part, cfg.tree)
+    else:
+        partz = part # assume z-sorted
+
     node_data, ilist, link_data = _distr_fof_dual_walk(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist,
-        size_links=int(cfg.alloc_fac_distr_links * len(posz))
+        size_links=int(cfg.alloc_fac_distr_links * len(part))
     )
 
-    labels = _distr_fof_leaf2leaf(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
+    labels = _distr_fof_leaf2leaf(node_data, ilist, link_data, partz, rlink=rlink, boxsize=boxsize)
 
     if linearize_labels:
-        num = jax.lax.all_gather(jnp.sum(~jnp.isnan(posz[...,0]), axis=0), axis_name)
+        num = jax.lax.all_gather(jnp.sum(~jnp.isnan(part[...,0]), axis=0), axis_name)
         dspl = cumsum_starting_with_zero(num)
         igroup = dspl[labels.irank] + labels.igroup
 
-        return igroup
+        return partz, igroup
     else:
-        return labels
-distr_fof_labels_z_with_tree.jit = jax.jit(
-    distr_fof_labels_z_with_tree, static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
-)
-
-def distr_fof_labels(part: Pos, rlink: float, boxsize: float = 0., 
-              cfg: FofConfig = FofConfig):
-    partz, th = zsort_and_tree(part, cfg.tree)
-
-    labels = distr_fof_labels_z_with_tree(partz.pos, th, rlink, boxsize, cfg)
-
-    return partz, labels
+        return partz, labels
 distr_fof_labels.smap = shard_map_constructor(distr_fof_labels,
-    in_specs=(P(-1), None, None, None), static_argnums=(1,2,3)
+    in_specs=(P(-1), None, None, None, P(-1), None),
+    static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
 )
+
 
 # ------------------------------------------------------------------------------------------------ #
 #                                        New User Interface                                        #
@@ -837,12 +833,6 @@ def fof_and_catalogue(
     rank, ndev, axis_name = get_rank_info()
     assert ndev == 1, "For distributed mode, please use distr_fof_and_catalogue"
 
-    # if th is not None:
-    #     # assume sorted particles
-    #     partz = part
-    # else:
-    #     partz, th = zsort_and_tree(part, cfg_tree=cfg.tree)
-    
     partz, igroup = fof_labels(part, rlink=rlink, th=th, boxsize=boxsize, cfg=cfg, output_order="z")
     partf, counts = _fof_order(igroup, partz)
     catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
@@ -863,12 +853,7 @@ def distr_fof_and_catalogue(
     """Returns particles in FoF-order and the FoFCatalogue... among ohters"""
     assert len(part.pos) < 2**31, "Allocation too large... may lead to int32 overflows"
 
-    if input_z_ordered:
-        partz = part
-        assert th is not None, "To skip sort, provide tree (jztree.tree.distr_zsort_and_tree)"
-    else:
-        partz, th = zsort_and_tree(part, cfg.tree)
-    labels = distr_fof_labels_z_with_tree(partz.pos, th, rlink=rlink, boxsize=boxsize, cfg=cfg)
+    partz, labels = distr_fof_labels(partz.pos, rlink=rlink, boxsize=boxsize, cfg=cfg, th=th)
     partf, counts = _distr_fof_order(labels, partz)
     catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
