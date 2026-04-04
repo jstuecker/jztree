@@ -150,6 +150,9 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
     
     # include splitting points for top-level nodes
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+    spl_n2n.ispl = spl_n2n.ispl + raise_if(spl_n2n.nfilled() > spl_n2n.size(),
+        "No space for top-level splits\nHint: Increase alloc_fac_nodes."
+    )
 
     def handle_level(i, ilist: InteractionList):
         level = nlevels - i - 1

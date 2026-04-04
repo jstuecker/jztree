@@ -120,6 +120,10 @@ def _fof_dual_walk(th: TreeHierarchy, rlink: float, boxsize: float=0., alloc_fac
     # Define super-node data
     igroup = jnp.arange(size, dtype=jnp.int32)
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+    spl_n2n.ispl = spl_n2n.ispl + raise_if(spl_n2n.nfilled() > spl_n2n.size(),
+        "No space for top-level splits\nHint: Increase alloc_fac_nodes."
+    )
+
     max_lvl = th.info().max_lvl()
     nlvl = th.lvl.append(jnp.full_like(igroup, max_lvl), nsup, max_lvl, resize=True)
 
@@ -375,6 +379,10 @@ def _distr_fof_dual_walk(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     )
     # Define arrays we need during tree-walk
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)
+    spl_n2n.ispl = spl_n2n.ispl + raise_if(spl_n2n.nfilled() > spl_n2n.size(),
+        "No space for top-level splits\nHint: Increase alloc_fac_nodes."
+    )
+
     lvl_max = th.info().max_lvl()
     node_lvl = th.lvl.append(jnp.full(size, lvl_max), nsup, fill_value=lvl_max, resize=True)
     l2p = th.splits_leaf_to_part()
