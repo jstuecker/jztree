@@ -133,7 +133,7 @@ def test_leaf_search(pos_mass_z: PosMass, tree_hierarchy: TreeHierarchy):
     assert jnp.all(spl == spl2), "Leaf ranges should be identical"
 
 def test_tree_nans(pos_mass_z: PosMass):
-    cfg_tree = TreeConfig()
+    cfg_tree = TreeConfig(mass_centered=True)
     npart = len(pos_mass_z.pos)
     nextra = 1356
 

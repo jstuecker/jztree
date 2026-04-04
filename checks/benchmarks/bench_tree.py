@@ -18,12 +18,12 @@ def bench_build_tree_hierarchy(jax_bench, npart):
 
     jb.measure(
         fn=build_tree_hierarchy, fn_jit=build_tree_hierarchy.jit, 
-        part=pos_mass_z, cfg_tree=cfg_tree, tag="geom_centered")
+        partz=pos_mass_z, cfg_tree=cfg_tree, tag="geom_centered")
     
     cfg_tree.mass_centered = True
     jb.measure(
         fn=build_tree_hierarchy, fn_jit=build_tree_hierarchy.jit, 
-        part=pos_mass_z, cfg_tree=cfg_tree, tag="mass_centered")
+        partz=pos_mass_z, cfg_tree=cfg_tree, tag="mass_centered")
 
 @pytest.mark.shrink_in_quick(keep_index=2)
 @pytest.mark.parametrize("npart", [1024*128,1024*1024, 1024*1024*8, 1024*1024*32])

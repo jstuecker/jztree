@@ -96,8 +96,8 @@ def zsort(pos: jax.Array | Pos) -> Tuple[jax.Array | Pos, jax.Array]:
     """Brings position vectors into z-order
 
     If x is a pytree, it needs to have a "pos" attribute which will be used as the sorting key. 
-    All remaining leaves of the pytree will be sorted accordingly along the leading axis (which 
-    should have consistent length)
+    All remaining leaves of the pytrees with the same length will be sorted accordingly along 
+    the leading axis
 
     Args:
         pos: Can be a jax.Array or a more complicated particle data structure following the
@@ -140,19 +140,20 @@ def zsort(pos: jax.Array | Pos) -> Tuple[jax.Array | Pos, jax.Array]:
     return eval(pos)
 zsort.jit = jax.jit(zsort)
 
-def search_sorted_z(xz, xz_query, block_size=64, leaf_search=False):
+def search_sorted_z(posz: jax.Array, posz_query: jax.Array, block_size: int = 64, leaf_search=False):
     """Finds the indices in xz where elements of xz_query would be inserted to keep order.
-    This is similar to np.searchsorted, but works for 3D points sorted in Z-order.
+    
+    This is similar to np.searchsorted, but works for points sorted in Z-order.
     On equality maintains the rule: xz[idx] < v <= xz[idx+1]
     if leaf_search is True, it is assumed that xz contains one point per leaf and we 
     return the index of the leaf that the query point belongs to.
     """
-    assert xz.dtype ==  xz_query.dtype
-    assert xz.shape[-1] == xz_query.shape[-1] == 3
+    assert posz.dtype ==  posz_query.dtype
+    assert posz.shape[-1] == posz_query.shape[-1] == 3
 
-    out_type = jax.ShapeDtypeStruct((xz_query.shape[0],), jnp.int32)
+    out_type = jax.ShapeDtypeStruct((posz_query.shape[0],), jnp.int32)
     inds = jax.ffi.ffi_call("SearchSortedZ", (out_type,))(
-        xz, xz_query, block_size=np.uint64(block_size), leaf_search=leaf_search)[0]
+        posz, posz_query, block_size=np.uint64(block_size), leaf_search=leaf_search)[0]
     return inds
 search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "leaf_search"))
 
@@ -367,9 +368,21 @@ def zsort_and_tree(
         num_types: int | None = None,
         shrink: bool = True
     ) -> Tuple[Pos, TreeHierarchy]:
-    """Brings particles into z-order and creates a tree hierarchy
-    
-    supports multi-GPU and may be called inside of a shard_map
+    """Brings particles into z-order and creates a tree hierarchy.
+
+    In the multi-GPU scenario, particles may be communicated and their balance adjusted
+    to ensure that top-level nodes don't cross domain boundaries.
+
+    For multi-type trees, please use :func:`zsort_and_tree_multi_type`
+
+    Args:
+        part: position array or dataclass
+        cfg_tree: low-level configuration options
+        data: optional: additional particle data that will be carried along through sorting
+            and communication. Can be a pytree and will be provided as an additional output
+        ptype: optional, a type-index per particle to distinguish particle types in tree
+        num_types: number of particle types
+        shrink: if False, always return 3 three outputs
     """
     rank, ndev, axis_name = get_rank_info()
 
@@ -412,6 +425,19 @@ def zsort_and_tree_multi_type(
         cfg_tree: TreeConfig = TreeConfig(),
         data: Any | None = None
     ) -> Tuple[Tuple[Pos, ...], TreeHierarchy]:
+    """Builds a tree with multiple particle types
+    
+    The tree's leaf-to-particle splits :paramref:`jztree.data.TreeHierarchy.ispl_l2p_per_type`
+    will be defined separately for each type. 
+
+    Args:
+        part: tuple of particle arrays of different types
+        cfg_tree: config object controlling tree structure and allocation
+        data: additional particle data to be carried along
+    Returns:
+        (partz, th) -- sorted particles and tree hierarchy. If :paramref:`data` is provided 
+        additionally returns the sorted data.
+    """
     num_types = len(part)
     size_of_type = tuple(len(get_pos(p)) for p in part)
     num_of_type = jnp.array(tuple(get_num(p) for p in part))
@@ -728,7 +754,7 @@ def _get_tree_mass_centers(part: PosMass, ispl_n2n: PackedArray) -> Tuple[Packed
     return node_mcent, node_mass
 
 def build_tree_hierarchy(
-        part: PosMass | jax.Array,
+        partz: PosMass | jax.Array,
         cfg_tree: TreeConfig,
         lvl_bound: jax.Array | None = None,
         ptype: jax.Array | None = None,
@@ -750,13 +776,16 @@ def build_tree_hierarchy(
     data dependent on each level. To limit the number of allocations that we need to predict, we
     use the PackedArray class, that helps us to stack multiple different levels into a single
     continguous array, but to access it "almost" as if they were separate arrays.
+
+    It is recommend to use the :func:`zsort_and_tree` interface -- especially for Multi-GPU,
+    since the particle distribution needs to be adjusted to acommodate nodes.
     """
     rank, ndev, axis_name = get_rank_info()
 
-    posz = get_pos(part)
-    npart_tot = get_num_total(part, default_to_length=(ndev==1))
+    posz = get_pos(partz)
+    npart_tot = get_num_total(partz, default_to_length=(ndev==1))
     np_per_dev = npart_tot // ndev # static estimate of number of unpadded-particles
-    npart = get_num(part, default_to_nancount=True)
+    npart = get_num(partz, default_to_nancount=True)
 
     node_sizes = _define_tree_level_node_sizes(npart_tot, cfg_tree)
 
@@ -784,8 +813,8 @@ def build_tree_hierarchy(
     geom_cent = PackedArray.from_data(geom_cent, prop_array_spl, fill_values=jnp.nan)
 
     if cfg_tree.mass_centered:
-        assert hasattr(part, "mass"), "To use mass centering, please provide PosMass input"
-        nmass_cent, nmass = _get_tree_mass_centers(part, ispl_n2n)
+        assert hasattr(partz, "mass"), "To use mass centering, please provide PosMass input"
+        nmass_cent, nmass = _get_tree_mass_centers(partz, ispl_n2n)
     else:
         nmass_cent, nmass = None, None
 
@@ -845,8 +874,17 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
 
     This is useful for evaluating all-to-all interactions in a grouped manner on GPU
 
-    node_range: if specified, the interaction list will only contain interactions with
-                receiving indices in node_range will be evaluated
+    Args:
+        nnodes: number of top-level nodes
+        size_ilist: allocation size of the interaction list
+        ngroup: how many top-level nodes should be summarized into one super node
+        size_super: size of the super-node allocation
+        node_range: can be provided to only include receiving nodes in this range, (but
+            source nodes on the full domain. Useful for multi-GPU scenarios)
+        dtype: data-dtype of the interaction list. So far only int32 supported.
+    Returns:
+        A tuple (spl_super, ilist, nsuper_nodes) containing the super node splitting
+        points, the interaction list and the number of super nodes.
     """
     nnodes, ngroup = jnp.astype(nnodes, dtype), jnp.astype(ngroup, dtype)
 
@@ -925,41 +963,10 @@ def _flag_interacting_nodes(ilist: InteractionList, block_size=64):
         ilist.ispl, ilist.isrc, block_size=np.uint64(block_size), 
     )[0].astype(jnp.bool)
 
-def simplify_interaction_list_old(ilist: InteractionList, always_keep: jax.Array | None = None
-                              ) -> InteractionList:
-    """Get reduced version of the interaction and node list skipping nodes without interactions
-    
-    Useful in multi-GPU scenarios where many non-local nodes will not have any local interactions
-    """
-    size_nodes = ilist.ispl.size - 1
-    idx = jnp.arange(ilist.isrc.size)
-
-    # flag all nodes that appear at least in one interaction
-    ioth = jnp.where(idx < ilist.ispl[-1], ilist.isrc, size_nodes)
-    flag = ilist.ispl[1:] > ilist.ispl[:-1] # appears as receiver
-    flag = flag.at[ioth].set(True) # appears as source
-
-    if always_keep is not None:
-        flag = flag | always_keep
-    
-    # create reduced id list
-    prefix = cumsum_starting_with_zero(flag)
-
-    reduced_ids = masked_scatter(flag, jnp.zeros_like(ilist.ids), prefix[:-1], ilist.ids)
-    reduced_dev_spl = prefix[ilist.dev_spl]
-
-    # change the label and the offsets of the interaction list
-    ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
-
-    ilist = InteractionList(
-        ispl, prefix[ilist.isrc], rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
-    )
-    
-    return verify_ilist(ilist)
-
 def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | None = None
                               ) -> InteractionList:
-    """Get reduced version of the interaction and node list skipping nodes without interactions
+    """Reduces an interaction list to skip nodes that don't appear as receiving our
+    source indices
     
     Useful in multi-GPU scenarios where many non-local nodes will not have any local interactions
     """

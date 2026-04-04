@@ -22,7 +22,7 @@ def bench_fof_steps(jax_bench, pos, N):
     cfg = FofConfig()
     th = jb.measure(
         fn_jit=build_tree_hierarchy.jit, 
-        part=posz, cfg_tree=cfg.tree, tag="tree"
+        partz=posz, cfg_tree=cfg.tree, tag="tree"
     )[1]
 
     node_data, ilist = jb.measure(fn_jit=_fof_dual_walk.jit, 

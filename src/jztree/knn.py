@@ -1,6 +1,6 @@
 from dataclasses import replace
 import numpy as np
-from typing import Any, Callable
+from typing import Any, Callable, Tuple
 
 import jax
 import jax.numpy as jnp
@@ -202,7 +202,7 @@ def knn(
         reduce_func: Callable | None = None,
         output_order: str = "input",
         cfg: KNNConfig = KNNConfig()
-    ) -> Any:
+    ) -> Tuple[jax.Array, jax.Array]:
     """The main function executing the nearest neighbour search.
     
     By default this returns (rnn, inn) -- the radii and indices of the k nearest
@@ -228,6 +228,8 @@ def knn(
             :paramref:`result`.
         output_order: May be "input" or "z".
         cfg: Config object that controls lower-level details of the algorithm
+    Returns:
+        tuple (rnn, inn) with neighbour radii and indices
     """
     assert output_order in ("z", "input")
 

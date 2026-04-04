@@ -365,7 +365,7 @@ def _max_tree_level(dim, dtype):
 
 @dataclass(frozen=True)
 class LevelInfo():
-    """Data class holding info on minimum and maximum level of a tree"""
+    """Data class holding info on minimum and maximum Morton level of a tree"""
     dim: int
     dtype: jnp.dtype
 
