@@ -14,7 +14,7 @@ def bench_knn_steps(jax_bench, pos):
 
     jb = jax_bench(jit_rounds=40, jit_warmup=10)
 
-    posz, idz = jb.measure(fn_jit=jz.tree.zsort.jit, x=pos, tag="zsort")[1]
+    posz, idz = jb.measure(fn_jit=jz.tree.zsort.jit, pos=pos, tag="zsort")[1]
     th = jb.measure(fn_jit=jz.tree.build_tree_hierarchy.jit, tag="tree",
                     part=posz, cfg_tree=cfg.tree)[1]
     
@@ -22,7 +22,7 @@ def bench_knn_steps(jax_bench, pos):
                        th=th, k=k, alloc_fac_ilist=cfg.alloc_fac_ilist)[1]
     
     jb.measure(fn_jit=jz.knn._segment_sort.jit, tag="ilist_sort",
-               spl=ilist.ispl, key=ilist.rad2, val=ilist.iother)[1]
+               spl=ilist.ispl, key=ilist.rad2, val=ilist.isrc)[1]
 
     rnn, inn = jb.measure(fn_jit=jz.knn._knn_leaf2leaf.jit, tag="leaf2leaf",
                           ilist=ilist, splT=th.splits_leaf_to_part(), xT=posz, k=k)[1]

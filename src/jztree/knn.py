@@ -31,12 +31,12 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     if xQ is None: xQ = xT
     if splQ is None: splQ = splT
 
-    assert ilist.rad2.shape == ilist.iother.shape, "rilist must have the same shape as ilist"
+    assert ilist.rad2.shape == ilist.isrc.shape, "rilist must have the same shape as ilist"
 
     assert xT.dtype == xQ.dtype
     assert xT.shape[-1] == xQ.shape[-1]
     assert splT.dtype == splQ.dtype == jnp.int32
-    assert ilist.iother.dtype == ilist.ispl.dtype == jnp.int32
+    assert ilist.isrc.dtype == ilist.ispl.dtype == jnp.int32
     assert len(ilist.ispl) == len(splQ)
 
     dtype = xT.dtype
@@ -53,7 +53,7 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     )
 
     rnn, inn = jax.ffi.ffi_call("KnnLeaf2Leaf", outputs)(
-        ilist.ispl, ilist.iother, ilist.rad2, splT, xT, splQ, xQ,
+        ilist.ispl, ilist.isrc, ilist.rad2, splT, xT, splQ, xQ,
         boxsize=np.float32(boxsize), k=np.int32(k)
     )[0:2]
     return rnn, inn
@@ -71,7 +71,7 @@ def _knn_node2node_ilist(
     assert dtype in (jnp.float32, jnp.float64)
 
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
-    assert ilist.iother.shape == ilist.rad2.shape, "node_ilist and node_ir2list must have the same shape"
+    assert ilist.isrc.shape == ilist.rad2.shape, "node_ilist and node_ir2list must have the same shape"
     assert ilist.size() < 2**31, f"Ilist allocation is in overflow danger {ilist.size()/2**31}"
 
     size = len(node_data.pos)
@@ -85,7 +85,7 @@ def _knn_node2node_ilist(
     )
 
     radii, ispl, il, ilr2 = jax.ffi.ffi_call("KnnNode2Node", outputs)(
-        ilist.ispl, ilist.iother, ilist.rad2, spl_parent, poslvl, node_data.npart,
+        ilist.ispl, ilist.isrc, ilist.rad2, spl_parent, poslvl, node_data.npart,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
         boxsize=np.float32(boxsize), dim=np.int32(node_data.pos.shape[-1])
     )
@@ -141,12 +141,12 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
         spl, ilist, nsup = distr_grouped_dense_interaction_list(
             th.num(nlevels-1), size, size_ilist=int(th.size_leaves*alloc_fac_ilist)
         )
-        ilist.rad2 = pcast_like(jnp.zeros(ilist.iother.shape, dtype=jnp.float32), ilist.iother)
+        ilist.rad2 = pcast_like(jnp.zeros(ilist.isrc.shape, dtype=jnp.float32), ilist.isrc)
     else:
         spl, ilist, nsup = grouped_dense_interaction_list(
             th.lvl.num(nlevels-1), int(th.size_leaves*alloc_fac_ilist), ngroup=32, size_super=size
         )
-        ilist.rad2 = jnp.zeros(ilist.iother.shape, dtype=jnp.float32)
+        ilist.rad2 = jnp.zeros(ilist.isrc.shape, dtype=jnp.float32)
     
     # include splitting points for top-level nodes
     spl_n2n = th.ispl_n2n.append(spl, nsup+1, fill_value=spl[-1], resize=True)

@@ -30,7 +30,7 @@ exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 autodoc_preserve_defaults = True
 # python_maximum_signature_line_length = 60
 autodoc_typehints = "description"
-autodoc_member_order = "bysource"
+# autodoc_member_order = "bysource"
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output

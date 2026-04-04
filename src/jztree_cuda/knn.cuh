@@ -20,13 +20,13 @@ struct PosR {
 
 struct ConstInteractionList {
     const int32_t* spl;
-    const int32_t* iother;
+    const int32_t* isrc;
     const float* rad2 = nullptr;
 };
 
 struct InteractionList {
     int32_t* spl;
-    int32_t* iother;
+    int32_t* isrc;
     float* rad2 = nullptr;
 };
 
@@ -235,7 +235,7 @@ __global__ void KnnLeaf2LeafKernel(
         PosId<dim, tvec>* particles = reinterpret_cast<PosId<dim, tvec>*>(shared_mem);
 
         PrefetchList2<int,float> pf_ilist(
-            ilist.iother, ilist.rad2, ilist.spl[ileafQ], ilist.spl[ileafQ + 1]
+            ilist.isrc, ilist.rad2, ilist.spl[ileafQ], ilist.spl[ileafQ + 1]
         );
 
         while(!pf_ilist.finished()) {
@@ -310,7 +310,7 @@ template <int dim, typename tvec>
 std::string KnnLeaf2Leaf(
     cudaStream_t stream,
     const int* ilist_spl,       // leaf-ranges in ilist
-    const int* ilist_iother,           // interaction list
+    const int* ilist_isrc,           // interaction list
     const float* ilist_r2,      // (lower) interaction rmax2
     const int* splT,            // leaf-ranges in A
     const Vec<dim,tvec>* xT,    // input positions
@@ -326,7 +326,7 @@ std::string KnnLeaf2Leaf(
 ) {
     int block_size = 32;
     int smem_size = block_size*sizeof(PosId<dim, tvec>);
-    ConstInteractionList ilist = {ilist_spl, ilist_iother, ilist_r2};
+    ConstInteractionList ilist = {ilist_spl, ilist_isrc, ilist_r2};
 
     constexpr int kmax = 32;
 
@@ -460,7 +460,7 @@ __global__ void KnnNode2NodeFindRmax(
         SortedNearestKWithCounts<kbins> nearestK(k, INFINITY);
 
         PrefetchList2<int,float> pf_ilist(
-            par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
+            par_ilist.isrc, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
         );
 
         float rmax2 = INFINITY;
@@ -539,7 +539,7 @@ __global__ void KnnNode2NodeCountInsert(
         int ncount = 0;
 
         PrefetchList2<int,float> pf_ilist(
-            par_ilist.iother, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
+            par_ilist.isrc, par_ilist.rad2, par_ilist.spl[parentQ], par_ilist.spl[parentQ + 1]
         );
         
         while(!pf_ilist.finished()) {
@@ -580,7 +580,7 @@ __global__ void KnnNode2NodeCountInsert(
                             }
 
                             node_ilist.rad2[offset] = r2;
-                            node_ilist.iother[offset] = itoff + j;
+                            node_ilist.isrc[offset] = itoff + j;
                         }
                         ncount += 1;
                     }

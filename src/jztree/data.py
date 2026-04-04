@@ -344,46 +344,8 @@ class PackedArray:
 #                                          Tree Structure                                          #
 # ------------------------------------------------------------------------------------------------ #
 
-@jax.tree_util.register_dataclass
-@dataclass
-class TreePlane():
-    # Defined per node:
-    ispl: jax.Array # relation to children
 
-    npart: jax.Array
-    lvl: jax.Array
-    geom_cent: jax.Array
-
-    # Scalars (data dependent)
-    nnodes: jax.Array
-
-    around_com: bool = static_field()
-
-    # Optional data:
-    mass_cent: PosMass | None = None      # Optionally needed
-
-    def size(self) -> int: # needed
-        return self.lvl.shape[0]
-    def center(self) -> jax.Array:
-        if self.around_com:
-            assert self.mass_cent is not None, "Mass center not available"
-            return self.mass_cent.pos
-        else:
-            return self.geom_cent
-    def node_extent(self, diag2=False) -> jax.Array: # only jax
-        # return jnp.ldexp(1., self.lvl)
-        olvl, omod = self.lvl//3, self.lvl % 3
-
-        dx = jnp.ldexp(1., olvl)
-        dy = jnp.ldexp(1., olvl + (omod >= 2).astype(jnp.int32))
-        dz = jnp.ldexp(1., olvl + (omod >= 1).astype(jnp.int32))
-
-        if diag2:
-            return dx*dx + dy*dy + dz*dz
-        else:
-            return jnp.stack((dx, dy, dz), axis=-1)
-
-def min_max_msb_diff(dtype):
+def _min_max_msb_diff(dtype):
     if dtype == jnp.float32:
         return -150, 128
     elif dtype == jnp.float64:
@@ -393,27 +355,44 @@ def min_max_msb_diff(dtype):
     elif dtype == jnp.int64:
         return -1, 64
 
-def min_tree_level(dim, dtype):
-    min_per_dim = min_max_msb_diff(dtype)[0]
+def _min_tree_level(dim, dtype):
+    min_per_dim = _min_max_msb_diff(dtype)[0]
     return dim*min_per_dim
 
-def max_tree_level(dim, dtype):
-    max_per_dim = min_max_msb_diff(dtype)[1]
+def _max_tree_level(dim, dtype):
+    max_per_dim = _min_max_msb_diff(dtype)[1]
     return dim*(max_per_dim + 1)
 
 @dataclass(frozen=True)
 class LevelInfo():
+    """Data class holding info on minimum and maximum level of a tree"""
     dim: int
     dtype: jnp.dtype
 
     def min_lvl(self) -> int:
-        return min_tree_level(self.dim, self.dtype)
+        return _min_tree_level(self.dim, self.dtype)
     def max_lvl(self) -> int:
-        return max_tree_level(self.dim, self.dtype)
+        return _max_tree_level(self.dim, self.dtype)
 
 @jax.tree_util.register_dataclass
 @dataclass
 class TreeHierarchy():
+    """Dataclass holding the tree-plane hierarchy
+
+    Most properties are stored in :class:`PackedArray` classes that stack them
+    contingously in a single buffer for all tree-planes
+    
+    Args:
+        size_leaves: Size of the leaf-node level allocation
+        ispl_n2n: The node-to-node splitting points. Node i on plane p includes all plane
+            p-1 nodes in the range ispl_n2n.get(p)[i] ... ispl_n2n.get(p)[i+1]
+        ispl_n2l: Splitting points that go directly from nodes to leaves.
+        ispl_l2p_per_type: Leaf-to-particle splitting points per particle type.
+        lvl: Morton-level of nodes. Can be used to define extent of nodes.
+        geom_cent: Geometric centers
+        mass: Mass of nodes (only available for mass_centered tree)
+        mass_cent: Mass centers of nodes (only available for mass_centered tree)
+    """
     size_leaves: int = static_field()
 
     # Packed Arrays:
@@ -429,27 +408,32 @@ class TreeHierarchy():
     mass_cent: PackedArray | None = None
 
     def splits_leaf_to_part(self, ptype: int = 0, size: int | None = None) -> jax.Array:
+        """Convenience method to get the leaf-to-particle splits for a specific type"""
         if size is None:
             size = self.size()+1
         return self.ispl_l2p_per_type[ptype][:size]
     # self.ispl_n2n.get(0, size)
     
     def npart(self, level: int, ptype: int = 0, size=None) -> jax.Array:
+        """Number of particles in an node"""
         if size is None:
             size = self.size()
         ispl_n2p = self.splits_leaf_to_part(ptype)[self.ispl_n2l.get(level, size+1)]
         return ispl_n2p[1:] - ispl_n2p[:-1]
 
     def center(self) -> PackedArray:
+        """Returns mass_cent or geom_cent, depending on how tree was constructed"""
         if self.mass_cent is not None:
             return self.mass_cent
         else:
             return self.geom_cent
            
     def num_planes(self) -> int:
+        """Numer of planes in the tree"""
         return len(self.ispl_n2l.ispl) - 1
 
     def num(self, level) -> int:
+        """Number of nodes in a given plane"""
         return self.lvl.num(level)
     
     def size(self) -> int:
@@ -458,6 +442,7 @@ class TreeHierarchy():
         return self.ispl_n2n.size() - 1
     
     def info(self) -> LevelInfo:
+        """Info about the minimum and maximum Morton levels of the tree"""
         dim = self.geom_cent.data.shape[-1]
         dtype = self.geom_cent.data.dtype
         return LevelInfo(dim, dtype)
@@ -469,9 +454,21 @@ class TreeHierarchy():
 @jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class InteractionList:
-    """Node i0 will interact with all indices iother[ispl[i0]:ispl[i0+1]]"""
+    """A dataclass that holds interaction information for dual tree-walks
+
+    The interaction list is defined so that a receiving node i needs to interact with
+    all source nodes in the range isrc[ispl[i]:ispl[i+1]]
+    
+    Args:
+        ispl: splitting points of interaction list segments
+        isrc: interaction source indices
+        rad2: interaction radii squared. Optional -- so far only used in kNN algorithm
+        ids: used in multi-GPU scenarios to define for each source index the origin index
+        dev_spl: used in multi-GPU scenarios to define for each unique source index the
+            origin rank. (Sources in range dev_spl[r]:dev_spl[r+1] belong to rank r.)
+    """
     ispl: jax.Array
-    iother: jax.Array
+    isrc: jax.Array
 
     # Optional: interaction radii (can be useful for pruning)
     rad2: jax.Array | None = None
@@ -480,17 +477,6 @@ class InteractionList:
     ids: jax.Array | None = None
     dev_spl: jax.Array | None = None
 
-    def get_interactions(self, get_valid=False):
-        """Returns (i0, i1, valid) indicating two interaction nodes and validity"""
-        iint = jnp.arange(self.size(), dtype=self.dtype())
-        i0 = inverse_of_splits(self.ispl, self.size())
-        i1 = self.iother#[iint]
-        if get_valid:
-            valid = iint < self.ispl[-1]
-            return i0, i1, valid
-        else:
-            return i0, i1
-    
     def without_remote_query_points(self, rank: int) -> 'InteractionList':
         """
         By default the interaction list carries remote and local points both on ispl so that
@@ -505,28 +491,20 @@ class InteractionList:
         )
         return replace(self, ispl=ispl_new)
 
-    def filter(self, mask: jax.Array, size: int | None = None) -> 'InteractionList':
-        """Returns a filtered interaction list according to the boolean mask"""
-        if size is None:
-            size = mask.size
-        ioff = cumsum_starting_with_zero(mask)
-        iupdate = jnp.where(mask, ioff, size)
-        iother_new = jnp.zeros(size, dtype=self.iother.dtype).at[iupdate].set(self.iother)
-        ispl_new = ioff[self.ispl]
-
-        return InteractionList(ispl=ispl_new, iother=iother_new)
-    
     def nfilled(self):
+        """Number of filled entries"""
         return self.ispl[-1]
 
     def size(self):
-        return self.iother.size
+        """Size of the interaction indices array"""
+        return self.isrc.size
     
     def dtype(self):
-        return self.iother.dtype
+        """Index datatype (so far always int32)"""
+        return self.isrc.dtype
 
 def verify_ilist(ilist: InteractionList):
-    if len(ilist.iother) >= 2**31:
+    if len(ilist.isrc) >= 2**31:
         raise ValueError("Intercation list allocation too large and may produce integer overflows",
                          "Hint: Use more GPUs or decrease alloc_fac_ilist (if possible)")
     return ilist
@@ -590,6 +568,27 @@ class FofNodeData():
 @jax.jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class FofCatalogue:
+    """Friends-of-friends catalogue data
+    
+    Many properties are optional and will be set to None if calculation was lacking data.
+    To allow **jax.jit** compatibility the arrays are generally allocated larger than
+    what is actually needed, with :paramref:`ngroups` indicating the filled
+    count. You may use :func:`squeeze_catalogue` (outside of **jax.jit**) to obtain 
+    a squeezed version.
+
+    Args:
+        ngroups: Actual number of groups. (On multi-GPU the local count.)
+        mass: Group masses
+        count: Number of particles
+        offset: Starting point of each group in the particle array
+        com_pos: Center of mass position
+        com_vel: Center of mass velocity
+        com_inertia_radius: Inertia radius 
+            :math:`\\sqrt{\\langle (\\mathbf{x} - \\mathbf{x}_0)^2 \\rangle}`.
+        scale_factor: For light-cone data: scale factor of light-cone crossing.
+        v_rad: For light-cone data: radial (line of sight) velocity
+        offset_rank: Provided for squeezed catalogues to indicate origin rank.
+    """
     ngroups: jax.Array
     mass: jax.Array | None = None
     count: jax.Array | None = None
@@ -612,16 +611,18 @@ def squeeze_catalogue(
         offset_mode: str = "rank",
         nparts: jax.Array | None = None
     ) -> FofCatalogue:
-    """Squeezes multi-gpu output catalogue (Ndev,ngroup*) into a dense form (Ntot)
-    and replicates it on every device
+    """Squeezes multi-GPU FoF catalogue that was returned from a shard_map (Ndev,size_group)
+    into a dense form (Ntot) and replicates it on every device
 
-    offset_mode: Can be "rank" or "flat". Before squeezing offsets indicate locations in the
-                particle array of the same device. Since squeezing looses the device info, we need
-                to indicate either the rank or we need to convert offsets to global offsets
-                that index a squeezed particle array (converts to int64).
-                "global" needs "nparts" as an input, i.e. how many particles were on each device
-    
-    To jit this function size_out must be provided
+    Args:
+        cata: FoF catalogue
+        size_out: Can be provided to allow **jit** compatibility
+        offset_mode: Can be "rank" or "flat". Before squeezing offsets indicate locations in the
+            particle array of the same device. Since squeezing looses the device info, we need
+            to indicate either the rank or we need to convert offsets to global offsets
+            that index a squeezed particle array (converts to int64).
+            "global" needs "nparts" as an input, i.e. how many particles were on each device
+        nparts: particles that are on each device, needed for "global" offset_mode
     """
     assert offset_mode in ("rank", "global")
 
@@ -675,5 +676,6 @@ def catalogues_equal(c1: FofCatalogue, c2: FofCatalogue):
 @partial(jax.tree_util.register_dataclass)
 @dataclass(slots=True)
 class RankIdx:
+    """Holds a rank and an index -- often used to indicate the origin of data."""
     rank: jax.Array
     idx: jax.Array

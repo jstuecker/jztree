@@ -833,7 +833,7 @@ def _dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
 
     stats_callback("allocation", AllocStats.record_filled_interactions, nint, size_ilist)
     
-    return verify_ilist(InteractionList(ispl=ispl, iother=ilist))
+    return verify_ilist(InteractionList(ispl=ispl, isrc=ilist))
 _dense_interaction_list.jit = jax.jit(_dense_interaction_list, static_argnames=['size_ilist', 'size_nodes'])
 
 def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
@@ -882,7 +882,7 @@ def grouped_dense_interaction_list(nnodes: jax.Array | int, size_ilist: int,
     idx = jnp.arange(size_ilist, dtype=dtype)
     ilist = jnp.where(idx < nint, idx % nsuper_nodes, 0)
 
-    ilist = verify_ilist(InteractionList(ispl=ispl, iother=ilist))
+    ilist = verify_ilist(InteractionList(ispl=ispl, isrc=ilist))
 
     stats_callback("allocation", AllocStats.record_filled_interactions, nint, size_ilist)
 
@@ -922,7 +922,7 @@ def _flag_interacting_nodes(ilist: InteractionList, block_size=64):
     outputs = (jax.ShapeDtypeStruct((ilist.ispl.size-1,), jnp.uint8),)
 
     return jax.ffi.ffi_call("FlagInteractingNodes", outputs, vmap_method="sequential")(
-        ilist.ispl, ilist.iother, block_size=np.uint64(block_size), 
+        ilist.ispl, ilist.isrc, block_size=np.uint64(block_size), 
     )[0].astype(jnp.bool)
 
 def simplify_interaction_list_old(ilist: InteractionList, always_keep: jax.Array | None = None
@@ -932,10 +932,10 @@ def simplify_interaction_list_old(ilist: InteractionList, always_keep: jax.Array
     Useful in multi-GPU scenarios where many non-local nodes will not have any local interactions
     """
     size_nodes = ilist.ispl.size - 1
-    idx = jnp.arange(ilist.iother.size)
+    idx = jnp.arange(ilist.isrc.size)
 
     # flag all nodes that appear at least in one interaction
-    ioth = jnp.where(idx < ilist.ispl[-1], ilist.iother, size_nodes)
+    ioth = jnp.where(idx < ilist.ispl[-1], ilist.isrc, size_nodes)
     flag = ilist.ispl[1:] > ilist.ispl[:-1] # appears as receiver
     flag = flag.at[ioth].set(True) # appears as source
 
@@ -952,7 +952,7 @@ def simplify_interaction_list_old(ilist: InteractionList, always_keep: jax.Array
     ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
 
     ilist = InteractionList(
-        ispl, prefix[ilist.iother], rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
+        ispl, prefix[ilist.isrc], rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
     )
     
     return verify_ilist(ilist)
@@ -978,8 +978,8 @@ def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | N
     # change the label and the offsets of the interaction list
     ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
 
-    # do isrc = prefix[ilist.iother], but faster:
-    isrc = map_in_range(jnp.array((0, ilist.ispl[-1])), ilist.iother, prefix)
+    # do isrc = prefix[ilist.isrc], but faster:
+    isrc = map_in_range(jnp.array((0, ilist.ispl[-1])), ilist.isrc, prefix)
 
     ilist = InteractionList(
         ispl, isrc, rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl

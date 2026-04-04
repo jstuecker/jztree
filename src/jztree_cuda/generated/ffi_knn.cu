@@ -30,7 +30,7 @@ using DT = ffi::DataType;
 
 using KnnLeaf2LeafDispatchFn = std::string (*) (cudaStream_t stream,
     const void* ilist_spl,
-    const void* ilist_iother,
+    const void* ilist_isrc,
     const void* ilist_r2,
     const void* splT,
     const void* xT,
@@ -47,7 +47,7 @@ using KnnLeaf2LeafDispatchFn = std::string (*) (cudaStream_t stream,
 template<int dim, typename tvec>
 static std::string KnnLeaf2LeafDispatchWrapper(cudaStream_t stream,
     const void* ilist_spl,
-    const void* ilist_iother,
+    const void* ilist_isrc,
     const void* ilist_r2,
     const void* splT,
     const void* xT,
@@ -63,7 +63,7 @@ static std::string KnnLeaf2LeafDispatchWrapper(cudaStream_t stream,
 ) {
     return KnnLeaf2Leaf<dim, tvec> (stream,
         reinterpret_cast<const int*>(ilist_spl),
-        reinterpret_cast<const int*>(ilist_iother),
+        reinterpret_cast<const int*>(ilist_isrc),
         reinterpret_cast<const float*>(ilist_r2),
         reinterpret_cast<const int*>(splT),
         reinterpret_cast<const Vec<dim,tvec>*>(xT),
@@ -83,7 +83,7 @@ static std::string KnnLeaf2LeafDispatchWrapper(cudaStream_t stream,
 ffi::Error KnnLeaf2LeafFFIHost(
     cudaStream_t stream,
     ffi::AnyBuffer ilist_spl,
-    ffi::AnyBuffer ilist_iother,
+    ffi::AnyBuffer ilist_isrc,
     ffi::AnyBuffer ilist_r2,
     ffi::AnyBuffer splT,
     ffi::AnyBuffer xT,
@@ -142,7 +142,7 @@ ffi::Error KnnLeaf2LeafFFIHost(
     // Now call our function
     std::string result = instance(stream,
         ilist_spl.untyped_data(),
-        ilist_iother.untyped_data(),
+        ilist_isrc.untyped_data(),
         ilist_r2.untyped_data(),
         splT.untyped_data(),
         xT.untyped_data(),
@@ -173,7 +173,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
     ffi::Ffi::Bind()
         .Ctx<ffi::PlatformStream<cudaStream_t>>()
         .Arg<ffi::AnyBuffer>() // ilist_spl
-        .Arg<ffi::AnyBuffer>() // ilist_iother
+        .Arg<ffi::AnyBuffer>() // ilist_isrc
         .Arg<ffi::AnyBuffer>() // ilist_r2
         .Arg<ffi::AnyBuffer>() // splT
         .Arg<ffi::AnyBuffer>() // xT

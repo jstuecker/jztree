@@ -5,11 +5,13 @@ config
 --------
 .. automodule:: jztree.config
    :members:
+   :member-order: bysource
 
 data
 --------
 .. automodule:: jztree.data
-   :members:
+   :members: Pos, PosMass, ParticleData, RankIdx, TreeHierarchy, FofCatalogue, InteractionList, LevelInfo, squeeze_catalogue, PackedArray
+   :member-order: bysource
 
 tree
 --------

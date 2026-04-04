@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 @dataclass(unsafe_hash=True)
 class LoggingConfig():
-    """Config controlling logging."""
+    """Config dataclass controlling logging."""
     level : int = 1
     show_loc : bool = True
 
@@ -14,7 +14,7 @@ class RegularizationConfig():
 
 @dataclass(unsafe_hash=True)
 class TreeConfig():
-    """Config controlling tree structure and allocation."""
+    """Config dataclass controlling tree structure and allocation."""
     # structure:
     max_leaf_size: int = 32
     coarse_fac: float = 6.0
@@ -28,11 +28,11 @@ class TreeConfig():
     nsamp: int = 1024
 
     # other:
-    mass_centered: bool = True
+    mass_centered: bool = False
 
 @dataclass(unsafe_hash=True)
 class FofCatalogueConfig():
-    """Config controlling aspects of friends-of-friends catalogues"""
+    """Config dataclass controlling aspects of friends-of-friends catalogues"""
     npart_min: int = 20
 
 @dataclass(unsafe_hash=True)

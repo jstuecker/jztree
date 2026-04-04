@@ -17,7 +17,7 @@ def bench_fof_steps(jax_bench, pos, N):
     rlink = 0.2 * boxsize / N**(1/3)
     pos = jax.random.uniform(jax.random.PRNGKey(0), (N, 3), minval=0.0, maxval=boxsize)
 
-    posz, idz = jb.measure(fn=zsort, fn_jit=zsort.jit, x=pos, tag="zsort")[1]
+    posz, idz = jb.measure(fn=zsort, fn_jit=zsort.jit, pos=pos, tag="zsort")[1]
 
     cfg = FofConfig()
     th = jb.measure(

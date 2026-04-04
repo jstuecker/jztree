@@ -34,8 +34,8 @@ def _fof_node2node(
     ) -> Tuple[jax.Array, InteractionList]:
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
     assert len(node_data.lvl) == len(node_igroup), "Should both correspond to no. of childrne"
-    assert ilist.iother.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
-    assert ilist.iother.dtype == ilist.ispl.dtype == spl_parent.dtype == node_igroup.dtype == jnp.int32
+    assert ilist.isrc.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
+    assert ilist.isrc.dtype == ilist.ispl.dtype == spl_parent.dtype == node_igroup.dtype == jnp.int32
     
     size = len(node_data.pos)
 
@@ -46,16 +46,16 @@ def _fof_node2node(
     )
 
     res = jax.ffi.ffi_call("FofNode2Node", outputs, input_output_aliases={4:0})(
-        ilist.ispl, ilist.iother, spl_parent, node_data.pos_lvl(), node_igroup,
+        ilist.ispl, ilist.isrc, spl_parent, node_data.pos_lvl(), node_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size),
         dim=np.int32(node_data.pos.shape[-1])
     )
 
-    node_igroup, node_ilist_spl, node_ilist_ioth = pcast_like(res, like=ilist.iother)
+    node_igroup, node_ilist_spl, node_ilist_ioth = pcast_like(res, like=ilist.isrc)
 
     node_ilist = verify_ilist(InteractionList(node_ilist_spl, node_ilist_ioth))
 
-    n1, n2 = node_ilist.nfilled(), node_ilist.iother.shape[0]
+    n1, n2 = node_ilist.nfilled(), node_ilist.isrc.shape[0]
     node_igroup = node_igroup + raise_if(n1 > n2,
         "The interaction list allocation is too small. (need: {n1} have: {n2})\n"
         "Hint: Increase alloc_fac_ilist at least by a factor of {ratio:.1f}",
@@ -149,7 +149,7 @@ _fof_dual_walk.jit = jax.jit(_fof_dual_walk, static_argnames=["rlink", "boxsize"
 def _fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                    rlink: float, boxsize: float = 0., block_size=32):
     assert len(leaf_data.spl) == len(ilist.ispl) == len(leaf_data.igroup)+1 == len(leaf_data.lvl)+1
-    assert ilist.iother.dtype == ilist.ispl.dtype == leaf_data.spl.dtype == leaf_data.igroup.dtype == jnp.int32
+    assert ilist.isrc.dtype == ilist.ispl.dtype == leaf_data.spl.dtype == leaf_data.igroup.dtype == jnp.int32
 
     part_igroup = _node_to_child_label(
         leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz),
@@ -157,7 +157,7 @@ def _fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Arr
     )
 
     igroup = jax.ffi.ffi_call("FofLeaf2Leaf", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
-        ilist.ispl, ilist.iother, leaf_data.spl, posz, part_igroup,
+        ilist.ispl, ilist.isrc, leaf_data.spl, posz, part_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
@@ -464,7 +464,7 @@ def _distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
     iseg = jnp.where(irank==rank, iseg, jnp.arange(size))
 
     iseg_new = jax.ffi.ffi_call("FofLeaf2Leaf", (jax.ShapeDtypeStruct((len(posz),), iseg.dtype),))(
-        ilist.ispl, ilist.iother, spl, posz, iseg,
+        ilist.ispl, ilist.isrc, spl, posz, iseg,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
