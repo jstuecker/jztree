@@ -10,7 +10,7 @@ from jztree.data import ParticleData, Link, Label, flatten_particles, pad_partic
 from jztree.data import squeeze_particles, expand_particles, squeeze_catalogue, sort_catalogue
 from jztree.tree import zsort_and_tree, zsort
 from jztree.fof import _distr_link, _insert_links, distr_fof_labels, fof_labels
-from jztree.fof import fof_and_catalogue, distr_fof_and_catalogue
+from jztree.fof import fof_and_catalogue, fof_and_catalogue
 from jztree_utils import ics
 import importlib
 has_discodj = importlib.util.find_spec("discodj") is not None
@@ -76,9 +76,8 @@ def test_labels_vs_single(seed):
     # combine arrays into one:
     igroup1 = multi_to_dense(igroup1, dev_spl, out_size=dev_spl[-1])
     partz = squeeze_particles(partz)
-
-    partz = zsort.jit(partz)[0]
-    igroup2 = fof_labels.jit(partz.pos, rlink=0.03)
+    
+    partz, igroup2 = fof_labels.jit(partz, rlink=0.03)
 
     assert igroup1 == pytest.approx(igroup2, abs=0.1)
 
@@ -89,7 +88,7 @@ def test_catalogue_vs_single(seed):
     # almost everything gets linked so we need a bit larger allocation than usual:
     cfg = FofConfig(alloc_fac_distr_links=0.1)
     part = ics.gaussian_particles.smap(mesh, jit=True)(1024*1024, npad=1024*256, seed=seed)
-    partf, cata1 = distr_fof_and_catalogue.smap(mesh, jit=True)(part, rlink=0.05, cfg=cfg)
+    partf, cata1 = fof_and_catalogue.smap(mesh, jit=True)(part, rlink=0.05, cfg=cfg)
 
     p2, cata2 = fof_and_catalogue.jit(squeeze_particles(partf), rlink=0.05)
     
@@ -124,7 +123,7 @@ def test_discodj_fof():
         part = pad_particles(part, int(part.num_total // ndev * 0.5))
         cfg = FofConfig()
         cfg.tree.alloc_fac_nodes = 1.2
-        part_fof, cata = distr_fof_and_catalogue(part, rlink=rlink, boxsize=1000., cfg=cfg)
+        part_fof, cata = fof_and_catalogue(part, rlink=rlink, boxsize=1000., cfg=cfg)
         return part_fof, cata
     distr_fof = expanding_shard_map(distr_fof, mesh=mesh, jit=True)
     

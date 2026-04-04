@@ -757,9 +757,9 @@ _fof_catalogue_from_groups.smap = shard_map_constructor(_fof_catalogue_from_grou
 #                                          User Interface                                          #
 # ------------------------------------------------------------------------------------------------ #
 
-def fof_labels(part: jax.Array, rlink: float, boxsize: float = 0., 
+def fof_labels(part: jax.Array | Pos, rlink: float, boxsize: float = 0., 
                cfg: FofConfig = FofConfig(), th: TreeHierarchy | None = None,
-               output_order: str = "input") -> Tuple[jax.Array, jax.Array]:
+               output_order: str = "input") -> Tuple[jax.Array | Pos, jax.Array]:
     
     if th is None:
         partz, idz = zsort(part)
@@ -783,9 +783,9 @@ def fof_labels(part: jax.Array, rlink: float, boxsize: float = 0.,
 fof_labels.jit = jax.jit(fof_labels, static_argnames=["rlink", "boxsize", "cfg", "output_order"])
 
 def distr_fof_labels(
-        part: jax.Array, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig(), 
+        part: Pos, rlink: float, boxsize: float = 0., cfg: FofConfig = FofConfig(), 
         th: TreeHierarchy | None = None, linearize_labels: bool = False
-    ) -> Label:
+    ) -> Tuple[Pos, Label]:
     """
     linearize_labels: only for testing against single-gpu version - converts (irank,igroup) labels to 
         dense global linear ones
@@ -797,15 +797,17 @@ def distr_fof_labels(
     else:
         partz = part # assume z-sorted
 
+    posz = get_pos(partz)
+
     node_data, ilist, link_data = _distr_fof_dual_walk(
         th, rlink=rlink, boxsize=boxsize, alloc_fac_ilist=cfg.alloc_fac_ilist,
-        size_links=int(cfg.alloc_fac_distr_links * len(part))
+        size_links=int(cfg.alloc_fac_distr_links * len(posz))
     )
 
-    labels = _distr_fof_leaf2leaf(node_data, ilist, link_data, partz, rlink=rlink, boxsize=boxsize)
+    labels = _distr_fof_leaf2leaf(node_data, ilist, link_data, posz, rlink=rlink, boxsize=boxsize)
 
     if linearize_labels:
-        num = jax.lax.all_gather(jnp.sum(~jnp.isnan(part[...,0]), axis=0), axis_name)
+        num = jax.lax.all_gather(jnp.sum(~jnp.isnan(posz[...,0]), axis=0), axis_name)
         dspl = cumsum_starting_with_zero(num)
         igroup = dspl[labels.irank] + labels.igroup
 
@@ -817,11 +819,6 @@ distr_fof_labels.smap = shard_map_constructor(distr_fof_labels,
     static_argnames=["cfg", "rlink", "boxsize", "linearize_labels"]
 )
 
-
-# ------------------------------------------------------------------------------------------------ #
-#                                        New User Interface                                        #
-# ------------------------------------------------------------------------------------------------ #
-
 def fof_and_catalogue(
         part: ParticleData,
         rlink: float,
@@ -831,34 +828,21 @@ def fof_and_catalogue(
     ) -> Tuple[ParticleData, FofCatalogue]:
     """Returns particles in FoF-order and the FoFCatalogue"""
     rank, ndev, axis_name = get_rank_info()
-    assert ndev == 1, "For distributed mode, please use distr_fof_and_catalogue"
-
-    partz, igroup = fof_labels(part, rlink=rlink, th=th, boxsize=boxsize, cfg=cfg, output_order="z")
-    partf, counts = _fof_order(igroup, partz)
-    catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
+    
+    if ndev == 1:
+        partz, igroup = fof_labels(part, rlink=rlink, th=th, boxsize=boxsize, cfg=cfg, output_order="z")
+        partf, counts = _fof_order(igroup, partz)
+        catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
+    else:
+        partz, labels = distr_fof_labels(part, rlink=rlink, boxsize=boxsize, cfg=cfg, th=th)
+        partf, counts = _distr_fof_order(labels, partz)
+        catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
 
     return partf, catalogue
 fof_and_catalogue.jit = jax.jit(fof_and_catalogue,
     static_argnames=["rlink", "boxsize", "cfg"]
 )
-
-def distr_fof_and_catalogue(
-        part: ParticleData,
-        rlink: float,
-        boxsize: float=0.,
-        cfg: FofConfig = FofConfig(),
-        input_z_ordered: bool = False,
-        th: TreeHierarchy | None = None
-    ) -> Tuple[ParticleData, FofCatalogue]:
-    """Returns particles in FoF-order and the FoFCatalogue... among ohters"""
-    assert len(part.pos) < 2**31, "Allocation too large... may lead to int32 overflows"
-
-    partz, labels = distr_fof_labels(partz.pos, rlink=rlink, boxsize=boxsize, cfg=cfg, th=th)
-    partf, counts = _distr_fof_order(labels, partz)
-    catalogue = _fof_catalogue_from_groups(partf, counts, cfg.catalogue, boxsize=boxsize)
-
-    return partf, catalogue
-distr_fof_and_catalogue.smap = shard_map_constructor(distr_fof_and_catalogue,
-    in_specs=(P(-1), None, None, None, None, P(-1)),
-    static_argnames=["rlink", "boxsize", "cfg", "input_z_ordered"]
+fof_and_catalogue.smap = shard_map_constructor(fof_and_catalogue,
+    in_specs=(P(-1), None, None, None, P(-1)),
+    static_argnames=["rlink", "boxsize", "cfg"]
 )

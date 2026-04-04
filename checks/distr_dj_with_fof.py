@@ -32,7 +32,7 @@ def sim_and_fof(cfg: jz.config.FofConfig):
 
     def distr_fof(part: jz.data.ParticleData):
         part = jz.data.pad_particles(part, int(part.num_total // ndev * 0.2))
-        part_fof, cata = jz.fof.distr_fof_and_catalogue(part, rlink=rlink, boxsize=boxsize, cfg=cfg)
+        part_fof, cata = jz.fof.fof_and_catalogue(part, rlink=rlink, boxsize=boxsize, cfg=cfg)
         
         base_name = f"data/dj_sim_{boxsize}_{ngrid}_{ndev}/snap_and_fof"
         # token = io.distr_write_hdf5(base_name, fof=cata, particles=part_fof)

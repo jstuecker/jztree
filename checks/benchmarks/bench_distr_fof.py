@@ -7,7 +7,7 @@ import numpy as np
 from jztree.config import FofConfig
 from jztree.tree import zsort_and_tree
 from jztree.fof import distr_fof_labels, _distr_fof_dual_walk, _distr_fof_leaf2leaf
-from jztree.fof import _fof_catalogue_from_groups, _distr_fof_order, distr_fof_and_catalogue
+from jztree.fof import _fof_catalogue_from_groups, _distr_fof_order, fof_and_catalogue
 from jztree.jax_ext import get_rank_info, shard_map_constructor
 from jztree_utils import ics
 
@@ -75,4 +75,4 @@ def bench_fof_steps(jax_bench, pos, ndev):
     )[1]
 
     
-    jb.measure(fn_jit=distr_fof_and_catalogue.smap(mesh, jit=True), part=part, rlink=rlink, tag=f"total")
+    jb.measure(fn_jit=fof_and_catalogue.smap(mesh, jit=True), part=part, rlink=rlink, tag=f"total")

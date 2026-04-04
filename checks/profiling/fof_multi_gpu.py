@@ -40,8 +40,7 @@ def bench_ndev(ndev):
 
         rlink = 0.2
         
-        # if ndev > 1:
-        if True:
+        if ndev > 1:
             boxsize = np.cbrt(n * ndev)*1.
             part = ics.multi_gpu_dj_sim.jit(boxsize=boxsize, num_per_device=n)
             res["n"].append(len(part.pos))
@@ -53,7 +52,7 @@ def bench_ndev(ndev):
 
             part = jz.data.expand_particles(part, ndev)
             part = pad(part)
-            f = jz.fof.distr_fof_and_catalogue.smap(mesh, jit=True)
+            f = jz.fof.fof_and_catalogue.smap(mesh, jit=True)
             timing = jb.measure(
                 fn_jit=f, part=part, rlink=rlink, boxsize=boxsize, write=False, cfg=cfg
             )[0]
