@@ -97,3 +97,14 @@ def multi_gpu_dj_sim(boxsize = 1000., num_per_device=512**3) -> ParticleData:
 
     return part
 multi_gpu_dj_sim.jit = jax.jit(multi_gpu_dj_sim, static_argnums=(0,1))
+
+
+# ------------------------------------------------------------------------------------------------ #
+#                                              Samples                                             #
+# ------------------------------------------------------------------------------------------------ #
+
+def cosmo_2d_sample():
+    from importlib.resources import files
+
+    file = files("jztree_utils") / "data" / "pos2d_cosmo_128_100.npy"
+    return np.load(file)

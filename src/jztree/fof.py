@@ -197,7 +197,11 @@ def _label_min_max(l1: Label, l2: Label):
     return lmin, lmax
 
 def fof_is_superset(igroup_sup, igroup, mask = None):
-    """Checks whether every FoF group in igroup_up is a superset of sets in igroup_low"""
+    """Checks whether every FoF group in igroup_sup is a superset of sets in igroup_low
+    
+    Useful for comparing different FoF implementations where labels may differ even when they
+    represent the same groups.
+    """
     # For this we need to check that if we link groups together as indicated by the super-grouping
     # that they are identical to the super groups
 

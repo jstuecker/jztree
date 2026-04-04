@@ -56,5 +56,5 @@ This module contains functions to calculate friends-of-friends (FoF) group label
 bringing particles into group order and for calculating a group catalogue.
 
 .. automodule:: jztree.fof
-   :members: fof_labels, distr_fof_labels, fof_and_catalogue
+   :members: fof_labels, distr_fof_labels, fof_and_catalogue, fof_is_superset
    :member-order: bysource

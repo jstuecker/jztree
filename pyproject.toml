@@ -41,3 +41,7 @@ dev = [
     "hdf5plugin",
     "hdf5"
 ]
+
+
+[tool.setuptools.package-data]
+jztree_utils = ["data/*.npy"]
