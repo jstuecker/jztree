@@ -31,11 +31,11 @@ If you execute `tree -L 2` from the main directory, you will see something like 
 * `CMakeLists.txt` and the `pyproject.toml` define how the CUDA code gets compiled. 
 * `checks` is a directory that contains unit-tests, benchmarks and some other scripts used to evaluate the code
 * `docs` contains the files needed to build this documentation -- generated with [Sphinx](https://www.sphinx-doc.org/en/master/).
-* `notebooks` contains some jupyter notebooks that explain usage of the repo.
+* `notebooks` contains some Jupyter notebooks that explain usage of the repo.
 * `build` contains files that are created when building the project.
 * `src` contains three separate directories:
-    - jztree: the main python module
-    - jztree_cuda: the cuda/ffi kernels
+    - jztree: the main Python module
+    - jztree_cuda: the CUDA/FFI kernels
     - jztree_utils: Some data and tools that help with testing the code.
 
 ## Python modules
@@ -57,16 +57,16 @@ src
 │   └── tree.py
 ```
 
-You can find some of the python modules documented in the [API reference](api.rst). However, there
-are additional files that deal with lower level details that are not included:
+You can find some of the Python modules documented in the [API reference](api.rst). However, there
+are additional files that deal with lower-level details that are not included:
 
-* `comm.py`: Holds some communication helper functions with more convenient interfaces than jax's built-in methods
+* `comm.py`: Holds some communication helper functions with more convenient interfaces than JAX's built-in methods
 * `config.py`: Holds configuration dataclasses that are used throughout the code to control lower-level details
 * `data.py`: Holds dataclasses (such as particles) and some convenience functions to access / manipulate them.
 * `fof.py`: The implementation of the friends-of-friends clustering.
-* `jax_ext.py`: Holds a few functions that extent some standard jax functions with additional features.
+* `jax_ext.py`: Holds a few functions that extend some standard JAX functions with additional features.
 * `knn.py`: The implementation of the k-nearest neighbour search.
-* `stats.py`: Defines a context-manager that may be used to infer e.g. how much of the allocated spaces were used-
+* `stats.py`: Defines a context manager that may be used to infer, e.g. how much of the allocated spaces were used.
 * `tools.py`: Some frequently used helper functions.
 * `tree.py`: Defines z-sorting, tree-building and regularization.
 
@@ -96,7 +96,7 @@ src
 ```
 
 Importantly, the directory `generated` contains [foreign function interface](https://docs.jax.dev/en/latest/ffi.html) (FFI) bindings that
-are automatically generated. So I suggest not to modify these file manually.
+are automatically generated. So I suggest not modifying these files manually.
 
 Let us have a look at an example to see how this works. In the file `tree.cuh` you can find a
 kernel with the following signature:
@@ -124,11 +124,11 @@ This kernel computes properties of nodes, given knowledge of their first and las
 by `lbound` and `rbound`). All input arrays (`pos`, `lbound`, `rbound`, `nnodes`)
 are pointers with the `const` keyword, whereas output arrays (`level`, `center` and `extent`) are 
 pointers without `const`. Static parameters are `const`, but not pointers. Finally, there
-are template parameters `dim` and `tvec` -- indicating the dimension and the data-type of vector
-data-types (e.g. `float` or `double`).
+are template parameters `dim` and `tvec` -- indicating the dimension and the data type of vector
+data types (e.g. `float` or `double`).
 
-Ideally, we'd want to directly call this kernel from python/jax, but this is not possible. Instead
-we need to interface with jax's FFI -- which involves a lot of boiler plate code. This gets especially
+Ideally, we'd want to call this kernel directly from Python/JAX, but this is not possible. Instead
+we need to interface with JAX's FFI -- which involves a lot of boilerplate code. This gets especially
 challenging with the requirement that we need to instantiate all the template parameter combinations.
 Therefore, I have written a little tool [jax_ffi_gen](https://github.com/jstuecker/jax_ffi_gen) that
 auto-generates the FFI from the function signature. Let's have a look at the file
@@ -166,7 +166,7 @@ You can see that the code-generation involves three steps:
 [tree-sitter](https://tree-sitter.github.io/tree-sitter/)).
 
 (2): We customize some aspects of the function. For example, we can infer the parameter "size_nodes"
-from the element count of one of jax's array. Further, we need to define template instances. To 
+from the element count of one of JAX's arrays. Further, we need to define template instances. To 
 avoid repetition, it is done with the `add_dim_dtype_templates` function -- which does 
 something like this
 ```python
@@ -174,11 +174,11 @@ functions["GetNodeGeometry"].template_par["dim"].instances = (2,3,4,5,6,7,8,9,10
 functions["GetNodeGeometry"].template_par["dim"].expression = "pos.dimensions()[1]"
 ```
 Further, we define a "grid_size_expression" which defines the kernel launch. (If you skip this,
-you may also define the "grid_size" parameter directly from the python side.)
+you may also define the "grid_size" parameter directly from the Python side.)
 
 (3): We call `gen.generate_ffi_module_file` to auto-generate the FFI code. E.g. if you delete
-`generated/ffi_tree.cu` and run the script, it shold reappear. This generation step uses a 
-[JINJA](https://jinja.palletsprojects.com/en/stable/) template setup internally.
+`generated/ffi_tree.cu` and run the script, it should reappear. This generation step uses a 
+[Jinja](https://jinja.palletsprojects.com/en/stable/) template setup internally.
 
 If you have a look at the generated file, you will find something like this
 ```CUDA
@@ -241,7 +241,7 @@ NB_MODULE(ffi_tree, m) {
 Feel free to have a look at the full source-code to appreciate the amount of coding work that we 
 are saving with this. (And more importantly the amount of interfacing bugs that we avoid!)
 
-Finally, let us see, how we call this function from the python side.
+Finally, let us see how we call this function from the Python side.
 
 ```python
 #...
@@ -277,21 +277,21 @@ def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array,
     # ...
 ```
 (I have simplified this function a bit.) If you compare with the signature of the CUDA kernel,
-you see that the interface is mostly identical: For every `const *` we have one input array,
-for every `*`, we have one output array and for every parameter (except the ones that we hard-coded),
+you see that the interface is mostly identical: for every `const *`, we have one input array;
+for every `*`, we have one output array; and for every parameter (except the ones that we hard-coded),
 we pass a keyword argument with the same name. The only additional parameter is `block_size` which
-defines how many threads are dispatched per block and it is generally considered an important-to-test
-performance parameter (good choices are generally multiples of 32 or 64, depending on the kernel.)
+defines how many threads are dispatched per block and it is generally considered an important
+performance parameter to test (good choices are generally multiples of 32 or 64, depending on the kernel).
 
 So the auto-generation allows us to work "almost" as if we were directly invoking the kernel from
-jax. It's understandable if this whole setup feels a bit overwhelming, but it gets easier once
+JAX. It's understandable if this whole setup feels a bit overwhelming, but it gets easier after
 trying it out a bit. And it is well worth it if you consider that it allows you to compute at
 the fastest possible speed. I have set up a minimal setup in 
 [this repository](https://github.com/jstuecker/jax-ffi-example) if you'd like to play around
 within a safe testing ground.
 
 ## Unit tests and benchmarks
-**jz-tree** is a well tested and benchmarked code. If you check `tree -L 2` from `src/checks` 
+**jz-tree** is a well-tested and benchmarked codebase. If you check `tree -L 2` from `checks`, 
 you find the following structure:
 
 ```bash
@@ -344,15 +344,15 @@ If you don't have it, the corresponding tests will be skipped. Note that the pri
 interface of this code have slightly diverged and you may not be able to run tests with this
 until the most recent changes become public.
 
-Try out running some of the tests, e.g. from the `checks` directory do:
+Try running some of the tests, e.g. from the `checks` directory:
 ```bash
 pytest --quick tests/test_knn.py
 ```
-or 
+or
 ```bash
 pytest --quick benchmarks/bench_tree.py
 ```
-The latter one giving an output like this:
+The latter gives output like this:
 ```bash
 Using single-host mode
 ======================================================== test session starts ========================================================
@@ -373,7 +373,7 @@ All PTJB benchmarks plots saved to benchmarks/.results
 =================================================== 2 passed, 5 skipped in 6.70s ====================================================
 ```
 The `--quick` option skips a lot of tests/benchmarks that are slightly redundant (i.e. they address
-the same question, but with different parameters). Of course, you can ommit it if you want to have a
+the same question, but with different parameters). Of course, you can omit it if you want to have a
 full picture!
 
 ## Recommendations
@@ -385,7 +385,7 @@ recommend the following steps:
 
 * First define a leaf-leaf interaction kernel. This one should be close to a brute-force approach,
 but where the input data is grouped into leaves. 
-* Try to follow the same traversal pattern that is used  in `knn.cuh` and `fof.cuh`. 
+* Try to follow the same traversal pattern that is used in `knn.cuh` and `fof.cuh`. 
 This will give you a well-coalescing memory access pattern which is very important for performance 
 on GPU.
 * You can create a simple setup by seeding a dense interaction list on the leaves 
