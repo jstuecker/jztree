@@ -9,5 +9,5 @@ Welcome to the documentation of jz-tree!
 
    installation.md
    quickstart.md
-   examples.md
+   multi_gpu_guide.md
    api.rst
