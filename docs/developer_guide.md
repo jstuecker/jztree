@@ -402,4 +402,4 @@ decent performance, but it probably doesn't scale well to large problem sizes.
 now have one of the fastest possible implementations of your algorithm.
 
 If you are planning to implement something like this or if you have some feature request, feel free to
-contact me.
+contact me at [jens&#46;stuecker&#64;univie&#46;ac&#46;at](mailto:jens.stuecker@univie.ac.at).
