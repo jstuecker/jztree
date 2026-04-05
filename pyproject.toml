@@ -39,7 +39,12 @@ dev = [
     "matplotlib>=3.10.6",
     "pytest>=8.4.2",
     "hdf5plugin",
-    "hdf5"
+    "hdf5",
+    # docs:
+    "sphinx",
+    "myst_parser",
+    "sphinx_paramlinks",
+    "sphinx_rtd_theme"
 ]
 
 

@@ -70,6 +70,7 @@ are additional files that deal with lower-level details that are not included:
 * `tools.py`: Some frequently used helper functions.
 * `tree.py`: Defines z-sorting, tree-building and regularization.
 
+(cuda-kernels-and-automatic-ffi-generation)=
 ## CUDA kernels and automatic FFI generation
 
 The `src/jztree_cuda` directory has the following structure:
