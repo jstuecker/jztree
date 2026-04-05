@@ -284,8 +284,8 @@ def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: j
 determine_znode_boundaries.jit = jax.jit(determine_znode_boundaries)
 
 def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array, 
-                      num: jnp.array = None, block_size: int = 64, result: str = "lvl_cent_ext",
-                      upper_extent: bool = False
+                      num: jax.Array | None = None, block_size: int = 64, 
+                      result: str = "lvl_cent_ext", upper_extent: bool = False
                       ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     assert lbound.shape == rbound.shape
     assert lbound.dtype == rbound.dtype == jnp.int32
