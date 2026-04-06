@@ -1,7 +1,15 @@
 # Installation
 
 ## Via pip
-Coming soon!
+
+The easiest way of installing is via pip. If you have `jax[cuda12]`, simply use
+```
+pip install jztree[cuda12]
+```
+and for `jax[cuda13]`:
+```
+pip install jztree[cuda13]
+```
 
 ## Build from sources
 First of all, clone the repository
