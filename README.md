@@ -1,113 +1,141 @@
 # JZ-Tree
-Super efficient dual tree walks with Jax and CUDA. Includes Friends of Friends and k-Nearest Neighbor search.
+Jz-Tree offers a framwork for GPU-friendly implementations of tree algorithms in jax (with a CUDA backend).
+Currently nearest neighbour search and friends-of-friends are implemented and deliver top
+performance.
+
+For more details check [the documentation](https://jstuecker.github.io/jztree/installation.html)!
 
 # Installation
-Installation from source can be a bit tricky, because the CUDA compiler nvcc and a couple of libraries are required. These may be accessible in three different ways (1) installed with pip (only available for CUDA>=13), (2) installed in a conda environment or (3) system installed
 
-If option (1) is available, it is the easiest and the most reproducible option. Since CUDA13 is very new, it may require updating the GPU drivers and it is only supported on [Graphics cards with compute capability](https://developer.nvidia.com/cuda-gpus?utm_source=chatgpt.com)  >=7.5
+## Via pip
+Coming soon!
 
-You may consider these options in the following order:
-* Your graphics card and driver support CUDA13 -> Go with option (1)
-* A system installed CUDA is available (or can easily be loaded as a module) -> Go with option (3)
-* If you like conda or if neither of the two options above are available, go with option (2)
-
-How to set up for each of these cases is explained below:
-### Option (1): CUDA13 + pip setup:
-Check that the NVIDIA "Driver Version" is new enough [>= 580](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html). Note that CUDA 13 is not supported on older GPUs
+## Build from sources
+First of all, clone the repository
 ```bash
-nvidia-smi
+git clone https://github.com/jstuecker/jz-tree
 ```
-If it is, go ahead and:
+Then you need to check whether your GPU supports CUDA13 or CUDA12 (older CUDA versions are not supported
+by jax). To install with CUDA13 you need
+* A [GPU with compute capability](https://developer.nvidia.com/cuda-gpus?utm_source=chatgpt.com) >=7.5.
+* A sufficiently new graphics driver [>= 580](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html). 
+You can check your GPU and your driver with `nvidia-smi`
+
+Take note of your compute capability. You can significantly speed up the build time 
+by setting the `CUDAARCHS` environment variable, e.g.
 ```bash
-pip install .
+export CUDAARCHS=87
 ```
-To check whether the installation was successful, run
+for compute capability 8.7. By default we use `CUDAARCHS="all"` to build for all architectures. This
+may taking a very long time. You may also provide `CUDAARCHS="native"` if you are building on the
+same system where you want to run the code.
+
+### CUDA13 installation
+
+The simplest way to install with CUDA13 is via `pip`. First, install the build dependencies:
+
+
 ```
-python src/benchmarks/hello_world.py
+pip install jax[cuda13] scikit-build-core nanobind cmake>=3.24 setuptools_scm
 ```
-(Note: Installation speed my be significantly higher with [uv pip](https://docs.astral.sh/uv/) )
-### Option (2): CONDA + CUDA12 setup:
+Finally, install **jz-tree** with `--no-build-isolation`
+```
+pip install -e . --no-build-isolation
+```
+```{note}
+If you do an editable installation without `--no-build-isolation`, you python may have problems to
+locate the CUDA modules.
+```
+(Note: Installation speed my be significantly higher with [uv pip](https://docs.astral.sh/uv/) ) -->
+### CUDA12 installation
+To build with CUDA12 independently of system installations, we require a conda distribution, since
+the `nvidia-cuda-nvcc-cu12` pip package does not ship the `nvcc` compiler binary. However,
+we can install it with a conda package.
+
 Install miniforge (or any other conda distribution) / setup an environment / activate it (skip steps as appropriate)
 ```bash
 curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
 bash Miniforge3-Linux-x86_64.sh -b
 rm Miniforge3-Linux-x86_64.sh
-eval "$(/root/miniforge3/bin/conda shell.bash hook)"
+eval "$(~/miniforge3/bin/conda shell.bash hook)" # possibly fill in the correct directory
 conda init
-conda create --name jztest -y
-conda activate jztest
+conda create --name jzenv -y
+conda activate jzenv
 ```
 Install prequisites via conda and pip:
 ```bash
 export CONDA_OVERRIDE_CUDA="12.9"  # Use a version that fits your needs
 conda install pip
 # conda install -c conda-forge cuda-nvcc cuda-version=12 cudnn nccl conda-forge libcufft cuda-cupti libcublas libcusparse
-conda install -c conda-forge cuda-nvcc cuda-version=12 cudnn nccl libcufft cuda-cupti libcublas libcusparse
+conda install -c conda-forge pip cuda-nvcc cuda-version=12 cudnn nccl libcufft cuda-cupti libcublas libcusparse
 #nvidia-cuda-crt
-pip install scikit-build-core nanobind cmake=3.24 setuptools_scm
+pip install scikit-build-core nanobind cmake>=3.24 setuptools_scm
 pip install --upgrade "jax[cuda12-local]"
 ```
-Verify that the installation fits your drivers
-```
-conda list
-pip list
-```
-Finally install the code with
+Finally, install the code with
 ```
 pip install -e . --no-build-isolation
 ```
 or with the [dev] optional dependencies if you'd like to use unit tests and some optional features.
 
-### Option (3): system CUDA setup:
+### System CUDA setup:
 I assume that you have already installed or loaded some CUDA version. E.g. check with
 ```bash
 nvcc --version
 ```
 Install:
 ```bash
-pip install --upgrade "jax[cuda13-local]"   # replace CUDA version as appropriate
-export CUDA_LOCAL=1   # This environment variable removes pip installed nvcc from build requirements
-pip install .
-```
-### Editable installation
-If you want to edit source files, it is recommended that you install like this:
-```bash
+pip install --upgrade "jax[cuda13-local]"   # or jax[cuda12-local]
+pip install scikit-build-core nanobind cmake>=3.24 setuptools_scm
 pip install -e . --no-build-isolation
 ```
-Note that the editable installation will be rebuild automatically on module load, so that it is not necessary to invoke install again whenever a .cu file changes (it will take a couple of seconds though). However, for this to work properly I found it necessary to use --no-build-isolation. For the "--no-build-isolation" flag to work, it is necessary that the build dependencies are installed separately. You should be able to achieve this by installing these in advance, e.g.
+Note that you may run into troubles if you have installed a second CUDA version in your python 
+environment.
+
+
+### Speeding up build-time
+
+As mentioned earlier, the primary way to speed up build is to provide the CUDAARCHS environment
+variable. For example,
+```
+CUDAARCHS=87 pip install -e . --no-build-isolation
+```
+
+A more advanced way of reducing the build time is to reduce the number of template variants that are 
+instanced, by modifying the code generation script `src/_generate_ffi.py` (and executing it again).
+This is explained in more detail in {ref}`CUDA kernels and automatic FFI generation <cuda-kernels-and-automatic-ffi-generation>`.
+
+## Hello World
+
+You can verify that the installation was succesful by running 
 ```bash
-pip install nvidia-cuda-cccl>=13.0.0 scikit-build-core nanobind jax[cuda13]
+python checks/hello_world.py
 ```
-or similar, depending on your setup. Also a system or conda installed version of cmake may be required.
 
-### Automatic Generation of FFI .cu files
-Jax's foreign function interface uses a lot of boiler-plate code. Have a look at `src/jztree_cuda/generated` to see it. I wrote a little tool to autogenerate these, so that we only need to focus on writing CUDA kernels and the python interface. Therefore, if you modify one of the `.cuh` files in `src/jztree_cuda`, you should regenerate the ffi bindings. You can do this by executing the `src/jztree_cuda/_generate_ffi.py` file (from any directory). Alternatively you can also pass the environment variable `CJ_GENERATE=1` to pip, e.g.
-```
-CJ_GENERATE=1 uv pip install -e . --no-build-isolation
-```
-and the script will get automatically executed. 
+This should give you something like this:
 
-However, if you want to modify kernels, it is best that you have a look at `src/jztree_cuda/_generate_ffi.py` and adapt it to your needs. Most of the code in the ffi files can be mapped trivially from the kernel definitions, but some more involved apsects (e.g. automatically evaluated launch parameters or template instantiation) require your input.
-
-For now, we'll keep all generated ffi files under version control. This helps monitoring whether the autogeneration is working fine.
-
-### uv
-If you want to reconstruct the exact virtual environment that the code was developed in, you will need a GPU and GPU-driver that are CUDA13 compatible. If you do, you can use [uv](https://docs.astral.sh/uv/) as follows:
 ```bash
-uv sync --group dev
-source .venv/bin/activate   # optionally activate the created environment
+rnn: [[0.         0.00327169 0.00362817 0.00418469 0.00620413 0.00629311
+  0.00657683 0.0065819 ]
+ [0.         0.0018539  0.00218362 0.00325193 0.00418783 0.00457177
+  0.00464585 0.00483315]
+ [0.         0.00392929 0.00410999 0.00522736 0.00623543 0.00679859
+  0.006818   0.00706907]]
+Should be:
+[[0.         0.00327169 0.00362817 0.00418469 0.00620413 0.00629311
+  0.00657683 0.0065819 ]
+ [0.         0.0018539  0.00218362 0.00325193 0.00418783 0.00457177
+  0.00464585 0.00483315]
+ [0.         0.00392929 0.00410999 0.00522736 0.00623543 0.00679859
+  0.006818   0.00706907]]
 ```
-### CUDA Architectures
-By default code will be compiled only for the native architecture on the compiling system. However, to use custom defined architectures you can define the CUDAARCHS environment variable to override this behaviour. E.g:
+
+If you get some warning like this in the beginning
 ```bash
-CUDAARCHS="75;80;86;87;89" uv pip install .
+E0406 01:02:01.239070 1581469 cuda_executor.cc:1743] Could not get kernel mode driver version: [INVALID_ARGUMENT: Version does not match the format X.Y.Z]
 ```
-
-# Useufl links
-* z-order with floats: http://compgeom.com/~piyush/papers/tvcg_stann.pdf
-
-# Other notes:
-* Probably I can remove dependence on thrust when deleting deprecated code
+don't worry, it's a new *feature* in jax and can be savely ignored or silenced by defining the environment variable 
+`TF_CPP_MIN_LOG_LEVEL=3`.
 
 ## Third-party components
 Some CUDA submodules use NVIDIA CUB (BSD-3-Clause licensed).
