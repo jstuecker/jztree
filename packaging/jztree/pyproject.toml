@@ -15,6 +15,10 @@ dependencies = [
   "numpy>=2.2.6",
 ]
 
+[project.urls]
+Homepage = "https://jstuecker.github.io/jztree"
+Issues = "https://github.com/jstuecker/jztree/issues"
+
 [project.optional-dependencies]
 cuda12 = ["jztree-cu12==1.0.0"]
 cuda13 = ["jztree-cu13==1.0.0"]
