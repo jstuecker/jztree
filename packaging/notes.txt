@@ -1,0 +1,16 @@
+# to build CUDA 13
+source ~/virtualenvs/uvjax/bin/activate
+CUDAARCHS=all uv build --wheel --no-build-isolation packaging/jztree-cu13
+
+# to build CUDA 12
+conda activate cu12.2
+CUDAARCHS=all python -m build --wheel --no-isolation packaging/jztree-cu12
+
+# to build interface package
+uv build --wheel --no-build-isolation packaging/jztree
+
+# to generalize packages so PyPI accepts them:
+python -m auditwheel repair --plat manylinux_2_34_x86_64 -w wheelhouse jztree_cu13-1.0.0-cp312-cp312-linux_x86_64.whl
+
+# to upload a package
+twine upload wheelhouse/jztree_cu13-1.0.0-cp312-cp312-manylinux_2_34_x86_64.whl

@@ -23,3 +23,7 @@ logging.level = "INFO"
 editable.rebuild = false
 cmake.define = { JZTREE_CUDA_MAJOR = "13", JZTREE_BACKEND_PACKAGE_NAME = "jztree_cuda" }
 sdist.include = ["src/jztree_cuda/THIRD_PARTY_NOTICES"]
+
+[[tool.scikit-build.overrides]]
+if.from-sdist = true
+cmake.source-dir = "."

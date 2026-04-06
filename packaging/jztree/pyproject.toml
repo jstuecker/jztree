@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "jztree"
 version = "1.0.0"
 description = "A framework for Morton z-order trees for JAX with CUDA backend"
-readme = "../../README.md"
+readme = { text = "A framework for Morton z-order trees for JAX with CUDA backend.", content-type = "text/markdown" }
 authors = [{ name = "Jens Stuecker", email = "jens.stuecker@univie.ac.at" }]
 license = "MIT"
 requires-python = ">=3.10"

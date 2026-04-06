@@ -56,7 +56,10 @@ dev = [
     "sphinx",
     "myst_parser",
     "sphinx_paramlinks",
-    "sphinx_rtd_theme"
+    "sphinx_rtd_theme",
+
+    # wheels:
+    "auditwheel"
 ]
 
 

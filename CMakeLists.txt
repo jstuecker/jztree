@@ -169,7 +169,13 @@ foreach(GEN_SRC IN LISTS GEN_FFI_CU)
   get_filename_component(MOD_NAME "${GEN_SRC}" NAME_WE)  # e.g. ffi_fmm.cu -> ffi_fmm
 
   nanobind_add_module(${MOD_NAME} "${GEN_SRC}")
-  target_compile_definitions(${MOD_NAME} PRIVATE JZTREE_CUDA_MAJOR=${JZTREE_CUDA_MAJOR})
+  target_compile_definitions(${MOD_NAME} PRIVATE
+    JZTREE_CUDA_MAJOR=${JZTREE_CUDA_MAJOR}
+    THRUST_DISABLE_ABI_NAMESPACE
+    THRUST_IGNORE_ABI_NAMESPACE_ERROR
+    CUB_DISABLE_NAMESPACE_MAGIC
+    CUB_IGNORE_NAMESPACE_MAGIC_ERROR
+  )
   target_compile_options(${MOD_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
   target_compile_features(${MOD_NAME} PRIVATE cxx_std_17)
 

@@ -57,11 +57,7 @@ conda activate jzenv
 ```
 Install prequisites via conda and pip:
 ```bash
-export CONDA_OVERRIDE_CUDA="12.9"  # Use a version that fits your needs
-conda install pip
-# conda install -c conda-forge cuda-nvcc cuda-version=12 cudnn nccl conda-forge libcufft cuda-cupti libcublas libcusparse
 conda install -c conda-forge pip cuda-nvcc cuda-version=12 cudnn nccl libcufft cuda-cupti libcublas libcusparse
-#nvidia-cuda-crt
 pip install scikit-build-core nanobind cmake>=3.24 setuptools_scm
 pip install --upgrade "jax[cuda12-local]"
 ```
