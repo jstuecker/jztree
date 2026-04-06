@@ -8,3 +8,4 @@ IMAGE_NAME="jztree-cu13-wheel-builder"
 OUTPUT_DIR="packaging/docker-wheel-builder/output"
 COPY_TO_PACKAGE_DIST=1
 UV_VERSION="0.7.2"
+PIP_BUILD_DEPS_CSV="build,jax[cuda13],scikit-build-core>=0.11,nanobind>=2.9.2,cmake>=3.24,auditwheel"

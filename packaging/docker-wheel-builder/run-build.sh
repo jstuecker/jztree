@@ -7,19 +7,20 @@ source "$SCRIPT_DIR/config.sh"
 
 PYTHON_VERSIONS_CSV=$(IFS=,; echo "${PYTHON_VERSIONS[*]}")
 
-docker build \
-  --build-arg UV_VERSION="$UV_VERSION" \
-  -t "$IMAGE_NAME" \
-  "$SCRIPT_DIR"
+docker build --build-arg UV_VERSION="$UV_VERSION" -t "$IMAGE_NAME" "$SCRIPT_DIR"
 
-docker run --rm -t \
-  -v "$REPO_ROOT:/workspace" \
-  -e REPO_ROOT=/workspace \
-  -e PACKAGE_DIR="$PACKAGE_DIR" \
-  -e CUDA_ARCHS="$CUDA_ARCHS" \
-  -e AUDITWHEEL_PLAT="$AUDITWHEEL_PLAT" \
-  -e OUTPUT_DIR="$OUTPUT_DIR" \
-  -e COPY_TO_PACKAGE_DIST="$COPY_TO_PACKAGE_DIST" \
-  -e PYTHON_VERSIONS_CSV="$PYTHON_VERSIONS_CSV" \
-  "$IMAGE_NAME" \
-  /builder/build-in-container.sh
+docker_args=(
+  --rm
+  -t
+  -v "$REPO_ROOT:/workspace"
+  -e REPO_ROOT=/workspace
+  -e PACKAGE_DIR="$PACKAGE_DIR"
+  -e CUDA_ARCHS="$CUDA_ARCHS"
+  -e AUDITWHEEL_PLAT="$AUDITWHEEL_PLAT"
+  -e OUTPUT_DIR="$OUTPUT_DIR"
+  -e COPY_TO_PACKAGE_DIST="$COPY_TO_PACKAGE_DIST"
+  -e PYTHON_VERSIONS_CSV="$PYTHON_VERSIONS_CSV"
+  -e PIP_BUILD_DEPS_CSV="$PIP_BUILD_DEPS_CSV"
+)
+
+docker run "${docker_args[@]}" "$IMAGE_NAME" /builder/build-in-container.sh

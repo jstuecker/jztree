@@ -3,6 +3,12 @@ checks/data
 checks/profiling/out
 src/jztree/_version.py
 
+# Wheel builder outputs
+packaging/docker-wheel-builder/output/
+packaging/docker-wheel-builder-cu12/output/
+packaging/docker-wheel-builder-main/output/
+packaging/tmp-old-wheels/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

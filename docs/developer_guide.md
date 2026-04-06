@@ -404,3 +404,70 @@ now have one of the fastest possible implementations of your algorithm.
 
 If you are planning to implement something like this or if you have some feature request, feel free to
 contact me at [jens&#46;stuecker&#64;univie&#46;ac&#46;at](mailto:jens.stuecker@univie.ac.at).
+
+## Building wheels
+
+Building wheels for this project is non-trivial because CUDA extension modules are Python-version specific and glibc compatibility depends on the build image. To keep this manageable, we use Docker-based builders in `packaging/`.
+
+### Why there are two builders
+
+* **CUDA 13** is built with a `manylinux_2_28` baseline.
+* **CUDA 12** is built with a `manylinux_2_17` baseline and uses conda/micromamba inside the container to install CUDA tooling reliably.
+
+This separation keeps each pipeline stable while still supporting broader deployment targets.
+
+### Entry points
+
+Use the top-level launcher to select which pipeline to run:
+
+```bash
+./packaging/run-wheel-builds.sh main
+./packaging/run-wheel-builds.sh cu13
+./packaging/run-wheel-builds.sh cu12
+./packaging/run-wheel-builds.sh all
+```
+
+You can also run each builder directly:
+
+```bash
+./packaging/docker-wheel-builder/run-build-main.sh
+./packaging/docker-wheel-builder/run-build.sh
+./packaging/docker-wheel-builder-cu12/run-build.sh
+```
+
+### Configuration
+
+Edit the config files before running if needed:
+
+* Main package: `packaging/docker-wheel-builder/run-build-main.sh` (wrapper around CUDA13 builder image)
+* CUDA 13: `packaging/docker-wheel-builder/config.sh`
+* CUDA 12: `packaging/docker-wheel-builder-cu12/config.sh`
+
+Important variables:
+
+* `PYTHON_VERSIONS`: list of Python versions to build.
+* `CUDA_ARCHS`: set to `all` for full coverage, or a smaller value (for example `87`) for faster iteration.
+* `AUDITWHEEL_PLAT`: controls the repaired wheel tag (`manylinux_2_28_x86_64` for CUDA13,
+    `manylinux_2_17_x86_64` for CUDA12 by default).
+* `COPY_TO_PACKAGE_DIST`: if `1`, repaired wheels are copied into the package `dist/` directory.
+
+### Output locations
+
+Raw and repaired wheels are written to builder-specific output folders:
+
+* Main package: `packaging/docker-wheel-builder-main/output/`
+* CUDA 13: `packaging/docker-wheel-builder/output/`
+* CUDA 12: `packaging/docker-wheel-builder-cu12/output/`
+
+Repaired wheels are placed in each builder's `wheelhouse/` directory, and optionally copied to:
+
+* `packaging/jztree/dist/`
+* `packaging/jztree-cu13/dist/`
+* `packaging/jztree-cu12/dist/`
+
+For the main `packaging/jztree` package, the wheel is expected to be `py3-none-any` (pure Python). In that case, it is copied directly and does not require `auditwheel` repair, so it is not tied to a glibc baseline.
+
+### Notes
+
+* Re-running a builder is safe; it will rebuild and overwrite outputs for the selected targets.
+* We intentionally do **not** upload to PyPI automatically. Upload is done manually after verification.
