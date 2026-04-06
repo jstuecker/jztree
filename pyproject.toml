@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://jstuecker.github.io/jztree"
+Homepage = "https://jstuecker.github.io/jztree/"
 Issues = "https://github.com/jstuecker/jztree/issues"
 
 [tool.scikit-build]
