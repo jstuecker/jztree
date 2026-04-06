@@ -10,8 +10,6 @@ from jztree.data import ParticleData, FofCatalogue, squeeze_catalogue, sort_cata
 from jztree.fof import fof_labels, fof_is_superset, fof_and_catalogue
 from jztree.jax_ext import tree_map_by_len
 from jztree.tools import cumsum_starting_with_zero, inverse_of_splits
-import h5py
-import hdf5plugin
 
 has_hfof = importlib.util.find_spec("hfof") is not None
 
@@ -60,6 +58,9 @@ def complete_permutation(idx0: jnp.ndarray, N: int) -> jnp.ndarray:
 
 @pytest.fixture()
 def camels_data():
+    import h5py
+    import hdf5plugin
+
     path_snap = Path(__file__).resolve().parent.parent / "data/CAMELS_snapshot.hdf5"
     path_groups = Path(__file__).resolve().parent.parent /"data/CAMELS_groups.hdf5"
 

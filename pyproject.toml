@@ -35,11 +35,20 @@ cuda13 = [
     "nvidia-cuda-cccl>=13.0.0"
 ]
 dev = [
-    "ipykernel>=6.30.1",
-    "matplotlib>=3.10.6",
+    # unit tests
     "pytest>=8.4.2",
-    "hdf5plugin",
-    "hdf5",
+    "scipy",
+    "matplotlib>=3.10.6",
+    "pytest-jax-bench",
+    # code generation
+    "jax-ffi-gen",
+
+    "ipykernel>=6.30.1",
+    
+    # not really needed
+    # "hdf5plugin",
+    # "hdf5",
+
     # docs:
     "sphinx",
     "myst_parser",
