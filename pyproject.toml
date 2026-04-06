@@ -4,17 +4,16 @@ requires = ["scikit-build-core>=0.11", "nanobind>=2.9.2", "setuptools-scm>=8"]
 
 [project]
 name = "jztree"
+description = "A framework for Morton z-order trees for JAX with CUDA backend"
+readme = "README.md"
+authors = [{ name = "Jens Stücker", email = "jens.stuecker@univie.ac.at" }]
+license = "MIT"
+license-files = ["LICEN[CS]E"]
 requires-python = ">=3.10"
 dynamic = ["version"]
 dependencies = [
-    "jax",
+    "jax>=0.8.0",
     "numpy>=2.2.6",
-    # The following are only build dependencies... however, to simplify installation
-    # with --no-build-isolation, we list them here as well.
-    "scikit-build-core>=0.11", # actually only needed for build
-    "nanobind>=2.9.2", # actually only needed for build
-    "cmake>=3.24",
-    "setuptools-scm>=8"
 ]
 
 [tool.scikit-build]
