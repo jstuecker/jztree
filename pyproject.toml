@@ -9,7 +9,7 @@ readme = "README.md"
 authors = [{ name = "Jens Stücker", email = "jens.stuecker@univie.ac.at" }]
 license = "MIT"
 license-files = ["LICEN[CS]E"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dynamic = ["version"]
 dependencies = [
     "jax>=0.8.0",

@@ -4,12 +4,12 @@ requires = ["scikit-build-core>=0.11", "nanobind>=2.9.2", "jax>=0.8.0"]
 
 [project]
 name = "jztree-cu12"
-version = "1.0.0"
+version = "1.0.1"
 description = "CUDA 12 backend for jztree"
 readme = "../../README.md"
 authors = [{ name = "Jens Stuecker", email = "jens.stuecker@univie.ac.at" }]
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = ["jax>=0.8.0", "numpy>=2.2.6"]
 
 [project.urls]
