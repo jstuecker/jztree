@@ -61,6 +61,10 @@ def load_backend():
             "Install one backend wheel, e.g. 'jztree-cu12' or 'jztree-cu13'."
         ) from exc
 
+    # Used by docs or lightweight environments to bypass backend compatibility checks.
+    if skip_check:
+        return jztree_cuda
+
     backend_cuda_major = getattr(jztree_cuda, "CUDA_MAJOR", None)
     if backend_cuda_major is None:
         raise ImportError(
