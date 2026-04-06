@@ -6,7 +6,7 @@ requires = ["scikit-build-core>=0.11", "nanobind>=2.9.2", "jax>=0.8.0"]
 name = "jztree-cu13"
 version = "1.0.1"
 description = "CUDA 13 backend for jztree"
-readme = "../../README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Jens Stuecker", email = "jens.stuecker@univie.ac.at" }]
 license = "MIT"
 requires-python = ">=3.11"
