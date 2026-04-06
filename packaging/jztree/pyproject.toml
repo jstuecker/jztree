@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jztree"
+version = "1.0.0"
+description = "A framework for Morton z-order trees for JAX with CUDA backend"
+readme = "../../README.md"
+authors = [{ name = "Jens Stuecker", email = "jens.stuecker@univie.ac.at" }]
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+  "jax>=0.8.0",
+  "numpy>=2.2.6",
+]
+
+[project.optional-dependencies]
+cuda12 = ["jztree-cu12==1.0.0"]
+cuda13 = ["jztree-cu13==1.0.0"]
+
+[tool.setuptools]
+package-dir = {"" = "../../src"}
+
+[tool.setuptools.packages.find]
+where = ["../../src"]
+include = ["jztree", "jztree.*"]

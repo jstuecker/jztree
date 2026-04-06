@@ -1,0 +1,18 @@
+"""Python entrypoint for the compiled jztree CUDA backend."""
+
+CUDA_MAJOR = @JZTREE_CUDA_MAJOR@
+
+from . import ffi_fof
+from . import ffi_knn
+from . import ffi_sort
+from . import ffi_tools
+from . import ffi_tree
+
+__all__ = [
+    "CUDA_MAJOR",
+    "ffi_fof",
+    "ffi_knn",
+    "ffi_sort",
+    "ffi_tools",
+    "ffi_tree",
+]

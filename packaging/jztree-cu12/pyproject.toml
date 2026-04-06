@@ -1,0 +1,21 @@
+[build-system]
+build-backend = "scikit_build_core.build"
+requires = ["scikit-build-core>=0.11", "nanobind>=2.9.2", "jax>=0.8.0"]
+
+[project]
+name = "jztree-cu12"
+version = "1.0.0"
+description = "CUDA 12 backend for jztree"
+readme = "../../README.md"
+authors = [{ name = "Jens Stuecker", email = "jens.stuecker@univie.ac.at" }]
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = ["jax>=0.8.0", "numpy>=2.2.6"]
+
+[tool.scikit-build]
+cmake.version = ">=3.24"
+cmake.source-dir = "../.."
+logging.level = "INFO"
+editable.rebuild = false
+cmake.define = { JZTREE_CUDA_MAJOR = "12", JZTREE_BACKEND_PACKAGE_NAME = "jztree_cuda" }
+sdist.include = ["src/jztree_cuda/THIRD_PARTY_NOTICES"]

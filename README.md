@@ -109,6 +109,10 @@ CUDAARCHS="75;80;86;87;89" uv pip install .
 # Other notes:
 * Probably I can remove dependence on thrust when deleting deprecated code
 
+## Third-party components
+Some CUDA submodules use NVIDIA CUB (BSD-3-Clause licensed).
+See src/jztree_cuda/THIRD_PARTY_NOTICES for details.
+
 
 # Useful commands
 #uv python install 3.12

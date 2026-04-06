@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Shared backend packaging knobs used by packaging/jztree-cu12 and packaging/jztree-cu13
+set(JZTREE_CUDA_MAJOR "13" CACHE STRING "CUDA major version baked into jztree backend wheel")
+set(JZTREE_BACKEND_PACKAGE_NAME "jztree_cuda" CACHE STRING "Python package path where backend modules are installed")
+
+if(NOT JZTREE_CUDA_MAJOR MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "JZTREE_CUDA_MAJOR must be a numeric major version (e.g. 12 or 13)")
+endif()
+
 # ================== Make sure we have a valid python interpreter =================================
 # (We need it to define some paths)
 if(DEFINED ENV{PYTHON_EXECUTABLE} AND NOT DEFINED Python_EXECUTABLE)
@@ -161,8 +169,25 @@ foreach(GEN_SRC IN LISTS GEN_FFI_CU)
   get_filename_component(MOD_NAME "${GEN_SRC}" NAME_WE)  # e.g. ffi_fmm.cu -> ffi_fmm
 
   nanobind_add_module(${MOD_NAME} "${GEN_SRC}")
+  target_compile_definitions(${MOD_NAME} PRIVATE JZTREE_CUDA_MAJOR=${JZTREE_CUDA_MAJOR})
   target_compile_options(${MOD_NAME} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O3> $<$<COMPILE_LANGUAGE:CUDA>:-O3>)
   target_compile_features(${MOD_NAME} PRIVATE cxx_std_17)
 
-  install(TARGETS ${MOD_NAME} LIBRARY DESTINATION ${SKBUILD_PROJECT_NAME}_cuda)
+  install(TARGETS ${MOD_NAME} LIBRARY DESTINATION ${JZTREE_BACKEND_PACKAGE_NAME})
 endforeach()
+
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/jztree_cuda/__init__.py.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/jztree_cuda/__init__.py"
+  @ONLY
+)
+
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/jztree_cuda/__init__.py"
+  DESTINATION ${JZTREE_BACKEND_PACKAGE_NAME}
+)
+
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/jztree_cuda/THIRD_PARTY_NOTICES"
+  DESTINATION ${JZTREE_BACKEND_PACKAGE_NAME}
+)
