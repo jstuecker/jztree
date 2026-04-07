@@ -19,8 +19,11 @@ def _identity_decorator(obj=None, **_kwargs):
 
 def _install_jax_stub():
 	"""Install a tiny jax shim so autodoc can import modules without jax/cuda."""
-	if "jax" in sys.modules:
+	try:
+		import jax
 		return
+	except ModuleNotFoundError:
+		pass
 
 	class _Dummy:
 		def __getattr__(self, _name):
@@ -110,10 +113,25 @@ release = '1.0'
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ['myst_parser', 'sphinx.ext.autodoc', 'sphinx_paramlinks', 'sphinx.ext.napoleon']
+extensions = [
+    "myst_parser",
+    "sphinx.ext.autodoc",
+    "sphinx_paramlinks",
+    "sphinx.ext.intersphinx",
+    "sphinx.ext.linkcode",
+    "sphinx.ext.napoleon",
+]
 
 templates_path = ['_templates']
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+
+intersphinx_mapping = {
+    'python': ('https://docs.python.org/3', None),
+    'numpy': ('https://numpy.org/doc/stable/', None),
+    'scipy': ('https://docs.scipy.org/doc/scipy/', None),
+    'matplotlib': ('https://matplotlib.org/stable/', None),
+    "jax": ("https://docs.jax.dev/en/latest", None),
+}
 
 autodoc_preserve_defaults = True
 # python_maximum_signature_line_length = 60
@@ -138,3 +156,32 @@ autodoc_mock_imports = [
 
 html_theme = 'sphinx_rtd_theme'
 html_static_path = ['_static']
+
+html_context = {
+  'display_github': True,
+  'github_user': 'jstuecker',
+  'github_repo': 'jztree',
+  'github_version': 'main/docs/',
+}
+
+def linkcode_resolve(domain, info):
+    def find_source():
+        # try to find the file and line number, based on code from numpy:
+        # https://github.com/numpy/numpy/blob/master/doc/source/conf.py#L286
+        obj = sys.modules[info['module']]
+        for part in info['fullname'].split('.'):
+            obj = getattr(obj, part)
+        import inspect
+        mod = info['module'].replace('.', '/')
+        fn = mod + ".py"
+        source, lineno = inspect.getsourcelines(obj)
+        return fn, lineno, lineno + len(source) - 1
+
+    if domain != 'py' or not info['module']:
+        return None
+    try:
+        fn, lineno, lineno_end = find_source()
+        filename = f'{fn}#L{lineno:d}-L{lineno_end:d}'
+    except Exception as e:
+        filename = info['module'].replace('.', '/') + '.py'
+    return f"https://github.com/jstuecker/jztree/blob/main/src/{filename}"
