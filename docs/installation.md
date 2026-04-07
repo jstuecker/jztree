@@ -10,6 +10,7 @@ and for `jax[cuda13]`:
 ```
 pip install jztree[cuda13]
 ```
+The CUDA 13 wheel support python 3.11-3.14 and the CUDA 12 wheel supports python 3.11-3.13. If you are outside of this range, you may still have success by building from sources, but be aware that jax also has a limited compability range.
 
 ## Build from sources
 First of all, clone the repository
