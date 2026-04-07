@@ -10,10 +10,10 @@ and for `jax[cuda13]`:
 ```
 pip install jztree[cuda13]
 ```
-The CUDA 13 wheel supports python 3.11-3.14 and the CUDA 12 wheel supports python 3.11-3.13. If you are outside of this range, you may still have success by building from sources, but be aware that jax also has a limited compability range.
+The CUDA 13 wheel supports python 3.11-3.14 and the CUDA 12 wheel supports python 3.11-3.13. If you are outside of this range, you may still have success by building from sources, but be aware that jax also has a limited compatibility range.
 
 ## Build from sources
-First of all, clone the repository
+First of all, clone the repository:
 ```bash
 git clone https://github.com/jstuecker/jz-tree
 ```
@@ -29,8 +29,7 @@ by setting the `CUDAARCHS` environment variable, e.g.
 export CUDAARCHS=87
 ```
 for compute capability 8.7. By default we use `CUDAARCHS="all"` to build for all architectures. This
-may taking a very long time. You may also provide `CUDAARCHS="native"` if you are building on the
-same system where you want to run the code.
+may taking a very long time (20-30 minutes rather than 2). You may also provide `CUDAARCHS="native"` to automatically detect your systems architecture.
 
 ### CUDA13 installation
 

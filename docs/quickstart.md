@@ -70,7 +70,7 @@ print(f"Dt1 = {t1-t0:.2f}s, Dt2 = {t2-t1:.2f}s")
     Dt1 = 2.86s, Dt2 = 0.22s
 
 
-As usual in jax, the first time we run a jitted function, it will take extra-time to compile. Subsequent executions are much faster! (Timings are from my Laptop with a mobile NVIDIA 4070 GPU.)
+As usual in jax, the first time we run a jitted function, it will take extra-time to compile. Subsequent executions are much faster! (Timings are from my Laptop with a mobile NVIDIA 4070.)
 
 Let's verify by comparing to **scipy**'s KDTree (you may need to install it with `pip install scipy`)
 
@@ -103,7 +103,7 @@ print(f"jz-tree: {t1-t0:.2f}s, scipy: {t2-t1:.2f}s")
 
 Quite a speed-up! 
 
-Note that the results agree perfectly within the margin of error: All neighbour radii are exactly identical, but a very small number of indices differ. This is because for $10^7$ particles, we already get a notable number of floating point collisions (where two or more radii in a neighbour list are identical at machine precision). **scipy** and **jz-tree** have a different tie-breaking behaviour. Feel free to verify that for each differing index there is a second particle at the same radius.
+Note that the results agree perfectly within the margin of error: all neighbour radii are exactly identical, but a very small number of indices differ. This is because for `10^7` particles, we already get a notable number of floating-point collisions (where two or more radii in a neighbour list are identical at machine precision). `scipy` and `jz-tree` have different tie-breaking behaviour. Feel free to verify that for each differing index, there is a second particle at the same radius.
 
 ## Friends-of-friends groups
 

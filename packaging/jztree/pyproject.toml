@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jztree"
-version = "1.0.1"
+version = "1.0.2"
 description = "A framework for Morton z-order trees for JAX with CUDA backend"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Jens Stuecker", email = "jens.stuecker@univie.ac.at" }]
@@ -28,4 +28,7 @@ package-dir = {"" = "../../src"}
 
 [tool.setuptools.packages.find]
 where = ["../../src"]
-include = ["jztree", "jztree.*"]
+include = ["jztree", "jztree.*", "jztree_utils", "jztree_utils.*"]
+
+[tool.setuptools.package-data]
+jztree_utils = ["data/*.npy"]
