@@ -105,7 +105,7 @@ _install_jax_stub()
 project = 'jz-tree'
 copyright = '2026, Jens Stücker'
 author = 'Jens Stücker'
-release = '0.8'
+release = '1.0'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
