@@ -74,6 +74,19 @@ for py_version in "${PYTHON_VERSIONS[@]}"; do
     "cmake>=3.24" \
     auditwheel
 
+  "$py_bin" - <<'PY'
+import sys
+try:
+    import jax  # noqa: F401
+    import jaxlib  # noqa: F401
+except Exception as exc:
+    raise SystemExit(
+        "Failed to import jax/jaxlib after installing jax[cuda12-local]. "
+        "This Python version may not be supported for CUDA12 wheels yet. "
+        f"Details: {exc}"
+    )
+PY
+
   (
     cd "$REPO_ROOT"
     CUDAARCHS="$CUDA_ARCHS" \

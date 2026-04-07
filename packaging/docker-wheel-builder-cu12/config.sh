@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-PYTHON_VERSIONS=("3.11" "3.12" "3.13" "3.14")
+PYTHON_VERSIONS=("3.11" "3.12" "3.13")
 CUDA_ARCHS="all"
 PACKAGE_DIR="packaging/jztree-cu12"
 AUDITWHEEL_PLAT="manylinux_2_17_x86_64"

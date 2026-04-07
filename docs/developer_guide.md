@@ -446,6 +446,8 @@ Edit the config files before running if needed:
 Important variables:
 
 * `PYTHON_VERSIONS`: list of Python versions to build.
+    * Current default: CUDA 12 builds `3.11-3.13`, CUDA 13 builds `3.11-3.14`.
+    * CUDA 12 on Python 3.14 may fail due to missing compatible `jaxlib` wheels for `jax[cuda12-local]`.
 * `CUDA_ARCHS`: set to `all` for full coverage, or a smaller value (for example `87`) for faster iteration.
 * `AUDITWHEEL_PLAT`: controls the repaired wheel tag (`manylinux_2_28_x86_64` for CUDA13,
     `manylinux_2_17_x86_64` for CUDA12 by default).
