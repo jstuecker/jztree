@@ -12,6 +12,11 @@ implementation of these two algorithms at the time of writing. For example, this
 .. image:: _static/knn_libraries_comparison.png
    :width: 60%
 
+For additional details, also consider:
+
+* The `code repository <https://github.com/jstuecker/jztree>`_
+* The arXiv preprint article: `arXiv:2604.05885 <https://arxiv.org/abs/2604.05885>`_
+* Jens Stücker's `personal homepage <https://jstuecker.github.io/>`_
 
 .. toctree::
    :maxdepth: 2
