@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.24)
 
 # Shared backend packaging knobs used by packaging/jztree-cu12 and packaging/jztree-cu13
-set(JZTREE_CUDA_MAJOR "13" CACHE STRING "CUDA major version baked into jztree backend wheel")
+# Empty JZTREE_CUDA_MAJOR means: auto-detect from the CUDA compiler after project(... CUDA)
+set(JZTREE_CUDA_MAJOR "" CACHE STRING "CUDA major version baked into jztree backend wheel; empty means auto-detect")
 set(JZTREE_BACKEND_PACKAGE_NAME "jztree_cuda" CACHE STRING "Python package path where backend modules are installed")
 
-if(NOT JZTREE_CUDA_MAJOR MATCHES "^[0-9]+$")
-  message(FATAL_ERROR "JZTREE_CUDA_MAJOR must be a numeric major version (e.g. 12 or 13)")
+if(JZTREE_CUDA_MAJOR AND NOT JZTREE_CUDA_MAJOR MATCHES "^[0-9]+$")
+  message(FATAL_ERROR "JZTREE_CUDA_MAJOR must be empty or a numeric major version (e.g. 12 or 13)")
 endif()
 
 # ================== Make sure we have a valid python interpreter =================================
@@ -103,6 +104,25 @@ else()
 endif()
 
 project(${SKBUILD_PROJECT_NAME} LANGUAGES CXX CUDA)
+
+if(NOT JZTREE_CUDA_MAJOR)
+  if(NOT CMAKE_CUDA_COMPILER_VERSION MATCHES "^([0-9]+)\\.")
+    message(FATAL_ERROR
+      "Could not determine CUDA major version from "
+      "CMAKE_CUDA_COMPILER_VERSION='${CMAKE_CUDA_COMPILER_VERSION}'"
+    )
+  endif()
+
+  set(JZTREE_CUDA_MAJOR "${CMAKE_MATCH_1}" CACHE STRING
+      "CUDA major version baked into jztree backend wheel; empty means auto-detect" FORCE)
+
+  message(STATUS
+    "Auto-detected JZTREE_CUDA_MAJOR=${JZTREE_CUDA_MAJOR} "
+    "from CUDA compiler version ${CMAKE_CUDA_COMPILER_VERSION}"
+  )
+else()
+  message(STATUS "Using explicit JZTREE_CUDA_MAJOR=${JZTREE_CUDA_MAJOR}")
+endif()
 
 message(STATUS "Using")
 
