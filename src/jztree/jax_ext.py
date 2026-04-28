@@ -221,11 +221,21 @@ def pcast_vma(x, vma):
     else:
         return jax.lax.pvary(x, tuple(vma))
 
+def get_vma(x):
+    xtype = jax.typeof(x)
+
+    # Old JAX: ShapedArray.vma
+    if hasattr(xtype, "vma"):
+        return xtype.vma
+
+    # New JAX: ShapedArray.manual_axis_type.varying
+    return xtype.manual_axis_type.varying
+
 def pcast_like(x, like):
     if hasattr(jax.lax, "pcast"):
-        return jax.lax.pcast(x, tuple(jax.typeof(like).vma), to="varying")
+        return jax.lax.pcast(x, tuple(get_vma(like)), to="varying")
     else:
-        return jax.lax.pvary(x, tuple(jax.typeof(like).vma))
+        return jax.lax.pvary(x, tuple(get_vma(like)))
 
 # ------------------------------------------------------------------------------------------------ #
 #                                       Expanding Shard Map                                        #

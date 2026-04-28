@@ -15,7 +15,7 @@ from .tree import simplify_interaction_list, zsort_and_tree, distr_grouped_dense
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
 from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constructor, tree_map_by_len
-from .jax_ext import raise_if
+from .jax_ext import raise_if, get_vma
 from .stats import statistics, stats_callback, AllocStats
 
 from jztree_cuda import ffi_fof
@@ -392,7 +392,7 @@ def _distr_fof_dual_walk(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
 
     # Set up an empty PackedArray to save link data
     link_data = PackedArray.create_empty(
-        (size_links, 4), levels=th.num_planes()+1, dtype=jnp.int32, vma=jax.typeof(rank).vma
+        (size_links, 4), levels=th.num_planes()+1, dtype=jnp.int32, vma=get_vma(rank)
     )
 
     def handle_plane(i: int, carry: Tuple[jax.Array, InteractionList, PackedArray]):
