@@ -28,3 +28,4 @@ For additional details, also consider:
    developer_guide.md
    api.rst
    attribution.md
+   changelog.md
