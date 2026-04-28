@@ -1,8 +1,14 @@
+# build options:
 ./packaging/run-wheel-builds.sh all
+./packaging/run-wheel-builds.sh main
+./packaging/run-wheel-builds.sh cu12
+./packaging/run-wheel-builds.sh cu13
 
+# uploading, e.g.
 twine upload wheelhouse/jztree_cu13-1.0.0-cp312-cp312-manylinux_2_34_x86_64.whl
 
-# old...
+# ================= old... =============== #
+
 # to build CUDA 13
 #source ~/virtualenvs/uvjax/bin/activate
 #CUDAARCHS=all uv build --wheel --no-build-isolation packaging/jztree-cu13
