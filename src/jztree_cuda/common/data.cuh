@@ -4,6 +4,15 @@
 template <typename T>
 using same_width_int = std::conditional_t<(sizeof(T) == 4), std::int32_t, std::int64_t>;
 
+template<int nbytes>
+struct compact_alignment {
+    static constexpr int value =
+        (nbytes % 16 == 0) ? 16 :
+        (nbytes %  8 == 0) ?  8 :
+        (nbytes %  4 == 0) ?  4 :
+                              1;
+};
+
 /* ---------------------------------------------------------------------------------------------- */
 /*                                   Vector class and operators                                   */
 /* ---------------------------------------------------------------------------------------------- */
@@ -112,7 +121,8 @@ Vec<dim, tvec> reversed_vec(const Vec<dim, tvec>& x) {
 /* ---------------------------------------------------------------------------------------------- */
 
 template<int dim, typename tvec>
-struct Node {
+struct alignas(compact_alignment<(dim + 1) * sizeof(tvec)>::value)
+Node {
     Vec<dim, tvec> center;
     same_width_int<tvec> level;
 };
@@ -125,25 +135,35 @@ struct NodeWithExt {
 };
 
 template<int dim, typename tvec>
-struct PosMass {
-    Vec<dim,tvec> pos;
-    tvec mass;
+struct alignas(compact_alignment<(dim + 1) * sizeof(tvec)>::value)
+PosMass {
+    union {
+        struct {
+            Vec<dim,tvec>  pos;
+            tvec mass;
+        };
+
+        Vec<dim+1,tvec> asvec;
+    };
 };
 
 template<int dim, typename tvec>
-struct PosId {
+struct alignas(compact_alignment<(dim + 1) * sizeof(tvec)>::value)
+PosId {
     Vec<dim,tvec> pos;
     same_width_int<tvec> id;
 };
 
-struct __align__(16) ForcePot {
+template<int dim, typename tvec>
+struct alignas(compact_alignment<(dim + 1) * sizeof(tvec)>::value)
+LocalExp {
     union {
         struct {
-            float3 force;
-            float  pot;
+            tvec  pot;
+            Vec<dim,tvec> grad;
         };
 
-        float4 f4;
+        Vec<dim+1,tvec> asvec;
     };
 };
 

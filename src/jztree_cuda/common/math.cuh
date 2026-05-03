@@ -72,55 +72,6 @@ __device__ __forceinline__ tvec invalid_val() {
 // }
 
 /* ---------------------------------------------------------------------------------------------- */
-/*                                           Vector Math                                          */
-/* ---------------------------------------------------------------------------------------------- */
-
-__device__ __forceinline__ float dot(float3 a, float3 b) {
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-__device__ __forceinline__ float norm2(float3 a) {
-    return dot(a, a);
-}
-
-__host__ __device__ __forceinline__
-float4 operator+(float4 a, float4 b) {
-    return make_float4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
-}
-
-__host__ __device__ __forceinline__
-float3 operator+(float3 a, float3 b) {
-    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-
-__host__ __device__ __forceinline__
-float3 operator-(float3 a, float3 b) {
-    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
-}
-
-__host__ __device__ __forceinline__
-float4 operator-(float4 a, float4 b) {
-    return make_float4(a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w);
-}
-
-__host__ __device__ __forceinline__
-float3 operator*(float a, float3 b) {
-    return make_float3(a * b.x, a * b.y, a * b.z);
-}
-
-__host__ __device__ __forceinline__
-float4 operator*(float a, float4 b) {
-    return make_float4(a * b.x, a * b.y, a * b.z, a * b.w);
-}
-
-__device__ __forceinline__ float3 sumf3(const float3 &a, const float3 &b) {
-    return make_float3(a.x + b.x, a.y + b.y, a.z + b.z);
-}
-__device__ __forceinline__ float dotf3(const float3 &a, const float3 b) {
-    return a.x*b.x + a.y*b.y + a.z*b.z;
-}
-
-/* ---------------------------------------------------------------------------------------------- */
 /*                                         Kahan Summation                                        */
 /* ---------------------------------------------------------------------------------------------- */
 
@@ -141,7 +92,26 @@ __forceinline__ __device__ void kahan_add(
 
 template<int dim, typename tvec>
 __forceinline__ __device__ void kahan_add_vec(
-    Vec<dim,tvec> &sum, Vec<dim,tvec> add, Vec<dim,tvec> &c
+    Vec<dim,tvec> &sum, const Vec<dim,tvec> &add, Vec<dim,tvec> &c
+) {
+    #pragma unroll
+    for(int i=0; i<dim; i++) {
+        kahan_add<tvec>(sum[i], add[i], c[i]);
+    }
+}
+
+template<bool use_kahan, int dim, typename tvec>
+__forceinline__ __device__
+void add_vec(Vec<dim,tvec>& sum, const Vec<dim,tvec>& add, Vec<dim,tvec>& c) {
+    if(use_kahan)
+        kahan_add_vec<dim,tvec>(sum, add, c);
+    else
+        sum += add;
+}
+
+template<int dim, typename tvec>
+__forceinline__ __device__ void kahan_add_array(
+    tvec* sum, tvec* add, tvec* c
 ) {
     #pragma unroll
     for(int i=0; i<dim; i++) {
