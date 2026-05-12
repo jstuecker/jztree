@@ -7,15 +7,15 @@ from jztree.data import PosMass, ParticleData, pad_particles
 from jztree.comm import get_rank_info
 from jztree.jax_ext import shard_map_constructor
 
-def uniform_particles(N, total_mass=1., seed=0, npad=0):
+def uniform_particles(N, total_mass=1., seed=0, npad=0, dim=3):
     rank, ndev, axis_name = get_rank_info()
 
-    pos = jax.random.uniform(jax.random.PRNGKey(seed + rank), (N,3), dtype=jnp.float32)
+    pos = jax.random.uniform(jax.random.PRNGKey(seed + rank), (N,dim), dtype=jnp.float32)
     posmass = PosMass(pos=pos, mass=total_mass/(N*ndev), num=N, num_total=ndev*N)
 
     return pad_particles(posmass, npad)
 uniform_particles.smap = shard_map_constructor(uniform_particles,
-    in_specs=(None, None, None, None), out_specs=P(-1), static_argnums=(0,3)
+    in_specs=(None, None, None, None), out_specs=P(-1), static_argnums=(0,3,4)
 )
 
 def gaussian_particles(N, scale=1.0, total_mass=1., seed=0, npad=0):

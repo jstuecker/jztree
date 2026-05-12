@@ -167,42 +167,17 @@ __device__ __forceinline__ float fact3f(unsigned kx, unsigned ky, unsigned kz) {
     return fact_upto6f(kx) * fact_upto6f(ky) * fact_upto6f(kz);
 }
 
-/* ---------------------------------------------------------------------------------------------- */
-/*                                       Multipole Indexing                                       */
-/* ---------------------------------------------------------------------------------------------- */
-
-#define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
-
-__device__ __forceinline__ constexpr  int multi_to_flat(const int kx, const int ky, const int kz) {
-    int p = kx + ky + kz;
-    int npoff = ((p+2)*(p+1)*p) / 6; // offset of the p-th symmeric tensor
-    int off = npoff + (kz*(2*p + 3 - kz))/2 + ky;
-
-    return off > 0 ? off : 0; // Ensure we don't return negative indices
+__device__ __forceinline__ constexpr int binomial_int(int n, int k) {
+    int res = 1;
+    #pragma unroll
+    for(int i = 1; i <= k; i++) {
+        res = (res * (n - k + i)) / i;
+    }
+    return res;
 }
 
-template<int pmax>
-__device__ __forceinline__ constexpr  int3 flat_to_multi(const int kflat) {
-    int i = 0, ksum, kz, ky;
-    #pragma unroll
-    for(ksum=0; ksum <= pmax; ksum++) {
-        int nadd = ((ksum+2)*(ksum+1)) >> 1;
-        if (i + nadd > kflat)
-            break;
-        i += nadd;
-    }
-    #pragma unroll
-    for(kz=0; kz <= ksum; kz++) {
-        int nadd = (ksum-kz+1);
-        if (i + nadd > kflat)
-            break;
-        i += nadd;
-    }
-    ky = kflat - i;
-
-    return int3{ksum-ky-kz, ky, kz};
-}
-
+#define NCOMB(p, dim) binomial_int((p) + (dim), (dim))
+// #define NCOMB(p) (((p) + 1) * ((p) + 2) * ((p) + 3) / 6)
 
 /* ---------------------------------------------------------------------------------------------- */
 /*                                         Bit operations                                         */
