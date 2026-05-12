@@ -483,7 +483,8 @@ def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True,
     assert ispl.dtype == jnp.int32
     assert part.pos.ndim == 2
 
-    out_xcent = jax.ShapeDtypeStruct((ispl.size-1, 4), part.pos.dtype)
+    dim = part.pos.shape[-1]
+    out_xcent = jax.ShapeDtypeStruct((ispl.size-1, dim + 1), part.pos.dtype)
 
     mass = jnp.broadcast_to(part.mass, part.pos.shape[:-1])
 
@@ -495,7 +496,7 @@ def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True,
 
     xm = pcast_like(xm, like=part.pos)
 
-    return PosMass(pos=xm[...,0:3], mass=xm[...,4])
+    return PosMass(pos=xm[...,:dim], mass=xm[...,dim])
 center_of_mass.jit = jax.jit(center_of_mass, static_argnames=['kahan_summation', 'block_size'])
 
 
