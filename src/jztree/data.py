@@ -50,7 +50,7 @@ class PosMass:
     num: jax.Array | None = None
     num_total: int | None = static_field(default=None)
 
-@jax.jax.tree_util.register_dataclass
+@jax.tree_util.register_dataclass
 @dataclass(kw_only=True, slots=True)
 class ParticleData:
     """Dataclass holding positions and optional data, see :class:`Pos` for details"""
@@ -576,7 +576,7 @@ class FofNodeData():
     igroup: jax.Array
     spl: jax.Array
 
-@jax.jax.tree_util.register_dataclass
+@jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class FofCatalogue:
     """Friends-of-friends catalogue data
