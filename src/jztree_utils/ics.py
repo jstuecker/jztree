@@ -15,7 +15,7 @@ def uniform_particles(N, total_mass=1., seed=0, npad=0, dim=3):
 
     return pad_particles(posmass, npad)
 uniform_particles.smap = shard_map_constructor(uniform_particles,
-    in_specs=(None, None, None, None), out_specs=P(-1), static_argnums=(0,3,4)
+    in_specs=(None, None, None, None, None), out_specs=P(-1), static_argnums=(0,3,4)
 )
 
 def gaussian_particles(N, scale=1.0, total_mass=1., seed=0, npad=0, dim=3):
@@ -26,7 +26,7 @@ def gaussian_particles(N, scale=1.0, total_mass=1., seed=0, npad=0, dim=3):
 
     return pad_particles(posmass, npad)
 gaussian_particles.smap = shard_map_constructor(gaussian_particles,
-    in_specs=(None, None, None, None, None), out_specs=P(-1), static_argnums=(0,4,5)
+    in_specs=(None, None, None, None, None, None), out_specs=P(-1), static_argnums=(0,4,5)
 )
 
 def hernquist_particles(N, a=1., M=1., anisotropy=0., seed=None):

@@ -89,6 +89,7 @@ def _zsort_impl(x: jax.Array, block_size=64):
                                 input_output_aliases={0:0})(
         x, block_size=np.uint64(block_size)
     )[0:2]
+    pos, ids = jax.tree.map(lambda out: pcast_like(out, x), (pos, ids))
 
     return pos, ids
 

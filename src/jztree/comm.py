@@ -56,6 +56,10 @@ def should_init_jax_distributed() -> bool:
 #                                       Tiny Helper Functions                                      #
 # ------------------------------------------------------------------------------------------------ #
 
+def in_shard_map_context() -> bool:
+    """Return True when executing under a named abstract mesh, even if its size is one."""
+    return len(jax.sharding.get_abstract_mesh().axis_names) > 0
+
 
 # ------------------------------------------------------------------------------------------------ #
 #                              Packing Helpers for more efficient comm                             #
