@@ -14,6 +14,7 @@ from .tree import zsort, grouped_dense_interaction_list, build_tree_hierarchy
 from .tree import simplify_interaction_list, zsort_and_tree, distr_grouped_dense_interaction_list
 from .comm import pytree_len, all_to_all_with_irank, all_to_all_request
 from .comm import all_to_all_request_children, all_to_all_with_splits
+from .comm import in_shard_map_context
 from .jax_ext import pcast_vma, pcast_like, get_rank_info, shard_map_constructor, tree_map_by_len
 from .jax_ext import raise_if, get_vma
 from .stats import statistics, stats_callback, AllocStats
@@ -624,7 +625,7 @@ def _distr_cross_task_group_info(group_counts: jax.Array, npart: int, npart_min:
     rank the rank and the local remaining count of the first group which may have started elsewhere.
     """
     rank, ndev, axis_name = get_rank_info()
-    if ndev == 1:
+    if not in_shard_map_context():
         return 0, 0
 
     idx = jnp.arange(len(group_counts))
@@ -661,6 +662,7 @@ def _fof_catalogue_from_groups(
     Consider the "ParticleData" class to understand relevant attributes.
     """
     rank, ndev, axis_name = get_rank_info()
+    in_smap = in_shard_map_context()
 
     npart = get_num(part, default_to_length=True)
     size_part = len(group_counts)
@@ -699,14 +701,14 @@ def _fof_catalogue_from_groups(
         gr_val = gr_val.at[part_gr_idx].add(val)
         valid = gr_valid.reshape((size_cata+1,) + (1,) * (gr_val.ndim-1))
         gr_val = jnp.where(valid, gr_val, invalid_val)
-        if ndev == 1: return gr_val
+        if not in_smap: return gr_val
         # Correct the last group by adding segments on other tasks
         dev_mask = (np.arange(ndev) == first_group_rank).reshape((-1,) + (1,) * (gr_val.ndim-1))
         send_val = jnp.where(dev_mask, gr_val[0], 0)
         add_last_val = jax.lax.all_to_all(send_val, axis_name, 0, 0, tiled=True)
         return gr_val.at[ngroups].add(jnp.sum(add_last_val, axis=0))
     def get_gr_prop(val):
-        if ndev==1: return val
+        if not in_smap: return val
         last_val = jax.lax.all_gather(val[ngroups], axis_name)
         return val.at[0].set(last_val[first_group_rank])
     def wrap_dx(dx):
@@ -790,9 +792,7 @@ def fof_labels(part: jax.Array | Pos, rlink: float, boxsize: float = 0.,
         (part, igroup) -- (possibly) reordered particles and group labels -- igroup points 
         to the first particle in z-order that belongs to the same group.
     """
-    rank, ndev, axis_name = get_rank_info()
-
-    assert ndev == 1, "Please use distr_fof_labels for multi-GPU"
+    assert not in_shard_map_context(), "Please use distr_fof_labels for multi-GPU"
     
     if th is None:
         partz, idz = zsort(part)
@@ -895,9 +895,7 @@ def fof_and_catalogue(
         forms a continous segment in the particle array, but the last group on each
         rank may continue on the next rank.
     """
-    rank, ndev, axis_name = get_rank_info()
-    
-    if ndev == 1:
+    if not in_shard_map_context():
         partz, igroup = fof_labels(part, rlink=rlink, th=th, boxsize=boxsize, cfg=cfg)
         partf, counts = _fof_order(igroup, partz)
     else:

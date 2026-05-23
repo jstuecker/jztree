@@ -13,7 +13,7 @@ from .tree import grouped_dense_interaction_list, zsort_and_tree_multi_type
 from .tree import distr_grouped_dense_interaction_list, simplify_interaction_list, zsort_and_tree
 from .tools import masked_inverse
 from .jax_ext import raise_if, pcast_vma, pcast_like, shard_map_constructor, tree_map_by_len
-from .comm import get_rank_info, all_to_all_request_children, all_to_all_with_irank
+from .comm import get_rank_info, in_shard_map_context, all_to_all_request_children, all_to_all_with_irank
 from .stats import stats_callback, AllocStats, InteractionStats
 
 from jztree_cuda import ffi_knn
@@ -132,12 +132,13 @@ _segment_sort.jit = jax.jit(_segment_sort, static_argnames="smem_size")
 def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None, 
                    alloc_fac_ilist: float = 32.) -> InteractionList:
     rank, ndev, axis_name = get_rank_info()
+    in_smap = in_shard_map_context()
 
     nlevels = th.num_planes()
     size = th.size()
 
     # initialize top-level interaction list
-    if ndev > 1:
+    if in_smap:
         spl, ilist, nsup = distr_grouped_dense_interaction_list(
             th.num(nlevels-1), size, size_ilist=int(th.size_leaves*alloc_fac_ilist)
         )
@@ -165,7 +166,7 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
             npart=th.npart(level, size=size, ptype=0)
         )
 
-        if ndev > 1:
+        if in_smap:
             # Request the remote node data that we need to interact with
             (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
                 ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
@@ -176,7 +177,7 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
 
         ilist = _knn_node2node_ilist(ilist, parent_spl, node_data, k=k, boxsize=boxsize)
 
-        if ndev > 1:
+        if in_smap:
             # simplify interaction list to remove unused remotes
             ilist = replace(ilist, ids=ids, dev_spl=dev_spl)
             ilist = simplify_interaction_list(ilist)
@@ -238,14 +239,15 @@ def knn(
     assert output_order in ("z", "input")
 
     rank, ndev, axis_name = get_rank_info()
+    in_smap = in_shard_map_context()
 
     def init_origin(part):
         size = len(get_pos(part))
         ridx = RankIdx(
-            rank = jnp.full(size, rank, dtype=jnp.int32) if ndev > 1 else None,
+            rank = jnp.full(size, rank, dtype=jnp.int32) if in_smap else None,
             idx = jnp.arange(size, dtype=jnp.int32)
         )
-        return ridx, get_num(part, default_to_length=(ndev==1))
+        return ridx, get_num(part, default_to_length=not in_smap)
 
     origin, num_origin = init_origin(part)
 
@@ -274,7 +276,7 @@ def knn(
 
     # Request particle data for interactions
     spl = th.splits_leaf_to_part(ptype=0)
-    if ndev > 1:
+    if in_smap:
         (partz_req, origin_req), spl, dev_spl = all_to_all_request_children(
             ilist.dev_spl, ilist.ids, spl, (partz, origin), axis_name=axis_name,
             err_hint_parent="\nHint: increase alloc_fac_nodes.",
@@ -311,9 +313,9 @@ def knn(
         elif key == "rankidx":
             res.append(jax.tree.map(lambda x: x[innz], origin_req))
         elif key == "globalidx":
-            if get_num_total(part, default_to_length=(ndev==1)) >= 2**31:
+            if get_num_total(part, default_to_length=not in_smap) >= 2**31:
                 raise ValueError("I have > 2**31 particles, globalidx will overflow. Use rankidx instead!")
-            if ndev > 1:
+            if in_smap:
                 dev_offsets = jnp.cumsum(origin_cts) - origin_cts
                 gidx = dev_offsets[origin_req.rank] + origin_req.idx
                 res.append(gidx[innz])
@@ -335,7 +337,7 @@ def knn(
     res = tuple(res) if len(res) > 1 else res[0]
 
     if output_order == "input":
-        if ndev > 1:
+        if in_smap:
             (res, idx), dev_spl = all_to_all_with_irank(
                 origin_q.rank, (res, origin_q.idx), num=partz_q.num, axis_name=axis_name,
                 err_hint="\nThis should never fail..."

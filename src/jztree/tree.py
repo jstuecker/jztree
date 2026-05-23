@@ -10,7 +10,7 @@ from .data import get_num_total, get_pos, get_num, verify_ilist, same_width_int
 from .config import TreeConfig, RegularizationConfig
 from .tools import cumsum_starting_with_zero, div_ceil, inverse_of_splits, map_in_range, masked_scatter
 from .comm import send_to_left, send_to_right, shift_particles_left
-from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank
+from .comm import all_to_all_with_splits, global_splits, all_to_all_with_irank, in_shard_map_context
 from .jax_ext import pcast_like, get_rank_info, tree_map_by_len, raise_if, shard_map_constructor
 from .jax_ext import concatenate_pytrees, separate_pytrees
 from .stats import statistics, stats_callback, AllocStats
@@ -60,7 +60,7 @@ def _level_histogram(lvl: jax.Array, linfo: LevelInfo, weights: jax.Array | None
     counts = jnp.bincount(lvl - linfo.min_lvl(), length=nlvl, weights=weights)
     counts = jnp.astype(counts, dtype) # After summing floating point is a reliable representation
 
-    if ndev > 1:
+    if in_shard_map_context():
         counts = jax.lax.psum(counts, axis_name=axis_name)
     
     levels = jnp.arange(nlvl, dtype=jnp.int32) + linfo.min_lvl()
@@ -385,18 +385,18 @@ def zsort_and_tree(
         num_types: number of particle types
         shrink: if False, always return 3 three outputs
     """
-    rank, ndev, axis_name = get_rank_info()
+    in_smap = in_shard_map_context()
 
-    npart_tot = get_num_total(part, default_to_length=(ndev==1))
+    npart_tot = get_num_total(part, default_to_length=not in_smap)
     dt = (data, ptype)
 
-    if ndev > 1:
+    if in_smap:
         partz, dtz = distr_zsort(part, data=dt, nsamp=cfg_tree.nsamp)
     else:
         partz, isort = zsort(part)
         dtz = tree_map_by_len(lambda x: x[isort], dt, len(get_pos(partz)))
 
-    if ndev > 1:
+    if in_smap:
         top_node_size = _define_tree_level_node_sizes(npart_tot, cfg_tree)[-1]
         partz, dtz, lvl_bound = adjust_domain_for_nodesize(partz, top_node_size, dataz=dtz)
     else:
@@ -786,7 +786,7 @@ def build_tree_hierarchy(
 
     partz = jax.lax.stop_gradient(partz)
     posz = get_pos(partz)
-    npart_tot = get_num_total(partz, default_to_length=(ndev==1))
+    npart_tot = get_num_total(partz, default_to_length=not in_shard_map_context())
     np_per_dev = npart_tot // ndev # static estimate of number of unpadded-particles
     npart = get_num(partz, default_to_nancount=True)
 
