@@ -783,6 +783,7 @@ def build_tree_hierarchy(
     """
     rank, ndev, axis_name = get_rank_info()
 
+    partz = jax.lax.stop_gradient(partz)
     posz = get_pos(partz)
     npart_tot = get_num_total(partz, default_to_length=(ndev==1))
     np_per_dev = npart_tot // ndev # static estimate of number of unpadded-particles
