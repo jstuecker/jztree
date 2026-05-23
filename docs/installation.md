@@ -44,8 +44,7 @@ Finally, install **jz-tree** with `--no-build-isolation`
 pip install -e . --no-build-isolation
 ```
 ```{note}
-If you do an editable installation without `--no-build-isolation`, you python may have problems to
-locate the CUDA modules.
+If you do an editable installation without `--no-build-isolation`, your python may have problems to locate the CUDA modules.
 ```
 (Note: Installation speed my be significantly higher with [uv pip](https://docs.astral.sh/uv/) ) -->
 ### CUDA12 installation
