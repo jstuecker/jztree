@@ -84,8 +84,7 @@ def discodj_particles(res, boxsize=100.):
     X, P, a = dj.run_nbody(a_ini=0.02, a_end=1.0, n_steps=10, res_pm=res, stepper="bullfrog")
     pos = X.reshape(-1,3)
 
-    mass = jnp.ones(len(pos), dtype=pos.dtype) / res**3
-    return PosMass(pos=pos, mass=mass)
+    return PosMass(pos=pos, mass=1. / res**3)
 discodj_particles.jit = jax.jit(discodj_particles, static_argnames=("res", "boxsize"))
 
 def multi_gpu_dj_sim(boxsize = 1000., num_per_device=512**3) -> ParticleData:
