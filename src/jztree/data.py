@@ -470,6 +470,9 @@ class InteractionList:
         ids: used in multi-GPU scenarios to define for each source index the origin index
         dev_spl: used in multi-GPU scenarios to define for each unique source index the
             origin rank. (Sources in range dev_spl[r]:dev_spl[r+1] belong to rank r.)
+        has_separate_query_and_source_indices: if False, query and source indices share one
+            requested-node index space. If True, ispl is indexed by local query nodes while
+            isrc indexes requested source nodes.
     """
     ispl: jax.Array
     isrc: jax.Array
@@ -481,6 +484,8 @@ class InteractionList:
     ids: jax.Array | None = None
     dev_spl: jax.Array | None = None
 
+    has_separate_query_and_source_indices: bool = static_field(default=False)
+
     def without_remote_query_points(self, rank: int) -> 'InteractionList':
         """
         By default the interaction list carries remote and local points both on ispl so that
@@ -488,12 +493,13 @@ class InteractionList:
         However, this function redefines the interaction list so that ispl is only defined for 
         local query points, but interaction indices may still point to remote points
         """
+        assert not self.has_separate_query_and_source_indices
         idx = jnp.arange(len(self.ispl))
         mask = (idx >= self.dev_spl[rank]) & (idx <= self.dev_spl[rank+1])
         ispl_new = jnp.compress(
             mask, self.ispl, size=len(self.ispl), fill_value=self.ispl[self.dev_spl[rank+1]]
         )
-        return replace(self, ispl=ispl_new)
+        return replace(self, ispl=ispl_new, has_separate_query_and_source_indices=True)
 
     def nfilled(self):
         """Number of filled entries"""

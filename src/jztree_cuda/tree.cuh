@@ -437,9 +437,10 @@ __global__ void FlagInteractingNodes(
     const int* __restrict__ isrc,
     bool* flag,
     const int size_nodes,
-    const int size_ilist
+    const int size_ilist,
+    bool flag_query_nodes
 ) {
-    // Flags all nodes that appear as source or receiving index in the interaction list
+    // Flags source nodes and, optionally, query nodes that appear in the interaction list.
 
     int inode = blockIdx.x;
     
@@ -447,7 +448,7 @@ __global__ void FlagInteractingNodes(
     if(ilow >= iup)
         return;
 
-    if(threadIdx.x == 0)
+    if(flag_query_nodes && threadIdx.x == 0 && inode < size_nodes)
         flag[inode] = true;
 
     for(int i=ilow + threadIdx.x; i<iup; i += blockDim.x) {

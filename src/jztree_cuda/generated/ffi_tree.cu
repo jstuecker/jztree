@@ -641,9 +641,10 @@ ffi::Error FlagInteractingNodesFFIHost(
     ffi::AnyBuffer isplit,
     ffi::AnyBuffer isrc,
     ffi::Result<ffi::AnyBuffer> flag,
+    bool flag_query_nodes,
     size_t block_size
 ) {
-    int size_nodes = isplit.element_count() - 1;
+    int size_nodes = flag->element_count();
     int size_ilist = isrc.element_count();
     dim3 blockDim(block_size);
     dim3 gridDim(isplit.element_count() - 1);
@@ -661,7 +662,8 @@ ffi::Error FlagInteractingNodesFFIHost(
         &isrc_arg,
         &flag_arg,
         &size_nodes,
-        &size_ilist
+        &size_ilist,
+        &flag_query_nodes
     };
     const void* instance = (const void*)FlagInteractingNodes;
 
@@ -688,6 +690,7 @@ XLA_FFI_DEFINE_HANDLER_SYMBOL(
         .Arg<ffi::AnyBuffer>() // isplit
         .Arg<ffi::AnyBuffer>() // isrc
         .Ret<ffi::AnyBuffer>() // flag
+        .Attr<bool>("flag_query_nodes")
         .Attr<size_t>("block_size"),
     {xla::ffi::Traits::kCmdBufferCompatible}
 );

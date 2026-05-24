@@ -942,7 +942,8 @@ def _linearly_grouped(num, size, ngroup=32):
     return jnp.minimum(jnp.arange(size+1) * ngroup, num), num_sup
 
 def distr_grouped_dense_interaction_list(
-        num_local: int, size: int, size_ilist: int, only_geq: bool = False
+        num_local: int, size: int, size_ilist: int, only_geq: bool = False,
+        separate_query_and_source_indices: bool = False,
         ) -> Tuple[jax.Array, InteractionList, jax.Array]:
     rank, ndev, axis_name = get_rank_info()
 
@@ -955,31 +956,51 @@ def distr_grouped_dense_interaction_list(
     else:
         dev_spl = cumsum_starting_with_zero(nper_rank)
     
-    # Define a dense interaction list on top-nodes:
-    ilist = _dense_interaction_list(dev_spl[-1], size, size_ilist,
-        node_range=jnp.array([dev_spl[rank], dev_spl[rank+1]])
-    )
+    # Define a dense interaction list on top-nodes. By default, query and source
+    # indices share the same requested-node index space. Some algorithms keep
+    # only local query data and requested source data.
+    if separate_query_and_source_indices:
+        node_range = jnp.array([0, nsuper])
+    else:
+        node_range = jnp.array([dev_spl[rank], dev_spl[rank+1]])
+
+    ilist = _dense_interaction_list(dev_spl[-1], size, size_ilist, node_range=node_range)
     ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
     ilist.dev_spl = dev_spl
+    ilist.has_separate_query_and_source_indices = separate_query_and_source_indices
 
     return spl, ilist, nsuper
 
-def _flag_interacting_nodes(ilist: InteractionList, block_size=64):
-    outputs = (jax.ShapeDtypeStruct((ilist.ispl.size-1,), jnp.uint8),)
+def _flag_interacting_nodes(
+        ilist: InteractionList,
+        flag_query_nodes: bool = True,
+        block_size=64,
+    ):
+    if flag_query_nodes:
+        size_flags = ilist.ispl.size - 1
+    else:
+        size_flags = ilist.ids.size
+    outputs = (jax.ShapeDtypeStruct((size_flags,), jnp.uint8),)
 
     return jax.ffi.ffi_call("FlagInteractingNodes", outputs, vmap_method="sequential")(
-        ilist.ispl, ilist.isrc, block_size=np.uint64(block_size), 
+        ilist.ispl, ilist.isrc,
+        flag_query_nodes=bool(flag_query_nodes),
+        block_size=np.uint64(block_size),
     )[0].astype(jnp.bool)
 
-def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | None = None
+def simplify_interaction_list(
+        ilist: InteractionList,
+        always_keep: jax.Array | None = None,
                               ) -> InteractionList:
     """Reduces an interaction list to skip nodes that don't appear as receiving our
     source indices
     
     Useful in multi-GPU scenarios where many non-local nodes will not have any local interactions
     """
-    # flag all nodes that appear at least in one interaction
-    flag = _flag_interacting_nodes(ilist)
+    flag = _flag_interacting_nodes(
+        ilist,
+        flag_query_nodes=not ilist.has_separate_query_and_source_indices,
+    )
 
     if always_keep is not None:
         flag = flag | always_keep
@@ -990,14 +1011,20 @@ def simplify_interaction_list(ilist: InteractionList, always_keep: jax.Array | N
     reduced_ids = masked_scatter(flag, jnp.zeros_like(ilist.ids), prefix[:-1], ilist.ids)
     reduced_dev_spl = prefix[ilist.dev_spl]
 
-    # change the label and the offsets of the interaction list
-    ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
+    # Change the source labels and, for the shared query/source indexing
+    # convention, the query offsets. With separate query/source indices, query
+    # ispl already points into local query nodes and only sources are compressed.
+    if ilist.has_separate_query_and_source_indices:
+        ispl = ilist.ispl
+    else:
+        ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
 
     # do isrc = prefix[ilist.isrc], but faster:
     isrc = map_in_range(jnp.array((0, ilist.ispl[-1])), ilist.isrc, prefix)
 
     ilist = InteractionList(
-        ispl, isrc, rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl
+        ispl, isrc, rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl,
+        has_separate_query_and_source_indices=ilist.has_separate_query_and_source_indices
     )
     
     return verify_ilist(ilist)
