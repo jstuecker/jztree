@@ -16,6 +16,13 @@ def max_allow_None(a, b):
     if b is None: return a
     return max(a,b)
 
+def _nested_getattr(obj, *names):
+    for name in names:
+        obj = getattr(obj, name, None)
+        if obj is None:
+            return None
+    return obj
+
 @jax.tree_util.register_dataclass
 @dataclass(slots=True)
 class AllocStats:
@@ -76,13 +83,21 @@ class AllocStats:
             print(f"Could decrease alloc_fac_nodes at most from {cfg.tree.alloc_fac_nodes} "
                   f"to {cfg.tree.alloc_fac_nodes * frac:.2f}")
         if self.max_ilist_frac_fof is not None:
-            print(f"Filled at most {self.max_ilist_frac_fof:.1%} of interaction list. Could decrease "
-                  f"alloc_fac_ilist at most from {cfg.alloc_fac_ilist} to "
-                  f"{cfg.alloc_fac_ilist * self.max_ilist_frac_fof:.2f}")
+            alloc_fac_ilist = getattr(cfg, "alloc_fac_ilist", None)
+            if alloc_fac_ilist is None:
+                alloc_fac_ilist = _nested_getattr(cfg, "fmm", "alloc_fac_ilist")
+            msg = f"Filled at most {self.max_ilist_frac_fof:.1%} of interaction list."
+            if alloc_fac_ilist is not None:
+                msg += (f" Could decrease alloc_fac_ilist at most from {alloc_fac_ilist} to "
+                        f"{alloc_fac_ilist * self.max_ilist_frac_fof:.2f}")
+            print(msg)
         if self.max_links_frac is not None:
-            print(f"Filled at most {self.max_links_frac*100.:.2g}% of cross-task link data. Could "
-                  f"decrease alloc_fac_distr_links at most from {cfg.alloc_fac_distr_links} to"
-                  f"{cfg.alloc_fac_distr_links*self.max_links_frac:.2g}")
+            alloc_fac_distr_links = getattr(cfg, "alloc_fac_distr_links", None)
+            msg = f"Filled at most {self.max_links_frac*100.:.2g}% of cross-task link data."
+            if alloc_fac_distr_links is not None:
+                msg += (f" Could decrease alloc_fac_distr_links at most from {alloc_fac_distr_links} to"
+                        f"{alloc_fac_distr_links*self.max_links_frac:.2g}")
+            print(msg)
         if self.max_reg_frac_leaf is not None:
             print(f"Regularization increased number of leaves at most by {self.max_reg_frac_leaf - 1.:.2%}")
         if self.max_reg_frac_node is not None:
