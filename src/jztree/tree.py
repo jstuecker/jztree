@@ -154,7 +154,8 @@ def search_sorted_z(posz: jax.Array, posz_query: jax.Array, block_size: int = 64
 
     out_type = jax.ShapeDtypeStruct((posz_query.shape[0],), jnp.int32)
     inds = jax.ffi.ffi_call("SearchSortedZ", (out_type,))(
-        posz, posz_query, block_size=np.uint64(block_size), leaf_search=leaf_search)[0]
+        jax.lax.stop_gradient(posz), jax.lax.stop_gradient(posz_query), 
+        block_size=np.uint64(block_size), leaf_search=leaf_search)[0]
     return inds
 search_sorted_z.jit = jax.jit(search_sorted_z, static_argnames=("block_size", "leaf_search"))
 
@@ -315,7 +316,9 @@ def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array,
     rdict = {}
     
     rdict["lvl"], rdict["cent"], rdict["ext"] = jax.ffi.ffi_call("GetNodeGeometry", out_types)(
-        posz, lbound, rbound, num, block_size=np.uint64(block_size),
+        jax.lax.stop_gradient(posz), jax.lax.stop_gradient(lbound), 
+        jax.lax.stop_gradient(rbound), jax.lax.stop_gradient(num), 
+        block_size=np.uint64(block_size),
         lvl_invalid=np.int32(-2000), mode_flags=np.uint32(mode_flags), upper_extent=upper_extent
     )
 
@@ -345,14 +348,16 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
     # Distance from the left boundary where each levels node ends
     xleft = send_to_right(posz[npart-1], axis_name, invalid_float=-jnp.inf)
     ext_lr = jax.ffi.ffi_call("GetBoundaryExtendPerLevel", out_types)(
-        xleft, irange, posz, block_size=np.uint64(block_size), left=True,
+        jax.lax.stop_gradient(xleft), jax.lax.stop_gradient(irange), jax.lax.stop_gradient(posz), 
+        block_size=np.uint64(block_size), left=True,
         lvl_min=np.int32(info.min_lvl()), lvl_max=np.int32(info.max_lvl())
     )[0]
 
     # Distance from the right boundary where each levels node starts
     xright = send_to_left(posz[0], axis_name, invalid_float=jnp.inf)
     ext_rl = jax.ffi.ffi_call("GetBoundaryExtendPerLevel", out_types)(
-        xright, irange, posz, block_size=np.uint64(block_size), left=False,
+        jax.lax.stop_gradient(xright), jax.lax.stop_gradient(irange), jax.lax.stop_gradient(posz), 
+        block_size=np.uint64(block_size), left=False,
         lvl_min=np.int32(info.min_lvl()), lvl_max=np.int32(info.max_lvl())
     )[0]
 
