@@ -29,6 +29,42 @@ gaussian_particles.smap = shard_map_constructor(gaussian_particles,
     in_specs=(None, None, None, None, None, None), out_specs=P(-1), static_argnums=(0,4,5)
 )
 
+def hernquist_posmass(N, a=1., total_mass=1., seed=0, npad=0, dim=3, rmax=None):
+    rank, ndev, axis_name = get_rank_info()
+
+    key_r, key_dir = jax.random.split(jax.random.PRNGKey(seed + rank))
+    u = jax.random.uniform(key_r, (N,), dtype=jnp.float32)
+    if rmax is not None:
+        umax = (rmax / (rmax + a)) ** 2
+        u = u * jnp.asarray(umax, dtype=u.dtype)
+    u = jnp.minimum(u, jnp.asarray(1. - jnp.finfo(u.dtype).eps, dtype=u.dtype))
+
+    sqrt_u = jnp.sqrt(u)
+    r = a * sqrt_u / (1. - sqrt_u)
+
+    if dim == 3:
+        key_mu, key_phi = jax.random.split(key_dir)
+        mu = jax.random.uniform(key_mu, (N,), minval=-1., maxval=1., dtype=jnp.float32)
+        phi = jax.random.uniform(key_phi, (N,), minval=0., maxval=2. * jnp.pi, dtype=jnp.float32)
+        sin_theta = jnp.sqrt(jnp.maximum(0., 1. - mu * mu))
+        direction = jnp.stack(
+            (sin_theta * jnp.cos(phi), sin_theta * jnp.sin(phi), mu), axis=-1
+        )
+    elif dim == 2:
+        phi = jax.random.uniform(key_dir, (N,), minval=0., maxval=2. * jnp.pi, dtype=jnp.float32)
+        direction = jnp.stack((jnp.cos(phi), jnp.sin(phi)), axis=-1)
+    else:
+        direction = jax.random.normal(key_dir, (N, dim), dtype=jnp.float32)
+        direction = direction / jnp.linalg.norm(direction, axis=-1, keepdims=True)
+
+    pos = direction * r[:, None]
+    mass = total_mass / (N * ndev)
+    part = PosMass(pos=pos, mass=mass, num=N, num_total=N * ndev)
+    return pad_particles(part, npad)
+hernquist_posmass.smap = shard_map_constructor(hernquist_posmass,
+    in_specs=(None, None, None, None, None, None, None), out_specs=P(-1), static_argnums=(0,4,5,6)
+)
+
 def hernquist_particles(N, a=1., M=1., anisotropy=0., seed=None):
     import aegis
 

@@ -847,6 +847,7 @@ def _dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
     size_ilist: size of the interaction list. (Required at compile time)
     nnodes: actual number of filled nodes (Can be dynamic, used to invalidating unused nodes)
     """
+    assert size_ilist <= 2**31, "Ilist allocation is too large... will get integer overflows"
 
     dtype = nnodes.dtype
 
