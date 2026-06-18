@@ -943,10 +943,13 @@ def _linearly_grouped(num, size, ngroup=32):
     return jnp.minimum(jnp.arange(size+1) * ngroup, num), num_sup
 
 def distr_grouped_dense_interaction_list(
-        num_local: int, size: int, size_ilist: int, only_geq: bool = False,
+        num_local: int, size: int, size_ilist: int, size_ids: int | None = None, only_geq: bool = False,
         separate_query_and_source_indices: bool = False,
         ) -> Tuple[jax.Array, InteractionList, jax.Array]:
     rank, ndev, axis_name = get_rank_info()
+
+    if size_ids is None:
+        size_ids = size
 
     spl, nsuper = _linearly_grouped(num_local, size, ngroup=32)
 
@@ -966,7 +969,7 @@ def distr_grouped_dense_interaction_list(
         node_range = jnp.array([dev_spl[rank], dev_spl[rank+1]])
 
     ilist = _dense_interaction_list(dev_spl[-1], size, size_ilist, node_range=node_range)
-    ilist.ids = jnp.arange(size) - dev_spl[inverse_of_splits(dev_spl, size)] # !!! verify size
+    ilist.ids = jnp.arange(size_ids) - dev_spl[inverse_of_splits(dev_spl, size_ids)]
     ilist.dev_spl = dev_spl
     ilist.has_separate_query_and_source_indices = separate_query_and_source_indices
 
