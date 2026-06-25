@@ -1,18 +1,18 @@
 from dataclasses import dataclass
 
-@dataclass(unsafe_hash=True)
+@dataclass(unsafe_hash=True, slots=True)
 class LoggingConfig():
     """Config dataclass controlling logging."""
     level : int = 1
     show_loc : bool = True
 
-@dataclass(unsafe_hash=True)
+@dataclass(unsafe_hash=True, slots=True)
 class RegularizationConfig():
     """Config controlling regularization."""
     regularize_percentile: float = 90.
     max_volume_fac: float = 20.
 
-@dataclass(unsafe_hash=True)
+@dataclass(unsafe_hash=True, slots=True)
 class TreeConfig():
     """Config dataclass controlling tree structure and allocation."""
     # structure:
@@ -30,12 +30,12 @@ class TreeConfig():
     # other:
     mass_centered: bool = False
 
-@dataclass(unsafe_hash=True)
+@dataclass(unsafe_hash=True, slots=True)
 class FofCatalogueConfig():
     """Config dataclass controlling aspects of friends-of-friends catalogues"""
     npart_min: int = 20
 
-@dataclass(unsafe_hash=True)
+@dataclass(unsafe_hash=True, slots=True)
 class FofConfig:
     """Main nested config for friends-of-friends"""
     alloc_fac_ilist: float = 32.
@@ -50,7 +50,7 @@ class FofConfig:
     )
     catalogue: FofCatalogueConfig = FofCatalogueConfig()
 
-@dataclass(unsafe_hash=True)
+@dataclass(unsafe_hash=True, slots=True)
 class KNNConfig:
     """Main nested config for k nearest neighbour search"""
     alloc_fac_ilist: float = 256.
