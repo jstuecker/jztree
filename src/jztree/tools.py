@@ -33,7 +33,10 @@ def rearange_segments(data, seg_spl_out, seg_offset_in, block_size=64):
         )[0]
 
 def map_in_range(range, input, imap, block_size=64):
-    data_out = jax.ShapeDtypeStruct(input.shape, input.dtype)
+    range = jnp.asarray(range, dtype=jnp.int32)
+    input = jnp.asarray(input, dtype=jnp.int32)
+    imap = jnp.asarray(imap, dtype=jnp.int32)
+    data_out = jax.ShapeDtypeStruct(input.shape, jnp.int32)
     out = jax.ffi.ffi_call("MapInRange", (data_out,), input_output_aliases={1:0})(
             range, input, imap, block_size=np.uint64(block_size)
     )[0]
@@ -110,7 +113,7 @@ def masked_to_dense(arr: jax.Array, mask, get_inverse=False, get_indices=False, 
     if get_inverse:
         res.append(pref)
     if get_indices:
-        ind = jnp.full(size, size, pref.dtype).at[pref].set(jnp.arange(size))
+        ind = jnp.full(size, size, pref.dtype).at[pref].set(jnp.arange(size, dtype=pref.dtype))
         res.append(ind)
     return res
 
@@ -136,7 +139,7 @@ def bucket_prefix_sum(key, count=None, num=None):
     """A prefix sum per key: result = sum(count[key[:i] == key[i]]), but jittable
     i.e. the prefix-sum of points with the same index"""
     if num is not None:
-        key = jnp.where(jnp.arange(len(key)) < num, key, jnp.iinfo(key.dtype).max)
+        key = jnp.where(jnp.arange(len(key), dtype=key.dtype) < num, key, jnp.iinfo(key.dtype).max)
 
     isort = jnp.argsort(key, stable=True)
     key_sort = key[isort]
@@ -149,8 +152,8 @@ def bucket_prefix_sum(key, count=None, num=None):
     
     cdiff = csum_sort - csum_sort[ifirst]
     if num is not None:
-        isort = jnp.where(jnp.arange(len(isort)) < num, isort, len(isort))
-    invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort)))
+        isort = jnp.where(jnp.arange(len(isort), dtype=isort.dtype) < num, isort, len(isort))
+    invsort = jnp.zeros_like(isort).at[isort].set(jnp.arange(len(isort), dtype=isort.dtype))
 
     return cdiff[invsort]
 
@@ -178,8 +181,8 @@ def multi_to_dense(x: jax.Array, spl: jax.Array, out_size: int | None = None) ->
     """x[ndev,n], spl[ndev+1] -> x[ndev*n]"""
     ndev = len(x)
     xout = jnp.zeros(((ndev*x.shape[1],) + x.shape[2:]), x.dtype)
-    iarange = jnp.arange(x.shape[1])
-    idev = jnp.arange(ndev)
+    iarange = jnp.arange(x.shape[1], dtype=spl.dtype)
+    idev = jnp.arange(ndev, dtype=spl.dtype)
     
     indices = spl[idev,None] + iarange[None,:]
     xout = masked_scatter(indices < spl[idev+1,None], xout, indices, x)
@@ -193,12 +196,12 @@ multi_to_dense.jit = jax.jit(multi_to_dense)
 def set_range(arr : jax.Array, values, start, end):
     if(len(arr) / len(values) >= 4):
         # values are much smaller than arr, do a scatter based update
-        idx = jnp.arange(len(values)) + start
+        idx = jnp.arange(len(values), dtype=jnp.int32) + start
         idx = jnp.where(idx < end, idx, len(arr))
         return arr.at[idx].set(values, unique_indices=True)
     else:
         # Do a masked update
-        idx = jnp.arange(len(arr))
+        idx = jnp.arange(len(arr), dtype=jnp.int32)
         cond = (idx >= start) & (idx < end)
         cond = cond.reshape((-1,) + (1,) * (values.ndim - 1))
         return jnp.where(cond, values[idx - start], arr)
@@ -221,7 +224,7 @@ def ragged_transpose(data: jax.Array, n: jax.Array, axes: Tuple[int]):
         return data, n
 
     # Define transposition on segment indices
-    iseg = jnp.arange(n.size).reshape(n.shape)
+    iseg = jnp.arange(n.size, dtype=jnp.int32).reshape(n.shape)
     iseg_from = jnp.transpose(iseg, axes).flatten()
 
     # determine segment offsets

@@ -128,7 +128,7 @@ def expand_particles(part: Pos, ndev: int):
             return jnp.broadcast_to(x, (ndev,) + jnp.shape(x)) # replicate dynamic meta-data per device
 
     part_exp = jax.tree.map(expand, part)
-    part_exp.num = jnp.full(ndev, N)
+    part_exp.num = jnp.full(ndev, N, dtype=jnp.int32)
 
     return part_exp
 
@@ -276,10 +276,11 @@ class PackedArray:
     
     @classmethod
     def from_data(cls, data, ispl, fill_values=None, levels_filled=None):
+        ispl = jnp.asarray(ispl, dtype=jnp.int32)
         if levels_filled is None:
             levels_filled = jnp.full((1,), len(ispl)-1, dtype=jnp.int32)
         else:
-            levels_filled = jnp.asarray(levels_filled).reshape(1,)
+            levels_filled = jnp.asarray(levels_filled, dtype=jnp.int32).reshape(1,)
 
         if jnp.isscalar(fill_values):
             fill_values = jnp.full(len(ispl)-1, fill_values, dtype=data.dtype)
@@ -299,7 +300,11 @@ class PackedArray:
     def set(self, level, values, num=None, fill_value=None):
         if num is None:
             num = values.shape[0]
-        new_spl = jnp.where(jnp.arange(len(self.ispl)) <= level, self.ispl, self.ispl[level] + num)
+        new_spl = jnp.where(
+            jnp.arange(len(self.ispl), dtype=jnp.int32) <= level,
+            self.ispl,
+            self.ispl[level] + num
+        )
         new_data = set_range(self.data, values, self.ispl[level], self.ispl[level] + num)
         if fill_value is not None:
             new_fill_vals = self.fill_values.at[level].set(jnp.astype(fill_value, self.data.dtype))
@@ -494,7 +499,7 @@ class InteractionList:
         local query points, but interaction indices may still point to remote points
         """
         assert not self.has_separate_query_and_source_indices
-        idx = jnp.arange(len(self.ispl))
+        idx = jnp.arange(len(self.ispl), dtype=jnp.int32)
         mask = (idx >= self.dev_spl[rank]) & (idx <= self.dev_spl[rank+1])
         ispl_new = jnp.compress(
             mask, self.ispl, size=len(self.ispl), fill_value=self.ispl[self.dev_spl[rank+1]]
@@ -517,7 +522,11 @@ def verify_ilist(ilist: InteractionList):
     if len(ilist.isrc) >= 2**31:
         raise ValueError("Intercation list allocation too large and may produce integer overflows",
                          "Hint: Use more GPUs or decrease alloc_fac_ilist (if possible)")
-    return ilist
+    return replace(
+        ilist,
+        ispl=jnp.asarray(ilist.ispl, dtype=jnp.int32),
+        isrc=jnp.asarray(ilist.isrc, dtype=jnp.int32),
+    )
 
 # ------------------------------------------------------------------------------------------------ #
 #                                      Fof Specific Data Class                                     #

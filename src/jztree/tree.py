@@ -208,6 +208,8 @@ def detect_leaf_boundaries(
     if lvl_bound is None:
         lvl_max = LevelInfo(posz.shape[-1], posz.dtype).max_lvl()
         lvl_bound = (lvl_max, lvl_max)
+    npart = jnp.asarray(npart, dtype=jnp.int32)
+    lvl_bound = jnp.asarray(lvl_bound, dtype=jnp.int32)
 
     outputs = (
         jax.ShapeDtypeStruct((posz.shape[0]+1,), jnp.int8),
@@ -223,7 +225,7 @@ def detect_leaf_boundaries(
         ptype = jnp.astype(ptype, jnp.uint8)
 
     flag_split, lvl = jax.ffi.ffi_call("FlagLeafBoundaries", outputs, vmap_method="sequential")(
-        posz, ptype, jnp.asarray(lvl_bound), npart, max_size=np.int32(leaf_size),
+        posz, ptype, lvl_bound, npart, max_size=np.int32(leaf_size),
         block_size=np.uint64(block_size), scan_size=np.int32((leaf_size+1)*num_types),
         num_types=np.int32(num_types)
     )
@@ -242,7 +244,9 @@ def detect_leaf_boundaries(
             max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
         )
 
-        flag_split = flag_split | ((lvl >= lvl_max) & (jnp.arange(len(posz)+1) < npart+1))
+        flag_split = flag_split | (
+            (lvl >= lvl_max) & (jnp.arange(len(posz)+1, dtype=jnp.int32) < npart+1)
+        )
 
         stats_callback(
             "allocation", AllocStats.record_leaf_regularization, lvl_max, num_pre, jnp.sum(flag_split)
@@ -267,7 +271,7 @@ def determine_znode_boundaries(posz: jax.Array, block_size: int = 64, nleaves: j
     """Builds a Z-order tree from positions"""
     if nleaves is None:
         nleaves = jnp.array(len(posz), dtype=jnp.int32)
-    nleaves = jnp.minimum(len(posz), nleaves)
+    nleaves = jnp.asarray(jnp.minimum(len(posz), nleaves), dtype=jnp.int32)
 
     info = LevelInfo(posz.shape[-1], posz.dtype)
     
@@ -290,7 +294,8 @@ def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array,
                       result: str = "lvl_cent_ext", upper_extent: bool = False
                       ) -> Tuple[jax.Array, jax.Array, jax.Array]:
     assert lbound.shape == rbound.shape
-    assert lbound.dtype == rbound.dtype == jnp.int32
+    lbound = jnp.asarray(lbound, dtype=jnp.int32)
+    rbound = jnp.asarray(rbound, dtype=jnp.int32)
 
     mode_flags = 0
 
@@ -302,7 +307,9 @@ def get_node_geometry(posz: jax.Array, lbound: jax.Array, rbound: jax.Array,
         mode_flags += 4
 
     if num is None:
-        num = jnp.array(len(lbound))
+        num = jnp.array(len(lbound), dtype=jnp.int32)
+    else:
+        num = jnp.asarray(num, dtype=jnp.int32)
 
     def rlen(flag):
         return lbound.shape[0] if flag else 1
@@ -343,7 +350,8 @@ def distr_boundary_extend(posz, npart=None, block_size: int = 64):
     nlevels = info.max_lvl() - info.min_lvl() + 1
     out_types = (jax.ShapeDtypeStruct((nlevels,), jnp.int32),)
 
-    irange = jnp.array([0, npart])
+    npart = jnp.asarray(npart, dtype=jnp.int32)
+    irange = jnp.array([0, npart], dtype=jnp.int32)
 
     # Distance from the left boundary where each levels node ends
     xleft = send_to_right(posz[npart-1], axis_name, invalid_float=-jnp.inf)
@@ -446,7 +454,7 @@ def zsort_and_tree_multi_type(
     """
     num_types = len(part)
     size_of_type = tuple(len(get_pos(p)) for p in part)
-    num_of_type = jnp.array(tuple(get_num(p) for p in part))
+    num_of_type = jnp.array(tuple(get_num(p) for p in part), dtype=jnp.int32)
     
     if data is not None:
         part_stacked, data_stacked = concatenate_pytrees(tuple(zip(part, data)), num_of_type)
@@ -486,8 +494,8 @@ def center_of_mass(ispl: jax.Array, part: PosMass, kahan_summation: bool = True,
                    ) -> PosMass:
     """Computes the center of mass of the nodes in the tree plane"""
     assert part.pos.dtype == jnp.float32
-    assert ispl.dtype == jnp.int32
     assert part.pos.ndim == 2
+    ispl = jnp.asarray(ispl, dtype=jnp.int32)
 
     dim = part.pos.shape[-1]
     out_xcent = jax.ShapeDtypeStruct((ispl.size-1, dim + 1), part.pos.dtype)
@@ -574,7 +582,9 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int, dataz: Any | None
     ext_ll, ext_lr, ext_rl, ext_rr = distr_boundary_extend(get_pos(partz), npart=npart)
     npart_l = ext_lr - ext_ll
     
-    ilvl_max = jnp.max(jnp.where(npart_l <= max_node_size, jnp.arange(len(npart_l)), -1))
+    ilvl_max = jnp.max(
+        jnp.where(npart_l <= max_node_size, jnp.arange(len(npart_l), dtype=jnp.int32), -1)
+    )
 
     npshift = ext_lr[ilvl_max]
 
@@ -592,7 +602,7 @@ def adjust_domain_for_nodesize(partz: Pos, max_node_size: int, dataz: Any | None
     xl = send_to_right(posz[npart-1], axis_name)
 
     lvl_bound = get_node_geometry(
-        jnp.array([xl, posz[0], posz[npart-1], xr]), 
+        jnp.array([xl, posz[0], posz[npart-1], xr], dtype=posz.dtype),
         lbound=jnp.array([0,2], dtype=jnp.int32), rbound=jnp.array([2,4], dtype=jnp.int32), num=2,
         result="lvl"
     )
@@ -628,7 +638,9 @@ def _define_tree_level_node_sizes(npart: int, cfg_tree: TreeConfig):
 def _splits_per_type(spl, ptype, num_types, npart):
     spls = []
     for t in range(num_types):
-        prefix = cumsum_starting_with_zero((ptype == t) & (jnp.arange(len(ptype)) < npart))
+        prefix = cumsum_starting_with_zero(
+            (ptype == t) & (jnp.arange(len(ptype), dtype=jnp.int32) < npart)
+        )
         spls.append(prefix[spl])
     return jnp.stack(spls, axis=0)
 
@@ -654,6 +666,9 @@ def _define_split_hierarchy(
     if lvl_bound is None:
         lvl_max = LevelInfo(posz.shape[-1], posz.dtype).max_lvl()
         lvl_bound = (lvl_max, lvl_max)
+    if npart is not None:
+        npart = jnp.asarray(npart, dtype=jnp.int32)
+    lvl_bound = jnp.asarray(lvl_bound, dtype=jnp.int32)
     
     ispl = detect_leaf_boundaries(
         posz, ptype=ptype, num_types=num_types,
@@ -686,7 +701,7 @@ def _define_split_hierarchy(
 
         for i in range(1, nlevels):
             is_node = (~is_spl_on_level[i]) & is_spl_on_level[i,lbound] & is_spl_on_level[i,rbound]
-            is_node = is_node & (jnp.arange(len(lvl)) < nleaves)
+            is_node = is_node & (jnp.arange(len(lvl), dtype=jnp.int32) < nleaves)
 
             linfo = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
             lvl_max = find_regularization_level(
@@ -694,7 +709,9 @@ def _define_split_hierarchy(
                 max_vol_fac=cfg_reg.max_volume_fac, min_percentile=cfg_reg.regularize_percentile
             )
 
-            new = is_spl_on_level[i] | ((lvl > lvl_max) &  (jnp.arange(len(lvl)) <= nleaves))
+            new = is_spl_on_level[i] | (
+                (lvl > lvl_max) & (jnp.arange(len(lvl), dtype=jnp.int32) <= nleaves)
+            )
 
             # rank = jax.lax.axis_index("gpus")
             # jax.debug.log("r {} lv {}, lvmax {} isnode {}", rank, i, lvl_max, jnp.mean(is_node))
@@ -706,7 +723,7 @@ def _define_split_hierarchy(
 
             new_is_spl.append(new)
         
-        is_spl_on_level = jnp.array(new_is_spl)
+        is_spl_on_level = jnp.array(new_is_spl, dtype=jnp.bool)
 
     # Calculate a prefix accross hierarchy levels to densly stack the nodes later
     offsets = jnp.cumsum(is_spl_on_level.flatten()).reshape(is_spl_on_level.shape)
@@ -731,7 +748,7 @@ def _define_split_hierarchy(
 
     # node-to-node relation is given by the last level node that is active at the node location
     # for the leaf-level we insert the leaf to particle relation here
-    ilevel = jnp.arange(nlevels)
+    ilevel = jnp.arange(nlevels, dtype=jnp.int32)
     value = jnp.where(ilevel[:,None] == 0, ispl, offsets[ilevel-1,:] - level_spl[ilevel-1,None])
     ispl_n2n = jnp.zeros(alloc_size, dtype=jnp.int32).at[offsets].set(value.astype(jnp.int32))
     # out of bounds access shall give nnodes of next smaller level (or npart for leaves):
@@ -849,14 +866,17 @@ def _dense_interaction_list(nnodes: jax.Array, size_nodes: int, size_ilist: int,
     """
     assert size_ilist <= 2**31, "Ilist allocation is too large... will get integer overflows"
 
-    dtype = nnodes.dtype
+    dtype = jnp.int32
+    nnodes = jnp.asarray(nnodes, dtype=dtype)
+    if node_range is not None:
+        node_range = jnp.asarray(node_range, dtype=dtype)
 
-    idx = jnp.arange(size_ilist)
+    idx = jnp.arange(size_ilist, dtype=dtype)
     if node_range is not None:
         # !!! Put some checks here!
         nint = nnodes*(node_range[1] - node_range[0])
         ilist = jnp.where(idx < nint, idx % nnodes, 0)
-        node_idx = jnp.arange(size_nodes)
+        node_idx = jnp.arange(size_nodes, dtype=dtype)
         ispl = cumsum_starting_with_zero((node_idx >= node_range[0]) & (node_idx < node_range[1])) * nnodes
     else:
         nint = nnodes*nnodes
@@ -939,8 +959,9 @@ grouped_dense_interaction_list.jit = jax.jit(
 )
 
 def _linearly_grouped(num, size, ngroup=32):
+    num = jnp.asarray(num, dtype=jnp.int32)
     num_sup = div_ceil(num, ngroup)
-    return jnp.minimum(jnp.arange(size+1) * ngroup, num), num_sup
+    return jnp.minimum(jnp.arange(size+1, dtype=jnp.int32) * ngroup, num), num_sup
 
 def distr_grouped_dense_interaction_list(
         num_local: int, size: int, size_ilist: int, size_ids: int | None = None, only_geq: bool = False,
@@ -956,7 +977,7 @@ def distr_grouped_dense_interaction_list(
     nper_rank = jax.lax.all_gather(nsuper, axis_name)
 
     if only_geq:
-        dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev) >= rank))
+        dev_spl = cumsum_starting_with_zero(nper_rank * (jnp.arange(ndev, dtype=jnp.int32) >= rank))
     else:
         dev_spl = cumsum_starting_with_zero(nper_rank)
     
@@ -964,12 +985,12 @@ def distr_grouped_dense_interaction_list(
     # indices share the same requested-node index space. Some algorithms keep
     # only local query data and requested source data.
     if separate_query_and_source_indices:
-        node_range = jnp.array([0, nsuper])
+        node_range = jnp.array([0, nsuper], dtype=jnp.int32)
     else:
-        node_range = jnp.array([dev_spl[rank], dev_spl[rank+1]])
+        node_range = jnp.array([dev_spl[rank], dev_spl[rank+1]], dtype=jnp.int32)
 
     ilist = _dense_interaction_list(dev_spl[-1], size, size_ilist, node_range=node_range)
-    ilist.ids = jnp.arange(size_ids) - dev_spl[inverse_of_splits(dev_spl, size_ids)]
+    ilist.ids = jnp.arange(size_ids, dtype=jnp.int32) - dev_spl[inverse_of_splits(dev_spl, size_ids)]
     ilist.dev_spl = dev_spl
     ilist.has_separate_query_and_source_indices = separate_query_and_source_indices
 
@@ -985,9 +1006,11 @@ def _flag_interacting_nodes(
     else:
         size_flags = ilist.ids.size
     outputs = (jax.ShapeDtypeStruct((size_flags,), jnp.uint8),)
+    ispl = jnp.asarray(ilist.ispl, dtype=jnp.int32)
+    isrc = jnp.asarray(ilist.isrc, dtype=jnp.int32)
 
     return jax.ffi.ffi_call("FlagInteractingNodes", outputs, vmap_method="sequential")(
-        ilist.ispl, ilist.isrc,
+        ispl, isrc,
         flag_query_nodes=bool(flag_query_nodes),
         block_size=np.uint64(block_size),
     )[0].astype(jnp.bool)
@@ -1024,7 +1047,7 @@ def simplify_interaction_list(
         ispl = jnp.full(ilist.ispl.shape, ilist.ispl[-1], ilist.ispl.dtype).at[prefix].set(ilist.ispl)
 
     # do isrc = prefix[ilist.isrc], but faster:
-    isrc = map_in_range(jnp.array((0, ilist.ispl[-1])), ilist.isrc, prefix)
+    isrc = map_in_range(jnp.array((0, ilist.ispl[-1]), dtype=jnp.int32), ilist.isrc, prefix)
 
     ilist = InteractionList(
         ispl, isrc, rad2=ilist.rad2, ids=reduced_ids, dev_spl=reduced_dev_spl,

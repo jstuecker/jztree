@@ -84,7 +84,9 @@ def concatenate_pytrees(xs, nums):
     for i in range(len(leaves[0])):
         l = [leaves[t][i] for t in range(num_keys)]
         if(jnp.ndim(l[0]) > 0):
-            valid_mask = jnp.concatenate([jnp.arange(len(l[t])) < nums[t] for t in range(num_keys)])
+            valid_mask = jnp.concatenate([
+                jnp.arange(len(l[t]), dtype=jnp.int32) < nums[t] for t in range(num_keys)
+            ])
             new = jnp.concatenate(l)
             new_leaves.append(
                 jnp.compress(valid_mask, new, size=len(valid_mask), axis=0,
@@ -101,7 +103,7 @@ def separate_pytrees(x, key, out_sizes, num):
 
     assert np.max(out_sizes) <= size
     
-    key = jnp.where(jnp.arange(size) < num, key, num_keys)
+    key = jnp.where(jnp.arange(size, dtype=jnp.int32) < num, key, num_keys)
     isort = jnp.argsort(key)
 
     leaves, treedef = jax.tree_util.tree_flatten(x)
@@ -110,7 +112,7 @@ def separate_pytrees(x, key, out_sizes, num):
     offset = 0
     for t in range(0, num_keys):
         new_num = jnp.sum(key == t)
-        invalid = jnp.arange(out_sizes[t]) >= new_num
+        invalid = jnp.arange(out_sizes[t], dtype=jnp.int32) >= new_num
         ifrom = jnp.roll(isort, -offset)[:out_sizes[t]]
         new_leaves = []
         for l in leaves:

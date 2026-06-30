@@ -35,8 +35,10 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
 
     assert xT.dtype == xQ.dtype
     assert xT.shape[-1] == xQ.shape[-1]
-    assert splT.dtype == splQ.dtype == jnp.int32
-    assert ilist.isrc.dtype == ilist.ispl.dtype == jnp.int32
+    ilist_ispl = jnp.asarray(ilist.ispl, dtype=jnp.int32)
+    ilist_isrc = jnp.asarray(ilist.isrc, dtype=jnp.int32)
+    splT = jnp.asarray(splT, dtype=jnp.int32)
+    splQ = jnp.asarray(splQ, dtype=jnp.int32)
     assert len(ilist.ispl) == len(splQ)
 
     dtype = xT.dtype
@@ -53,7 +55,7 @@ def _knn_leaf2leaf(ilist: InteractionList, splT, xT, splQ=None, xQ=None, k=32, b
     )
 
     rnn, inn = jax.ffi.ffi_call("KnnLeaf2Leaf", outputs)(
-        ilist.ispl, ilist.isrc, ilist.rad2, splT, xT, splQ, xQ,
+        ilist_ispl, ilist_isrc, ilist.rad2, splT, xT, splQ, xQ,
         boxsize=np.float32(boxsize), k=np.int32(k)
     )[0:2]
     return rnn, inn
@@ -73,6 +75,10 @@ def _knn_node2node_ilist(
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
     assert ilist.isrc.shape == ilist.rad2.shape, "node_ilist and node_ir2list must have the same shape"
     assert ilist.size() < 2**31, f"Ilist allocation is in overflow danger {ilist.size()/2**31}"
+    ilist_ispl = jnp.asarray(ilist.ispl, dtype=jnp.int32)
+    ilist_isrc = jnp.asarray(ilist.isrc, dtype=jnp.int32)
+    spl_parent = jnp.asarray(spl_parent, dtype=jnp.int32)
+    nodes_npart = jnp.asarray(node_data.npart, dtype=jnp.int32)
 
     size = len(node_data.pos)
     poslvl = node_data.pos_lvl()
@@ -85,7 +91,7 @@ def _knn_node2node_ilist(
     )
 
     radii, ispl, il, ilr2 = jax.ffi.ffi_call("KnnNode2Node", outputs)(
-        ilist.ispl, ilist.isrc, ilist.rad2, spl_parent, poslvl, node_data.npart,
+        ilist_ispl, ilist_isrc, ilist.rad2, spl_parent, poslvl, nodes_npart,
         k=np.int32(k), blocksize_fill=np.uint64(32), blocksize_sort=np.uint64(64),
         boxsize=np.float32(boxsize), dim=np.int32(node_data.pos.shape[-1])
     )
@@ -112,11 +118,11 @@ _knn_node2node_ilist.jit = jax.jit(_knn_node2node_ilist, static_argnames=["k", "
 def _segment_sort(spl, key, val, smem_size=512):
     """Sorts key/val pairs within segments defined by isplit"""
     assert key.dtype == jnp.float32
-    assert val.dtype == jnp.int32
-    assert spl.dtype == jnp.int32
     assert key.shape == val.shape
     assert spl.ndim == 1
     assert smem_size >= 64
+    spl = jnp.asarray(spl, dtype=jnp.int32)
+    val = jnp.asarray(val, dtype=jnp.int32)
 
     out_type = (jax.ShapeDtypeStruct(key.shape, key.dtype), jax.ShapeDtypeStruct(val.shape, val.dtype))
     key_sorted, val_sorted = jax.ffi.ffi_call("SegmentSort", out_type)(
@@ -169,7 +175,7 @@ def _knn_dual_walk(th: TreeHierarchy, k: int, boxsize: float | None = None,
         if in_smap:
             # Request the remote node data that we need to interact with
             (node_data, ids), parent_spl, dev_spl = all_to_all_request_children(
-                ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size)),
+                ilist.dev_spl, ilist.ids, parent_spl, (node_data, jnp.arange(size, dtype=jnp.int32)),
                 axis_name=axis_name, err_hint_child="\nHint: increase alloc_fac_nodes",
                 err_hint_parent="\nHint: increase alloc_fac_nodes"
             )
@@ -344,7 +350,7 @@ def knn(
             )
         else:
             idx = origin_q.idx
-        inverse = masked_inverse(idx, mask=jnp.arange(len(idx)) < num_origin_q)
+        inverse = masked_inverse(idx, mask=jnp.arange(len(idx), dtype=idx.dtype) < num_origin_q)
 
         res = tree_map_by_len(lambda x: x[inverse], res, len(origin_q.idx))
     

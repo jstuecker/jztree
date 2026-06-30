@@ -36,7 +36,10 @@ def _fof_node2node(
     assert ilist.ispl.shape[0] == spl_parent.shape[0], "Should both correspond to no. of nodes+1"
     assert len(node_data.lvl) == len(node_igroup), "Should both correspond to no. of childrne"
     assert ilist.isrc.size < 2**31, "So far only int32 supported {ilist_alloc_size/2**31}"
-    assert ilist.isrc.dtype == ilist.ispl.dtype == spl_parent.dtype == node_igroup.dtype == jnp.int32
+    ilist_ispl = jnp.asarray(ilist.ispl, dtype=jnp.int32)
+    ilist_isrc = jnp.asarray(ilist.isrc, dtype=jnp.int32)
+    spl_parent = jnp.asarray(spl_parent, dtype=jnp.int32)
+    node_igroup = jnp.asarray(node_igroup, dtype=jnp.int32)
     
     size = len(node_data.pos)
 
@@ -47,7 +50,7 @@ def _fof_node2node(
     )
 
     res = jax.ffi.ffi_call("FofNode2Node", outputs, input_output_aliases={4:0})(
-        ilist.ispl, ilist.isrc, spl_parent, node_data.pos_lvl(), node_igroup,
+        ilist_ispl, ilist_isrc, spl_parent, node_data.pos_lvl(), node_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size),
         dim=np.int32(node_data.pos.shape[-1])
     )
@@ -71,9 +74,14 @@ _fof_node2node.jit = jax.jit(
 )
 
 def _insert_links(igroup, iA, iB, num_links: jax.Array | None = None, block_size=64):
+    igroup = jnp.asarray(igroup, dtype=jnp.int32)
+    iA = jnp.asarray(iA, dtype=jnp.int32)
+    iB = jnp.asarray(iB, dtype=jnp.int32)
     ngroups = len(igroup)
     if num_links is None:
         num_links = jnp.array(len(iA), dtype=jnp.int32)
+    else:
+        num_links = jnp.asarray(num_links, dtype=jnp.int32)
     
     out = (jax.ShapeDtypeStruct((ngroups,), jnp.int32),)
 
@@ -95,6 +103,11 @@ def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
 
     if flag_local is None:
         flag_local = jnp.ones(igroup.shape, dtype=jnp.bool)
+    igroup = jnp.asarray(igroup, dtype=jnp.int32)
+    lvl = jnp.asarray(lvl, dtype=jnp.int32)
+    spl = jnp.asarray(spl, dtype=jnp.int32)
+    if num is not None:
+        num = jnp.asarray(num, dtype=jnp.int32)
 
     outputs = (jax.ShapeDtypeStruct((size_child,), jnp.int32),)
     igroup_child = jax.ffi.ffi_call("NodeToChildLabel",  outputs)(
@@ -104,7 +117,7 @@ def _node_to_child_label(igroup: jax.Array, lvl: jax.Array, spl: jax.Array,
     )[0]
 
     if num is not None:
-        igroup_child = jnp.where(jnp.arange(size_child) < num, igroup_child, 0)
+        igroup_child = jnp.where(jnp.arange(size_child, dtype=jnp.int32) < num, igroup_child, 0)
 
     return igroup_child
 _node_to_child_label.jit = jax.jit(_node_to_child_label, static_argnames=("size_child", "rlink", "block_size", "dim"))
@@ -154,15 +167,18 @@ _fof_dual_walk.jit = jax.jit(_fof_dual_walk, static_argnames=["rlink", "boxsize"
 def _fof_leaf2leaf(leaf_data: FofNodeData, ilist: InteractionList, posz: jax.Array,
                    rlink: float, boxsize: float = 0., block_size=32):
     assert len(leaf_data.spl) == len(ilist.ispl) == len(leaf_data.igroup)+1 == len(leaf_data.lvl)+1
-    assert ilist.isrc.dtype == ilist.ispl.dtype == leaf_data.spl.dtype == leaf_data.igroup.dtype == jnp.int32
+    ilist_ispl = jnp.asarray(ilist.ispl, dtype=jnp.int32)
+    ilist_isrc = jnp.asarray(ilist.isrc, dtype=jnp.int32)
+    leaf_spl = jnp.asarray(leaf_data.spl, dtype=jnp.int32)
 
     part_igroup = _node_to_child_label(
         leaf_data.igroup, leaf_data.lvl, leaf_data.spl, rlink=rlink, size_child=len(posz),
         num=leaf_data.spl[-1], dim=posz.shape[-1], dtype=posz.dtype
     )
+    part_igroup = jnp.asarray(part_igroup, dtype=jnp.int32)
 
     igroup = jax.ffi.ffi_call("FofLeaf2Leaf", (jax.ShapeDtypeStruct((len(posz),), part_igroup.dtype),))(
-        ilist.ispl, ilist.isrc, leaf_data.spl, posz, part_igroup,
+        ilist_ispl, ilist_isrc, leaf_spl, posz, part_igroup,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
@@ -255,7 +271,10 @@ def _distr_link_step(igroup: jax.Array, labels: Label, links: Link, nlinks: jax.
     igroup = _insert_links(igroup, igrA, igrB, num)
     labels = labels[igroup]
 
-    is_root = (labels.irank == rank) & (labels.igroup == jnp.arange(len(labels.igroup)))
+    is_root = (
+        (labels.irank == rank)
+        & (labels.igroup == jnp.arange(len(labels.igroup), dtype=labels.igroup.dtype))
+    )
 
     # Dereference again, since labels may have changed
     lmin, lmax, are_local = contract(lA, lB)
@@ -294,7 +313,7 @@ def _distr_contract(labels: Label, igroup: jax.Array, dev_spl: int):
     labels = labels[igroup]
 
     # mask root labels of the local graph that lie remotely
-    idx = jnp.arange(len(igroup))
+    idx = jnp.arange(len(igroup), dtype=igroup.dtype)
     is_local_root = idx == igroup
     valid = (idx >= dev_spl[rank]) & (idx < dev_spl[rank+1])
     mask = valid & is_local_root & (labels.irank != rank)
@@ -345,10 +364,10 @@ def _distr_link(
 def _distr_detect_new_cross_task_links(igroup, igroup_new, origin_group, dev_spl) -> Link:
     rank, ndev, axis_name = get_rank_info()
     
-    valid = jnp.arange(len(igroup)) < dev_spl[-1]
+    valid = jnp.arange(len(igroup), dtype=jnp.int32) < dev_spl[-1]
 
     # find globally relevant root nodes that became linked
-    was_root = jnp.arange(len(igroup)) == igroup
+    was_root = jnp.arange(len(igroup), dtype=igroup.dtype) == igroup
     irank = inverse_of_splits(dev_spl, igroup.size)
     remote = irank != rank
     mask = (igroup != igroup_new) & was_root & remote & valid
@@ -389,7 +408,7 @@ def _distr_fof_dual_walk(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
     l2p = th.splits_leaf_to_part()
 
     # initialize labels of top-level
-    igroup = pcast_vma(jnp.arange(size), axis_name)
+    igroup = pcast_vma(jnp.arange(size, dtype=jnp.int32), axis_name)
 
     # Set up an empty PackedArray to save link data
     link_data = PackedArray.create_empty(
@@ -413,7 +432,7 @@ def _distr_fof_dual_walk(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
         
         # Request the remote node children that we need to interact with
         (poslvl, ids, pid), parent_spl, dev_spl = all_to_all_request_children(
-            ilist.dev_spl, ilist.ids, parent_spl, (poslvl, jnp.arange(size), pid),
+            ilist.dev_spl, ilist.ids, parent_spl, (poslvl, jnp.arange(size, dtype=jnp.int32), pid),
             axis_name=axis_name, err_hint_child="\nHint: Increase alloc_fac_nodes.",
             err_hint_parent="\nHint: Increase alloc_fac_nodes."
         )
@@ -422,7 +441,7 @@ def _distr_fof_dual_walk(th: TreeHierarchy, rlink: float, boxsize: float = 0.,
 
         # Treat remote nodes as roots
         irank = inverse_of_splits(dev_spl, size)
-        igroup = jnp.where(irank==rank, igroup, jnp.arange(size))
+        igroup = jnp.where(irank==rank, igroup, jnp.arange(size, dtype=jnp.int32))
 
         igroup_new, ilist = _fof_node2node(
             ilist, parent_spl, poslvl, igroup, rlink=rlink, boxsize=boxsize
@@ -465,7 +484,7 @@ def _distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
 
     numpart = node_data.spl[-1]
     (posz, pids), spl, dev_spl = all_to_all_request_children(
-        ilist.dev_spl, ilist.ids, node_data.spl, (posz, jnp.arange(size)), axis_name=axis_name,
+        ilist.dev_spl, ilist.ids, node_data.spl, (posz, jnp.arange(size, dtype=jnp.int32)), axis_name=axis_name,
         err_hint_parent="\nHint: Increase alloc_fac_nodes.",
         err_hint_child="\nHint: Increase padding."
     )
@@ -474,10 +493,14 @@ def _distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
 
     # Treat remote nodes as roots
     irank = inverse_of_splits(dev_spl, size)
-    iseg = jnp.where(irank==rank, iseg, jnp.arange(size))
+    iseg = jnp.where(irank==rank, iseg, jnp.arange(size, dtype=jnp.int32))
+    ilist_ispl = jnp.asarray(ilist.ispl, dtype=jnp.int32)
+    ilist_isrc = jnp.asarray(ilist.isrc, dtype=jnp.int32)
+    spl = jnp.asarray(spl, dtype=jnp.int32)
+    iseg = jnp.asarray(iseg, dtype=jnp.int32)
 
     iseg_new = jax.ffi.ffi_call("FofLeaf2Leaf", (jax.ShapeDtypeStruct((len(posz),), iseg.dtype),))(
-        ilist.ispl, ilist.isrc, spl, posz, iseg,
+        ilist_ispl, ilist_isrc, spl, posz, iseg,
         r2link=np.float32(rlink*rlink), boxsize=np.float32(boxsize), block_size=np.int32(block_size)
     )[0]
 
@@ -498,7 +521,11 @@ def _distr_fof_leaf2leaf(node_data: FofNodeData, ilist: InteractionList,
     labels = Label(jnp.full(iseg.shape, rank, dtype=jnp.int32), iseg)
     labels = _distr_link(iseg_new, labels, links, dev_spl, link_data.ispl[-1])
     
-    labels = _tree_where(jnp.arange(len(labels.igroup)) < numpart, labels, Label(-1,-1))
+    labels = _tree_where(
+        jnp.arange(len(labels.igroup), dtype=jnp.int32) < numpart,
+        labels,
+        Label(-1, -1)
+    )
     labels.ilocal_segment = iseg_new
 
     return labels
@@ -511,7 +538,7 @@ _distr_fof_leaf2leaf.jit = jax.jit(_distr_fof_leaf2leaf, static_argnames=["rlink
 def _fof_order(igroup: jax.Array, part: ParticleData, npart: int | None = None):
     if npart is None:
         npart = jnp.sum(~jnp.isnan(get_pos(part)[...,0]))
-    igr = jnp.where(jnp.arange(len(igroup)) < npart, igroup, len(igroup))
+    igr = jnp.where(jnp.arange(len(igroup), dtype=jnp.int32) < npart, igroup, len(igroup))
     counts = jnp.zeros(len(igroup), dtype=igroup.dtype).at[igr].add(1)
 
     isort = jnp.argsort(igr, stable=True)
@@ -545,9 +572,12 @@ def _distr_fof_order(label: Label, part: ParticleData, size_out: int | None = No
         iseg = label.ilocal_segment
 
     # Count locally known roots
-    is_segment_root = (iseg == jnp.arange(len(iseg))) & (jnp.arange(len(iseg)) < npart)
+    is_segment_root = (
+        (iseg == jnp.arange(len(iseg), dtype=iseg.dtype))
+        & (jnp.arange(len(iseg), dtype=jnp.int32) < npart)
+    )
     seg_idx, num_segs = offset_sum(is_segment_root)
-    seg_idx = jnp.where(jnp.arange(size) < npart, seg_idx[iseg], size) # mask invalid particles
+    seg_idx = jnp.where(jnp.arange(size, dtype=jnp.int32) < npart, seg_idx[iseg], size)
     seg_counts = jnp.zeros(size, dtype=jnp.int32).at[seg_idx].add(1)
 
     # Send segments to root task
@@ -562,7 +592,7 @@ def _distr_fof_order(label: Label, part: ParticleData, size_out: int | None = No
 
     group_offsets = cumsum_starting_with_zero(group_counts)
     # Mark counts at root particles for later
-    idx = jnp.arange(size)
+    idx = jnp.arange(size, dtype=jnp.int32)
     is_group_root = (label.igroup == idx) & (label.irank == rank) & (idx < npart)
     root_group_counts = jnp.where(is_group_root, group_counts[seg_idx], 0)
 
@@ -584,7 +614,11 @@ def _distr_fof_order(label: Label, part: ParticleData, size_out: int | None = No
         part_gid = seg_offsets[seg_idx] + part_seg_offset.astype(jnp.int64)
 
         nparttot = dev_offsets[-1]
-        target_global_dev_spl = jnp.pad(jnp.arange(ndev) * (nparttot // ndev), (0,1), constant_values=nparttot)
+        target_global_dev_spl = jnp.pad(
+            jnp.arange(ndev, dtype=jnp.int64) * (nparttot // ndev),
+            (0, 1),
+            constant_values=nparttot
+        )
 
         send_irank = (jnp.searchsorted(target_global_dev_spl, part_gid, side="right") - 1).astype(jnp.int32)
 
@@ -599,10 +633,14 @@ def _distr_fof_order(label: Label, part: ParticleData, size_out: int | None = No
             (part_gid, part, root_group_counts), dev_spl
         )
 
-        valid = jnp.arange(len(gid)) < dev_spl[-1]
-        itarget = jnp.where(valid, gid - target_global_dev_spl[rank], jnp.arange(len(gid)))
+        valid = jnp.arange(len(gid), dtype=jnp.int32) < dev_spl[-1]
+        itarget = jnp.where(
+            valid,
+            gid - target_global_dev_spl[rank],
+            jnp.arange(len(gid), dtype=jnp.int64)
+        )
 
-        isort = jnp.zeros_like(itarget).at[itarget].set(jnp.arange(size))
+        isort = jnp.zeros_like(itarget).at[itarget].set(jnp.arange(size, dtype=jnp.int64))
         
         part, gcnt = tree_map_by_len(lambda x: x[isort], (part, gcnt), len(gcnt))
     
@@ -628,7 +666,7 @@ def _distr_cross_task_group_info(group_counts: jax.Array, npart: int, npart_min:
     if not in_shard_map_context():
         return 0, 0
 
-    idx = jnp.arange(len(group_counts))
+    idx = jnp.arange(len(group_counts), dtype=jnp.int32)
     last_group_start = jnp.max(jnp.where((group_counts > 0) & (idx < npart), idx, 0))
     last_group_count = group_counts[last_group_start]
 
@@ -638,7 +676,11 @@ def _distr_cross_task_group_info(group_counts: jax.Array, npart: int, npart_min:
 
         gl_last_group_end = dev_spl[rank] + last_group_start + last_group_count
         dev_add_count = gl_last_group_end - dev_spl[:-1]
-        dev_add_count = jnp.where((last_group_count < npart_min) | (jnp.arange(ndev) <= rank), 0, dev_add_count)
+        dev_add_count = jnp.where(
+            (last_group_count < npart_min) | (jnp.arange(ndev, dtype=jnp.int32) <= rank),
+            0,
+            dev_add_count
+        )
         dev_add_count = jnp.minimum(dev_add_count, dev_npart)
 
         dev_recv_count = jax.lax.all_to_all(dev_add_count, axis_name, 0, 0, tiled=True)
@@ -684,7 +726,7 @@ def _fof_catalogue_from_groups(
     part_gr_idx, ngroups = csum, csum[-1]
 
     gr_start = jnp.where(keep_as_group, fill_value=size_part, size=size_cata)[0]
-    gr_valid = jnp.arange(size_cata) < ngroups
+    gr_valid = jnp.arange(size_cata, dtype=jnp.int32) < ngroups
     gr_counts = group_counts[gr_start] * gr_valid
 
     # add in extra group at beginning, we'll remove it later
@@ -692,7 +734,7 @@ def _fof_catalogue_from_groups(
     gr_valid = jnp.pad(gr_valid, (1,0), constant_values=True)
     gr_counts = jnp.pad(gr_counts, (1,0), constant_values=first_group_count)
 
-    idx = jnp.arange(size_part)
+    idx = jnp.arange(size_part, dtype=jnp.int32)
     part_valid = (part_gr_idx >= 0) & (idx < npart) &  (idx < gr_start[part_gr_idx] + gr_counts[part_gr_idx])
     part_gr_idx = jnp.where(part_valid, part_gr_idx, size_cata+1)
 

@@ -187,12 +187,12 @@ def shift_particles_left(x, nsend, max_send, npart):
     x_get = send_to_left(tree_map_by_len(lambda v: v[0:max_send], x, size), axis_name, invalid_float=jnp.nan)
 
     # Delete the particles that were send
-    iar = jnp.arange(pytree_len(x))
+    iar = jnp.arange(pytree_len(x), dtype=jnp.int32)
     x = invalidate(x, iar < nsend)
     x = tree_map_by_len(lambda v: jnp.roll(v, -nsend, axis=0), x, size)
 
     # Insert the received particles
-    idx = jnp.arange(max_send)
+    idx = jnp.arange(max_send, dtype=jnp.int32)
     idx = jnp.where(idx < nget, npart - nsend + idx, pytree_len(x)) # discard indices beyond nadd
     def insert(u, v):
         if leading_len(u) != size:
@@ -276,8 +276,8 @@ def all_to_all_with_splits(x, ispl, output=None, axis_name=None, verify=True, er
     if copy_self:
         # avoid communication for self i/o
         rank = jax.lax.axis_index(axis_name)
-        iout = jnp.arange(out_size) #+ output_offsets[rank]
-        iin = jnp.arange(out_size) + input_offsets[rank] - output_offsets[rank]
+        iout = jnp.arange(out_size, dtype=jnp.int32) #+ output_offsets[rank]
+        iin = jnp.arange(out_size, dtype=jnp.int32) + input_offsets[rank] - output_offsets[rank]
         mask = (iout >= output_offsets[rank]) & (iout < output_offsets[rank] + send_sizes[rank])
         
         send_sizes = send_sizes.at[rank].set(0)
@@ -384,9 +384,9 @@ def dynamic_all_gather(x, nsend, output=None, axis_name=None, verify=True):
             out_size=out_size, need=dev_spl[-1],
         )
 
-    input_off = jnp.zeros(ndev, jnp.int32)
+    input_off = jnp.zeros(ndev, dtype=jnp.int32)
     nsend = jnp.full(ndev, nsend, dtype=jnp.int32)
-    output_off = jnp.full(ndev, dev_spl[rank])
+    output_off = jnp.full(ndev, dev_spl[rank], dtype=jnp.int32)
 
     def comm(xi, outi):
         return jax.lax.ragged_all_to_all(
@@ -496,7 +496,7 @@ def all_to_all_request_children(
     node_sizes = (spl[1:] - spl[:-1])[indices]
     out_node_spl = cumsum_starting_with_zero(node_sizes)
     child_inode = inverse_of_splits(out_node_spl, size)
-    child_inode_offset = jnp.arange(size) - out_node_spl[child_inode]
+    child_inode_offset = jnp.arange(size, dtype=jnp.int32) - out_node_spl[child_inode]
     child_id = spl[indices[child_inode]] + child_inode_offset
     child_data = tree_map_by_len(lambda xi: xi[child_id],  data, pytree_len(data))
     child_dev_spl = out_node_spl[dev_spl]
@@ -522,11 +522,11 @@ def all_to_all_request_children(
 # ------------------------------------------------------------------------------------------------ #
 
 def update_range(x, update, i1, i2):
-    idx = i1 + jnp.arange(len(update))
+    idx = i1 + jnp.arange(len(update), dtype=jnp.int32)
     return x.at[jnp.where(idx < i2, idx, len(x))].set(update)
 
 def gather_num(x, size, at):
-    return x[at + jnp.arange(size)]
+    return x[at + jnp.arange(size, dtype=jnp.int32)]
 
 def permute_offset(offset, num):
     return [(i, (i + offset) % num) for i in range(num)]

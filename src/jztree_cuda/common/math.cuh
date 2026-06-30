@@ -214,7 +214,7 @@ __device__ __forceinline__ int32_t msb_xor_float(float a, float b) {
 }
 
 __device__ __forceinline__ int32_t msb_xor_double(double a, double b) {
-    if (signbit(a) != signbit(b)) {
+    if (isnan(a) || isnan(b) || (signbit(a) != signbit(b))) {
         return 1024; // double has exponent with 1+10 bits
     }
     uint64_t a_bits = (uint64_t)__double_as_longlong(abs(a));
