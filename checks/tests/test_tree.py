@@ -1,10 +1,11 @@
-import jax.numpy as jnp
 import jax
-from jztree.data import PosMass, TreeHierarchy
+import jax.numpy as jnp
+import numpy as np
+from jztree.data import LevelInfo, PosMass, TreeHierarchy
 import pytest
 import numpy.testing as npt
 from jztree.config import TreeConfig
-from jztree.tree import get_node_geometry, search_sorted_z, zsort, build_tree_hierarchy
+from jztree.tree import detect_leaf_boundaries, get_node_geometry, search_sorted_z, zsort, build_tree_hierarchy
 from jztree_utils import ics
 import jztree as jz
 
@@ -48,6 +49,27 @@ def test_node_geometry(pos_mass_z: PosMass):
         # Check that node is not too big, by seeing that half the extent would not be sufficient
         if jnp.all(jnp.isfinite(ext[i])):
             assert jnp.any(cent[i] - ext[i]*0.25 >= pmin) or jnp.any(cent[i] + ext[i]*0.25 <= pmax)
+
+def test_x64_leaves():
+    with jax.enable_x64():
+        pos = 100.0 * jax.random.normal(jax.random.PRNGKey(42), (10_000, 3), dtype=jnp.float64)
+        posz = zsort.jit(pos)[0]
+
+        linfo = LevelInfo(dim=posz.shape[-1], dtype=posz.dtype)
+        lvl_bound = jnp.array((linfo.max_lvl(), linfo.max_lvl()), dtype=jnp.int32)
+
+        ispl_implicit = detect_leaf_boundaries.jit(posz, leaf_size=32)
+        ispl_explicit = detect_leaf_boundaries.jit(posz, leaf_size=32, lvl_bound=lvl_bound)
+
+        ispl_implicit = np.asarray(ispl_implicit)
+        ispl_explicit = np.asarray(ispl_explicit)
+        npt.assert_array_equal(ispl_implicit, ispl_explicit)
+
+        spl = ispl_implicit[:np.argmax(ispl_implicit == len(posz)) + 1]
+        assert spl[0] == 0
+        assert spl[-1] == len(posz)
+        assert np.all(spl[1:] > spl[:-1])
+        assert np.all(spl[1:] - spl[:-1] <= 32)
 
 def test_multi_type_tree():
     n1, n2 = int(1e5), int(2e5)
