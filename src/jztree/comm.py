@@ -138,7 +138,7 @@ def global_splits(n, axis_name=None):
     if axis_name is None:
         axis_name = jax.sharding.get_abstract_mesh().axis_names
     alln = jax.lax.all_gather(n, axis_name)
-    return jnp.pad(jnp.cumsum(alln), (1,0), constant_values=0)
+    return cumsum_starting_with_zero(alln)
 
 def send_to_right(x, axis_name, invalid_float=jnp.nan, invalid_int=0):
     rank = jax.lax.axis_index(axis_name)
@@ -333,7 +333,7 @@ def all_to_all_along_axis(data, nij, axis=1, err_hint="", copy_self=True, pack_p
     
     def get_splits(n):
         ninner = jnp.sum(n, axis=range(1,ndim))
-        return jnp.pad(jnp.cumsum(ninner), (1,0), constant_values=0)
+        return cumsum_starting_with_zero(ninner)
   
     # transpose communication axis to beginning
     data_ji, nji = ragged_transpose(data, nij, axes=transpose)
@@ -359,7 +359,8 @@ def nested_all_to_all_with_splits(data, ispl, **kwargs):
     for i in reversed(range(0, ndim)):
         data, nij = all_to_all_along_axis(data, nij, axis=i, **kwargs)
     
-    return data, jnp.pad(jnp.cumsum(nij.flatten()), (1,0), constant_values=0)
+    dtype = jnp.result_type(nij.dtype, jnp.int32)
+    return data, jnp.pad(jnp.cumsum(nij.flatten(), dtype=dtype), (1, 0), constant_values=0)
 
 def dynamic_all_gather(x, nsend, output=None, axis_name=None, verify=True):
     """An all-gather where each task may send different amounts.
@@ -541,7 +542,7 @@ def all_to_all_with_permute(x, ispl, buffer_bytes=8*1024**2, axis_name=None, ver
 
     nsend = ispl[1:] - ispl[:-1]
     nrecv = jax.lax.all_to_all(nsend, axis_name, split_axis=0, concat_axis=0, tiled=True)
-    ispl_recv = jnp.pad(jnp.cumsum(nrecv), (1,0))
+    ispl_recv = cumsum_starting_with_zero(nrecv)
 
     if verify:
         out_size = pytree_len(output)

@@ -90,10 +90,12 @@ def div_ceil(a, b):
     return (a + b - 1) // b
 
 def cumsum_starting_with_zero(x):
-    return jnp.pad(jnp.cumsum(x), (1, 0))
+    dtype = jnp.result_type(x.dtype, jnp.int32)
+    return jnp.pad(jnp.cumsum(x, dtype=dtype), (1, 0))
 
 def offset_sum(num):
-    cs = jnp.cumsum(num, axis=0)
+    dtype = jnp.result_type(num.dtype, jnp.int32)
+    cs = jnp.cumsum(num, axis=0, dtype=dtype)
     return cs - num, cs[-1]
 
 def masked_prefix_sum(mask):
@@ -120,7 +122,7 @@ def masked_to_dense(arr: jax.Array, mask, get_inverse=False, get_indices=False, 
 def inverse_of_splits(ispl, size):
     """given [0, 4, 7] returns [0,0,0,0,1,1,1] for size=7"""
     mask = jnp.zeros(size, dtype=jnp.int32).at[ispl].add(1)
-    return jnp.cumsum(mask) - 1
+    return jnp.cumsum(mask, dtype=mask.dtype) - 1
 
 def inverse_indices(iargsort):
     """Given the indices that would sort an array, return the indices that would unsort it"""
@@ -147,7 +149,7 @@ def bucket_prefix_sum(key, count=None, num=None):
         csum_sort = jnp.arange(len(key), dtype=key.dtype)
     else:
         count_sort = count[isort]
-        csum_sort = jnp.cumsum(count_sort) - count_sort
+        csum_sort = jnp.cumsum(count_sort, dtype=count_sort.dtype) - count_sort
     ifirst = jnp.searchsorted(key_sort, key_sort, side="left")
     
     cdiff = csum_sort - csum_sort[ifirst]
@@ -229,8 +231,8 @@ def ragged_transpose(data: jax.Array, n: jax.Array, axes: Tuple[int]):
 
     # determine segment offsets
     n_T = jnp.transpose(n, axes)
-    seg_spl_out = jnp.pad(jnp.cumsum(n_T.flatten()), (1,0), constant_values=0)
-    seg_off_in = (jnp.cumsum(n.flatten()) - n.flatten())[iseg_from]
+    seg_spl_out = cumsum_starting_with_zero(n_T.flatten())
+    seg_off_in = cumsum_starting_with_zero(n.flatten())[:-1][iseg_from]
     
     # find which particle belongs to which segment in the output and its internal offset
     # idx_seg = jnp.cumsum(jnp.zeros(pytree_len(data), dtype=jnp.int32).at[seg_off_out+n_T.flatten()].add(1))

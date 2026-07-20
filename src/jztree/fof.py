@@ -722,7 +722,7 @@ def _fof_catalogue_from_groups(
     keep_as_group = group_counts >= npart_min
 
     # Create dense information
-    csum = jnp.cumsum(keep_as_group.astype(jnp.int32))
+    csum = jnp.cumsum(keep_as_group.astype(jnp.int32), dtype=jnp.int32)
     part_gr_idx, ngroups = csum, csum[-1]
 
     gr_start = jnp.where(keep_as_group, fill_value=size_part, size=size_cata)[0]

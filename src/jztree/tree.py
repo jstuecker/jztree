@@ -726,7 +726,7 @@ def _define_split_hierarchy(
         is_spl_on_level = jnp.array(new_is_spl, dtype=jnp.bool)
 
     # Calculate a prefix accross hierarchy levels to densly stack the nodes later
-    offsets = jnp.cumsum(is_spl_on_level.flatten()).reshape(is_spl_on_level.shape)
+    offsets = jnp.cumsum(is_spl_on_level.flatten(), dtype=jnp.int32).reshape(is_spl_on_level.shape)
     level_spl = jnp.pad(offsets[:,-1], (1,0), constant_values=np.int32(0)) # save level start/end points
     nnodes_on_level = level_spl[1:] - level_spl[:-1] - 1 # -1 since splits are always 1 larger than nodes
 

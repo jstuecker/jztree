@@ -322,7 +322,7 @@ def knn(
             if get_num_total(part, default_to_length=not in_smap) >= 2**31:
                 raise ValueError("I have > 2**31 particles, globalidx will overflow. Use rankidx instead!")
             if in_smap:
-                dev_offsets = jnp.cumsum(origin_cts) - origin_cts
+                dev_offsets = jnp.cumsum(origin_cts, dtype=origin_cts.dtype) - origin_cts
                 gidx = dev_offsets[origin_req.rank] + origin_req.idx
                 res.append(gidx[innz])
             else:
