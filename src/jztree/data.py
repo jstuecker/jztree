@@ -436,6 +436,15 @@ class TreeHierarchy():
             return self.mass_cent
         else:
             return self.geom_cent
+
+    def poslvl(self, level: int, size: int | None = None) -> PosLvl:
+        """Return node centers and Morton levels for one tree plane."""
+        if size is None:
+            size = self.size()
+        return PosLvl(
+            pos=self.center().get(level, size),
+            lvl=self.lvl.get(level, size),
+        )
            
     def num_planes(self) -> int:
         """Numer of planes in the tree"""
