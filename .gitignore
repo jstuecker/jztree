@@ -4,6 +4,8 @@ checks/profiling/out
 src/jztree/_version.py
 
 # Wheel builder outputs
+packaging/.build-cache/
+packaging/output/
 packaging/docker-wheel-builder/output/
 packaging/docker-wheel-builder-cu12/output/
 packaging/docker-wheel-builder-main/output/

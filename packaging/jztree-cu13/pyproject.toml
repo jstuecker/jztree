@@ -9,6 +9,7 @@ description = "CUDA 13 backend for jztree"
 readme = { file = "README.md", content-type = "text/markdown" }
 authors = [{ name = "Jens Stuecker", email = "jens.stuecker@univie.ac.at" }]
 license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["jax>=0.8.0", "numpy>=2.2.6"]
 

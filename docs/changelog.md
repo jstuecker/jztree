@@ -1,6 +1,6 @@
 # Changelog
 
-## Version 1.1.0 (unreleased)
+## Version 1.1.0
 
 * Added `TreeHierarchy.poslvl()` for accessing node positions and levels.
 * Added separate query/source indexing for interaction lists, including updated
@@ -13,6 +13,7 @@
 * Extended initial-condition helpers, statistics, and array utilities.
 * Configurations now use slots: assigning an unknown parameter raises an error
   instead of silently adding an unused attribute. Existing parameters remain mutable.
+* CUDA 12 release wheels now target manylinux_2_28 (Linux x86-64, glibc >=2.28), matching CUDA 13.
 
 ## Version 1.0.3
 * Updated .vma access to support jax 0.10

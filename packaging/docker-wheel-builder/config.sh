@@ -2,10 +2,7 @@
 
 PYTHON_VERSIONS=("3.11" "3.12" "3.13" "3.14")
 CUDA_ARCHS="all"
-PACKAGE_DIR="packaging/jztree-cu13"
 AUDITWHEEL_PLAT="manylinux_2_28_x86_64"
 IMAGE_NAME="jztree-cu13-wheel-builder"
-OUTPUT_DIR="packaging/docker-wheel-builder/output"
-COPY_TO_PACKAGE_DIST=1
+OUTPUT_DIR="packaging/output/cu13"
 UV_VERSION="0.7.2"
-PIP_BUILD_DEPS_CSV="build,jax[cuda13],scikit-build-core>=0.11,nanobind>=2.9.2,cmake>=3.24,auditwheel"

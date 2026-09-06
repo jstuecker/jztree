@@ -5,15 +5,15 @@ MODE=${1:-all}
 REPO_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
 run_main() {
-  "$REPO_ROOT/packaging/docker-wheel-builder/run-build-main.sh"
+  bash "$REPO_ROOT/packaging/run-builder.sh" main
 }
 
 run_cu13() {
-  "$REPO_ROOT/packaging/docker-wheel-builder/run-build.sh"
+  bash "$REPO_ROOT/packaging/run-builder.sh" cu13
 }
 
 run_cu12() {
-  "$REPO_ROOT/packaging/docker-wheel-builder-cu12/run-build.sh"
+  bash "$REPO_ROOT/packaging/run-builder.sh" cu12
 }
 
 case "$MODE" in

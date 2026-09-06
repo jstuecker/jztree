@@ -1,4 +1,4 @@
-FROM quay.io/pypa/manylinux2014_x86_64
+FROM quay.io/pypa/manylinux_2_28_x86_64
 
 ARG UV_VERSION=0.7.2
 ENV UV_INSTALL_DIR=/opt/uv

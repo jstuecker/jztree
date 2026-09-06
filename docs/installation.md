@@ -12,6 +12,10 @@ pip install jztree[cuda13]
 ```
 The CUDA 13 wheel supports python 3.11-3.14 and the CUDA 12 wheel supports python 3.11-3.13. If you are outside of this range, you may still have success by building from sources, but be aware that jax also has a limited compatibility range.
 
+Starting with jz-tree 1.1.0, both CUDA wheel variants require Linux x86-64 with glibc 2.28 or newer.
+
+If you encounter errors with newer JAX versions on a cluster, see the [known issues and tested workarounds](https://jstuecker.github.io/jzfmm/known_issues.html). These also apply to jz-tree; they address compatibility with particular CUDA and driver configurations rather than errors in its numerical kernels.
+
 When upgrading, use `pip install --upgrade "jztree[cuda12]"` (or `cuda13`) so
 that the Python interface and its matching CUDA backend are upgraded together.
 Install only one of the two backends in an environment: both provide the
