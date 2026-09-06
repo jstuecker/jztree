@@ -12,6 +12,11 @@ pip install jztree[cuda13]
 ```
 The CUDA 13 wheel supports python 3.11-3.14 and the CUDA 12 wheel supports python 3.11-3.13. If you are outside of this range, you may still have success by building from sources, but be aware that jax also has a limited compatibility range.
 
+When upgrading, use `pip install --upgrade "jztree[cuda12]"` (or `cuda13`) so
+that the Python interface and its matching CUDA backend are upgraded together.
+Install only one of the two backends in an environment: both provide the
+`jztree_cuda` module.
+
 ## Build from sources
 First of all, clone the repository:
 ```bash
@@ -29,7 +34,10 @@ by setting the `CUDAARCHS` environment variable, e.g.
 export CUDAARCHS=87
 ```
 for compute capability 8.7. By default we use `CUDAARCHS="all"` to build for all architectures. This
-may taking a very long time (20-30 minutes rather than 2). You may also provide `CUDAARCHS="native"` to automatically detect your systems architecture.
+can take much longer than a build for one architecture. Previous release builds
+with `all` took approximately 15–18 minutes per CUDA wheel, excluding environment
+setup and wheel repair; timings depend on hardware and toolchain. You may also
+provide `CUDAARCHS="native"` to automatically detect your system's architecture.
 
 ### CUDA13 installation
 
@@ -37,7 +45,7 @@ The simplest way to install with CUDA13 is via `pip`. First, install the build d
 
 
 ```
-pip install jax[cuda13] scikit-build-core nanobind cmake>=3.24 setuptools_scm
+pip install "jax[cuda13]" scikit-build-core nanobind "cmake>=3.24" setuptools_scm
 ```
 Finally, install **jz-tree** with `--no-build-isolation`
 ```
@@ -65,7 +73,7 @@ conda activate jzenv
 Install prequisites via conda and pip:
 ```bash
 conda install -c conda-forge pip cuda-nvcc cuda-version=12 cudnn nccl libcufft cuda-cupti libcublas libcusparse
-pip install scikit-build-core nanobind cmake>=3.24 setuptools_scm
+pip install scikit-build-core nanobind "cmake>=3.24" setuptools_scm
 pip install --upgrade "jax[cuda12-local]"
 ```
 Finally, install the code with
@@ -82,7 +90,7 @@ nvcc --version
 Install:
 ```bash
 pip install --upgrade "jax[cuda13-local]"   # or jax[cuda12-local]
-pip install scikit-build-core nanobind cmake>=3.24 setuptools_scm
+pip install scikit-build-core nanobind "cmake>=3.24" setuptools_scm
 pip install -e . --no-build-isolation
 ```
 Note that you may run into troubles if you have installed a second CUDA version in your python 
@@ -98,7 +106,7 @@ CUDAARCHS=87 pip install -e . --no-build-isolation
 ```
 
 A more advanced way of reducing the build time is to reduce the number of template variants that are 
-instanced, by modifying the code generation script `src/_generate_ffi.py` (and executing it again).
+instantiated, by modifying `src/jztree_cuda/_generate_ffi.py` (and executing it again).
 This is explained in more detail in {ref}`CUDA kernels and automatic FFI generation <cuda-kernels-and-automatic-ffi-generation>`.
 
 ## Hello World
