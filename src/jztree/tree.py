@@ -398,7 +398,8 @@ def zsort_and_tree(
         num_types: number of particle types
         shrink: if False, always return 3 three outputs
     """
-    in_smap = in_shard_map_context()
+    # A one-device shard map needs neither redistribution nor domain adjustment.
+    in_smap = in_shard_map_context() and get_rank_info()[1] > 1
 
     npart_tot = get_num_total(part, default_to_length=not in_smap)
     dt = (data, ptype)
