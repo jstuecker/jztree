@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+* Use local sorting and tree construction for one-device shard maps, avoiding
+  unnecessary redistribution, domain adjustment and particle padding requirements.
+
 ## Version 1.1.0
 
 * Added `TreeHierarchy.poslvl()` for accessing node positions and levels.
