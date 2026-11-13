@@ -99,6 +99,50 @@ def test_query():
 
     check_against_ckdtree(pos, pos_query=posq)
 
+@pytest.mark.parametrize("boxsize", [None, 1.0])
+@pytest.mark.parametrize("query_n", [None, 32], ids=["self", "part_query"])
+@pytest.mark.parametrize("k", [8, 64, 117])
+def test_lattice_ties(k, query_n, boxsize):
+    # Dyadic coordinates give exact float32 distance ties. k > 32 also tests
+    # ties spanning multiple passes of KnnLeaf2LeafKernel.
+    def lattice(n):
+        g = (np.arange(n, dtype=np.float32) + 0.5) / n
+        x, y = np.meshgrid(g, g, indexing="ij")
+        return np.column_stack((x.ravel(), y.ravel()))
+
+    pos = lattice(16)
+    pos_query = None if query_n is None else lattice(query_n)
+    query = pos if pos_query is None else pos_query
+    radii, indices = jz.knn.knn(
+        jnp.asarray(pos), k=k, boxsize=boxsize,
+        part_query=None if pos_query is None else jnp.asarray(pos_query),
+    )
+    radii, indices = np.asarray(radii), np.asarray(indices)
+
+    assert indices.shape == (len(query), k)
+    assert np.all((indices >= 0) & (indices < len(pos)))
+    assert np.all(np.diff(np.sort(indices, axis=1), axis=1) > 0), \
+        "Each row must contain k distinct particle indices"
+
+    reference_radii, _ = cKDTree(pos, boxsize=boxsize).query(query, k=k)
+    assert np.all(np.diff(radii, axis=1) >= 0), "Radii must be sorted"
+    np.testing.assert_allclose(radii, reference_radii, rtol=1e-6, atol=1e-7)
+
+    # Check indices as well as radii; matching distances alone cannot detect
+    # duplicates on a lattice. Do not prescribe which tied cutoff IDs to use.
+    delta = pos[None, :, :].astype(np.float64) - query[:, None, :]
+    if boxsize is not None:
+        delta -= boxsize * np.rint(delta / boxsize)
+    distances = np.sqrt(np.sum(delta**2, axis=-1))
+    selected_distances = np.take_along_axis(distances, indices, axis=1)
+    np.testing.assert_allclose(radii, selected_distances, rtol=1e-6, atol=1e-7)
+
+    selected = np.zeros(distances.shape, dtype=bool)
+    np.put_along_axis(selected, indices, True, axis=1)
+    strictly_closer = distances < reference_radii[:, -1:]
+    assert np.all(selected | ~strictly_closer), \
+        "All neighbours strictly inside the k-th radius must be returned"
+
 def test_io_order():
     # tests (and demonstrates) the different output/input ordering options
     part = ics.uniform_particles(int(1024*128))

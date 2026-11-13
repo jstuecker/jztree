@@ -82,7 +82,9 @@ struct SortedNearestK {
     // * It seems the pattern with the mask helps the compiler to skip unnecessary work
     //   -- effectively achieving an early exit (still not totally sure how it works though...)
     __device__ __forceinline__ void consider(trad r2, int id) {
-        if (r2 > r2s[K-1]) return;
+        // Keep the first encountered candidates at the cutoff. Later passes
+        // skip that many equal-radius candidates in the same traversal order.
+        if (r2 >= r2s[K-1]) return;
 
         bool  active   = true;  // true until we've placed the item
 
